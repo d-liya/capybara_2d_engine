@@ -6,9 +6,6 @@ import { sdk } from "./sdk";
 async function bootstrap() {
   preloadDataAssets(allDataFiles);
   void preloadAllAudio();
-  void sdk.audio.preloadSpeechManifest(
-    new URL("./audio-manifest.json", import.meta.url).href,
-  );
 
   const canvas = document.getElementById("game") as HTMLCanvasElement;
   const loadingGate = createLoadingGate(canvas);
@@ -17,8 +14,8 @@ async function bootstrap() {
   // createMainScene({ onAudioReady: loadingGate.onContinue });
   // Start browser-gated audio from loadingGate.onContinue, not from passive
   // scene startup. The production loading gate emits this from the Tap To
-  // Continue gesture so calls like music.play(), AudioContext.resume(), and
-  // sdk.audio.speak(...) are much less likely to be blocked by autoplay rules.
+  // Continue gesture so calls like music.play() and AudioContext.resume()
+  // are much less likely to be blocked by autoplay rules.
 
   await loadingGate.waitForCompletion();
   loadingGate.teardown();

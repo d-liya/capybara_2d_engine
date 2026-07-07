@@ -5,5 +5,4 @@ export * from "./proximity";
 export * from "./movement";
 export * from "./thought";
 export * from "./bark";
-export * from "./speech";
 export * from "./errors";

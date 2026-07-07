@@ -13,7 +13,7 @@ These files are gameplay primitives, not an NPC framework. Scripted NPCs, schedu
 - `proximity.ts` — player/NPC proximity and distance helpers.
 - `movement.ts` — move, stop, and face-player helpers for registered NPCs.
 - `worldContext.ts` — generated map data to compact static world context with stable `itemId`s.
-- `speech.ts` — tiny authored-speech cue types only; runtime/dynamic NPC speech helpers are intentionally not provided.
+
 - `errors.ts` — re-exported SDK service/usage-limit helpers.
 - `index.ts` — public exports for gameplay code.
 
@@ -38,13 +38,7 @@ setNpcThought(game, "guide", "Checking the path...", 3_000);
 barkNpc(game, "guide", "The bridge is safer at dawn.");
 moveNpcToLocation(game, "guide", "forest-gate");
 
-// For voiced lines, author static/extractable calls near the owning NPC/scene.
-// Reuse one voiceName per NPC — see docs/recipes/tts-prompting.md.
-const GUIDE_VOICE = "Achird" as const;
 
-void sdk.audio.speak([GUIDE_TTS_PROFILE, GUIDE_BRIDGE_LINE], {
-  voiceName: GUIDE_VOICE,
-});
 ```
 
 World context is registered automatically by `createGame(...)` and refreshed by `game.loadMap(...)`:
@@ -54,6 +48,6 @@ const markdown = getNpcWorldMarkdown(game);
 const gate = getNpcLocation(game, "forest-gate");
 ```
 
-LLM tools should be direct `sdk.ai.addTool(...)` wrappers around these primitives. See `docs/recipes/llm-backed-npc-tools.md`.
+
 
 The NPC bubble renderer lives in `src/widgets/NpcBubbleWidget.ts`.

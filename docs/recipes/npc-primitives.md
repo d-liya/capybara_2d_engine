@@ -46,7 +46,7 @@ export function defineNpcArchetypes(game: GameAPI): void {
 
 ## One file per named NPC
 
-Put named character setup and authored speech in `src/npcs/<name>.ts`. Keep TTS profile/transcript constants and authored cue functions in that file — see `docs/recipes/tts-prompting.md` and `docs/recipes/npc-dialogue.md`.
+Put named character setup in `src/npcs/<name>.ts`. See `docs/recipes/npc-dialogue.md`.
 
 ```ts
 import type { EntityId, GameAPI } from "../Game";
@@ -64,8 +64,7 @@ export function setupGuideNpc(game: GameAPI, entityId: EntityId): void {
   }, entityId);
 }
 
-// Export no-argument authored cue functions such as playGuideBridgeLine()
-// that call sdk.audio.speak([GUIDE_PROFILE, LINE], options).
+
 ```
 
 The NPC id is the persistent gameplay identity. The entity id is the current spawned runtime body.
@@ -94,7 +93,7 @@ Keep scene files focused on composition. Put reusable behavior in NPC files, sys
 
 ## NPC state and bubbles
 
-`registerNpc(...)` stores the named NPC state in the `npcPrimitives` resource. `barkNpc(...)` is the existing readable bubble-state helper; it is **not** TTS and it is not a speech wrapper. Use it when the game mounts `NpcBubbleWidget`. If the game uses a bark subtitle, toast, or dialogue resource instead, update that resource directly. Do not create additional generic bark/speech helper functions.
+`registerNpc(...)` stores the named NPC state in the `npcPrimitives` resource. `barkNpc(...)` is the existing readable bubble-state helper. Use it when the game mounts `NpcBubbleWidget`. If the game uses a bark subtitle, toast, or dialogue resource instead, update that resource directly. Do not create additional generic bark/speech helper functions.
 
 ```ts
 import { barkNpc, setNpcThought } from "../npc-primitives";
@@ -125,13 +124,13 @@ When a new game slice introduces friendly or neutral NPCs, do not leave them as 
 4. If the character has only idle/default animation, keep it stationary; do not make it slide around.
 5. In a proximity system, face the NPC toward the player and trigger an authored bark before the player interacts.
 6. Gate the bark with a one-time flag and/or cooldown so it cannot repeat every frame or spam audio.
-7. If the bark is voiced, export no-argument authored cue functions from the NPC module — see `docs/recipes/tts-prompting.md`.
+
 
 This small behavior pass makes the world feel inhabited while keeping deterministic gameplay simple.
 
 ## Proximity
 
-Use proximity helpers for interactions, contextual barks, or simple scripted reactions. Proximity barks should normally run before explicit interaction so the player hears/sees signs of life as they approach. The readable bark update and optional TTS call should sit together inside the same gated event.
+Use proximity helpers for interactions, contextual barks, or simple scripted reactions. Proximity barks should normally run before explicit interaction so the player hears/sees signs of life as they approach.
 
 ```ts
 import { barkNpc, facePlayer, isPlayerNearNpc } from "../npc-primitives";
@@ -269,19 +268,6 @@ const location = getNpcLocation(game, "forest-gate");
 
 Prompt/tool instructions should say: use `itemId` exactly.
 
-## Speech/TTS
 
-NPC speech must be authored/static and extractable. Do **not** use dynamic helpers such as `speakNpcLine(game, npcId, text)`.
 
-- Define one reusable TTS profile prefix per NPC plus static transcript constants in the NPC module.
-- Export no-argument authored cue functions (for example `playGuideBridgeLine()`) that call `sdk.audio.speak([PROFILE, LINE], options)`.
-- Pair meaningful speech with readable text via `barkNpc(...)`, dialogue, toast, or subtitle resources.
-- `sdk.audio.speak(...)` plays audio only; it does not update bubble/dialogue state by itself.
 
-Read `docs/recipes/tts-prompting.md` for prompt design and `docs/recipes/npc-dialogue.md` for voiced bark wiring.
-
-## LLM-backed NPCs
-
-Assemble LLM-backed NPCs in that NPC's file: system prompt, optional `history`, and narrow `sdk.ai.addTool(...)` wrappers around primitives. Do not expose dynamic speech tools to the model.
-
-Read `docs/recipes/llm-backed-npc-tools.md` for the full character-file pattern, tool examples, and guidelines. For general tool-calling rules, read `docs/recipes/ai-agent-tool-calls.md`. For persistent memory, read `docs/recipes/persistent-agent-history.md`.

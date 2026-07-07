@@ -80,7 +80,7 @@ await sdk.save.saveGameData(toSavePayload(farm));
 
 `saveGameData(payload)` overwrites/replaces the current saved data object for the authenticated user/game.
 
-For independent key/value data such as agent history, settings, or feature blobs that should not overwrite the main save payload, use `sdk.storage.get/set/delete` instead of nesting everything into `saveGameData(...)`. Persistent AI agent history uses isolated storage internally; see `docs/recipes/persistent-agent-history.md`.
+For independent key/value data such as settings or feature blobs that should not overwrite the main save payload, use `sdk.storage.get/set/delete` instead of nesting everything into `saveGameData(...)`.
 
 ## Shared state
 

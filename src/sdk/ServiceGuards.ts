@@ -4,7 +4,7 @@ const DEFAULT_REQUEST_WINDOW_MS = 60_000;
 const DEFAULT_MAX_REQUESTS_PER_WINDOW = 24;
 const DEFAULT_USAGE_LIMIT_COOLDOWN_MS = 60_000;
 
-export type GuardedServiceName = "ai" | "tts" | "save" | "storage" | "multiplayer" | "auth";
+export type GuardedServiceName = "save" | "storage" | "multiplayer" | "auth";
 
 export interface ServiceUsageLimitRecord {
   service: GuardedServiceName | string;

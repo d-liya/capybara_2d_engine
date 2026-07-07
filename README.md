@@ -19,7 +19,7 @@ Agents should build from these docs and manifests, not by reverse-engineering `s
 - docs/CAPYBARA_ENGINE.md
   - Stable public interface for agents: GameAPI facade patterns, gameplay extension points, character rules, SDK/session rules, and escalation rules.
 - docs/SDK_FACADE.md
-  - Capybara SDK facade usage for AI, TTS, save/load, auth, and multiplayer.
+  - Capybara SDK facade usage for save/load, auth, and multiplayer.
 - docs/recipes/
   - Optional implementation recipes for farming loops, inventory/tools, NPC dialogue, combat/projectiles, enemy waves, RPG quests/inventory, pointer aiming, save/load, map placement, HUDs, and seasonal atmosphere.
 - src/Game.ts

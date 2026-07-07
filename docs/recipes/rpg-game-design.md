@@ -27,9 +27,9 @@ NPCs should usually have more than a static sprite and a dialogue panel.
 
 Common patterns:
 
-- **Proximity greeting bark** when the player first comes near; use scripted text plus authored TTS by default for voiced RPG/adventure NPCs.
+- **Proximity greeting bark** when the player first comes near; use scripted text for RPG/adventure NPCs.
 - **Ambient/thinking-out-loud barks** on a timer while idle or patrolling; keep most ambient chatter text-only or heavily cooldowned so the scene does not become noisy.
-- **Contextual barks** that change with quest flags, danger, time, or reputation; speak important warnings/hints/reactions with TTS when they help the world feel alive.
+- **Contextual barks** that change with quest flags, danger, time, or reputation.
 - **Interaction prompt** such as `Press E to Talk: Guard`.
 - **Face the player** when dialogue starts.
 - **Pause patrol/schedule during dialogue**, then resume afterward.
@@ -86,15 +86,13 @@ RPG movement should feel grounded.
 Audio sells RPG presence even when visuals are simple.
 
 - Short NPC voice/text barks for greetings, idle thoughts, reactions, and arrivals.
-- Use TTS for high-value NPC barks: first-time proximity greetings, quest-relevant warnings/hints, and major reactions.
-- Use preauthored gibberish/non-semantic TTS transcripts for ambient NPC chatter when the player should feel conversation without parsing important words.
-- Gate bark speech with one-time flags, per-NPC cooldowns, and a global anti-overlap policy (`interrupt` or a short queue). Do not speak the same line every time the player crosses a radius.
+- Gate bark speech with one-time flags and per-NPC cooldowns. Do not speak the same line every time the player crosses a radius.
 - Area ambience: market crowd, wind, archive paper, kitchen fire, cave drip, forest insects.
 - Footstep variations when useful; avoid one repeated loud sample.
 - UI sounds for open/close/select/error/collect/objective update.
 - Music can layer or switch by state: exploration, danger, combat, resolution.
 
-Use generated audio handles from `src/data/assets.md`; do not invent asset names. Use `sdk.audio.speak(...)` for spoken bark lines and procedural WebAudio for non-verbal UI/gameplay SFX.
+Use generated audio handles from `src/data/assets.md`; do not invent asset names. Use procedural WebAudio for non-verbal UI/gameplay SFX.
 
 ## UI conventions
 

@@ -16,8 +16,7 @@ Treat the repo as four layers:
 2. **SDK facade** — `src/sdk/index.ts` plus `docs/SDK_FACADE.md`
    - auth/session
    - save/load
-   - AI NPCs and agents when explicitly needed; simple NPC dialogue should stay scripted/resource-driven
-   - TTS/audio services
+    - save/load
 3. **Generated facts** — `src/data/assets.md` and `src/scenes/SCENES.md`
    - current map handles, map VFX/spritesheets, characters, animations, props, widgets, audio, placement targets
    - active/recommended scene composition
@@ -42,13 +41,11 @@ src/scenes/SCENES.md
 Then read only the targeted public reference that matches the task:
 
 ```txt
-docs/SDK_FACADE.md                 # auth, save/load, AI, TTS
+docs/SDK_FACADE.md                 # auth, save/load
 docs/recipes/farming-sim.md        # day/season/crops/gold
 docs/recipes/map-placement.md      # generated map placement zones
 docs/recipes/inventory-tools.md    # hotbar/tool/cursor attachment
-docs/recipes/npc-dialogue.md       # nearby NPC dialogue; scripted default, optional LLM-backed mode
-docs/recipes/ai-agent-tool-calls.md# autonomous/tool-using AI agents
-docs/recipes/tts-prompting.md      # voice style and narration prompting
+docs/recipes/npc-dialogue.md       # nearby NPC dialogue; scripted default
 docs/recipes/save-load.md          # persistent game state
 docs/recipes/hud-widget.md         # generated HUD widget adaptation
 docs/recipes/season-atmosphere.md  # tint/overlay atmosphere
@@ -262,7 +259,7 @@ Represent bullets, spells, arrows, and thrown objects as normal entities with co
 
 Use systems for simple patrol/chase/attack loops. Before moving an enemy/NPC, check `src/data/assets.md` for walk/run/move animations. If only idle/default animation exists, prefer stationary interaction, facing, ranged attacks, or proximity triggers.
 
-Friendly/neutral NPCs should usually get a first-pass liveliness baseline instead of standing silently: a short authored patrol route when movement animation exists, facing toward the player when approached, and a simple one-time or cooldown-gated proximity bark before the player presses interact. Keep barks readable through `NpcBubbleWidget`, a bark subtitle, toast, or dialogue widget. If using `NpcBubbleWidget`, `barkNpc(...)` is the existing bubble-state helper; it is not TTS. If bark TTS is used, keep it authored/static with one reusable profile prefix per NPC, one stable `voiceName` matched to the character's on-screen gender, and separate static transcript constants in that named NPC module, then export no-argument cue functions such as `playGuideBridgeLine()` that call `sdk.audio.speak([NPC_PROFILE, LINE_TRANSCRIPT], options)`. Systems call the cue function beside the readable bark update. Do not add dynamic helpers that accept arbitrary bark text. See `docs/recipes/tts-prompting.md` for casting and consistency rules.
+Friendly/neutral NPCs should usually get a first-pass liveliness baseline instead of standing silently: a short authored patrol route when movement animation exists, facing toward the player when approached, and a simple one-time or cooldown-gated proximity bark before the player presses interact. Keep barks readable through `NpcBubbleWidget`, a bark subtitle, toast, or dialogue widget.
 
 For obstacle-aware NPC movement, prefer the public destination API (`game.setEntityDestination(...)`) over manually patching `x` / `y`. Destinations use feet/ground coordinates and preserve animated sprite anchoring internally. If you build patrol loops on top of navigation, clear an entity's destination after `arrived`, `blocked`, or `unreachable` before assigning the next patrol point.
 
@@ -558,8 +555,7 @@ For crop grids, prefer resource-stored tile bounds plus `canvasClientToNormalize
 
 Use this split by default:
 
-- **Voiced speech, narration, authored NPC lines, and vocal sound design** -> use preauthored `sdk.audio.speak(...)` prompts. The SDK contract lives in `docs/SDK_FACADE.md`; prompting and playback policy live in `docs/recipes/tts-prompting.md`.
-- **NPC barks/dialogue** -> default to scripted/resource-driven lines. Add authored TTS delivery when useful; use SDK AI only when the task explicitly needs generated conversation or reasoning.
+- **NPC barks/dialogue** -> default to scripted/resource-driven lines.
 - **Background music / ambient music beds** -> use provided audio assets from `src/data/assets.md` with `getAudio(...)`, `stopAudio(...)`, and low volume.
 - **Non-vocal frequent SFX** -> footsteps, UI bleeps, impacts, pickups, weapon sounds, alerts, and short non-verbal stingers should usually be procedural WebAudio by default. Do not invent or import new SFX files unless the task explicitly provides them.
 
@@ -590,9 +586,9 @@ export function createMainScene(
 }
 ```
 
-The template's production loading gate emits `onContinue` synchronously from the **Tap To Continue** click/tap/key gesture. Put browser-gated work there: `music.play()`, `AudioContext.resume()`, `sdk.audio.speak(...)` intro retries, and other APIs that rely on user activation. Preloading audio on startup is fine; playback should wait for `onContinue` or a later gameplay input. In local dev the gate completes immediately and `onContinue` is a no-op, so use normal gameplay inputs when testing gated audio.
+The template's production loading gate emits `onContinue` synchronously from the **Tap To Continue** click/tap/key gesture. Put browser-gated work there: `music.play()`, `AudioContext.resume()`, and other APIs that rely on user activation. Preloading audio on startup is fine; playback should wait for `onContinue` or a later gameplay input. In local dev the gate completes immediately and `onContinue` is a no-op, so use normal gameplay inputs when testing gated audio.
 
-Use a low volume for background music by default, around `0.05`, so BGM does not overpower UI feedback, TTS, or gameplay sounds.
+Use a low volume for background music by default, around `0.05`, so BGM does not overpower UI feedback or gameplay sounds.
 
 Stop cached looping music with:
 
@@ -643,7 +639,7 @@ Use `src/data/assets.md` animation names as the source of truth.
 
 ## SDK rules
 
-This engine guide only identifies when SDK capabilities are appropriate. For import paths, lazy initialization, auth/session behavior, save/load, storage, AI, TTS, and multiplayer contracts, follow `docs/SDK_FACADE.md`.
+This engine guide only identifies when SDK capabilities are appropriate. For import paths, lazy initialization, auth/session behavior, save/load, storage, and multiplayer contracts, follow `docs/SDK_FACADE.md`.
 
 ## If the public surface is insufficient
 

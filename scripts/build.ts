@@ -1,6 +1,5 @@
 import * as esbuild from "esbuild";
 import { hashDistFile, updateIndexHtmlAssets } from "./asset-hash";
-import { audioExtractPlugin } from "./audio-extract-plugin";
 import { buildCss } from "./build-css";
 
 async function runBuild(): Promise<void> {
@@ -14,7 +13,6 @@ async function runBuild(): Promise<void> {
     minify: true,
     legalComments: "none",
     outfile: "dist/main.js",
-    plugins: [audioExtractPlugin("dist/audio-manifest.json")],
   });
 
   const stylesFile = hashDistFile("dist/styles.css", "styles", ".css");

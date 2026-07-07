@@ -243,8 +243,8 @@ export type LoadingGateContinueListener = (
 export interface LoadingGate {
   /**
    * Fires synchronously from the loading gate continue gesture in production.
-   * Put browser-gated work such as music.play(), AudioContext.resume(), or
-   * sdk.audio.speak(...) retries here instead of passive scene startup.
+    * Put browser-gated work such as music.play() or AudioContext.resume()
+    * here instead of passive scene startup.
    */
   onContinue(listener: LoadingGateContinueListener): () => void;
   waitForCompletion(): Promise<void>;

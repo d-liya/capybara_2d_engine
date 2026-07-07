@@ -62,71 +62,6 @@ export interface DeleteKvResponse {
   gameId: string;
   key: string;
 }
-export interface SpeechVoice {
-  voiceName: string;
-  style: string;
-}
-export interface SpeechVoicesResponse {
-  defaultVoice: string;
-  voices: SpeechVoice[];
-}
-export interface SpeechSynthesizeParams {
-  text: string;
-  gameId: string;
-  voiceName?: string;
-  speakers?: Array<{
-    speaker: string;
-    voiceName: string;
-  }>;
-}
-export interface BinaryResponse {
-  contentType: string;
-  data: ArrayBuffer;
-}
-export interface LlmResponsePayload {
-  input?: string | Array<Record<string, any>>;
-  messages?: Array<Record<string, any>>;
-  model?: string;
-  stream?: boolean;
-  instructions?: string;
-  metadata?: Record<string, any>;
-  previous_response_id?: string;
-  prompt_cache_key?: string;
-  prompt_cache_retention?: "in_memory" | "24h";
-  max_output_tokens?: number;
-  temperature?: number;
-  top_p?: number;
-  [key: string]: any;
-}
-export interface LlmUsage {
-  input_tokens?: number;
-  input_tokens_details?: {
-    cached_tokens?: number;
-    [key: string]: any;
-  };
-  output_tokens?: number;
-  output_tokens_details?: Record<string, any>;
-  total_tokens?: number;
-  cost?: number;
-  [key: string]: any;
-}
-export interface LlmResponse {
-  id?: string;
-  object?: "response" | string;
-  created_at?: number;
-  model?: string;
-  output_text?: string;
-  output?: Array<Record<string, any>>;
-  usage?: LlmUsage;
-  [key: string]: any;
-}
-export interface ResponseStreamEvent {
-  type?: string;
-  delta?: string;
-  response?: LlmResponse;
-  usage?: LlmUsage;
-  [key: string]: any;
-}
 export interface RoomState {
   state: Record<string, any>;
   version: number;
@@ -164,11 +99,6 @@ export interface RoomPresenceResponse {
   roomId: string;
   count: number;
   players: PresenceEntry[];
-}
-export interface SpeechToAudioHandle {
-  context: AudioContext;
-  done: Promise<BinaryResponse>;
-  stop: () => void;
 }
 export interface InternalRequestInit extends Omit<RequestInit, "body"> {
   body?: any;
@@ -250,38 +180,6 @@ export declare class GameServerClient {
     value: T,
   ): Promise<SetKvResponse<T>>;
   deleteKv(gameId: string, key: string): Promise<DeleteKvResponse>;
-  completeChat(
-    gameId: string,
-    payload: LlmResponsePayload,
-  ): AsyncGenerator<ResponseStreamEvent, void, unknown>;
-  completeChat(
-    gameId: string,
-    payload: LlmResponsePayload & {
-      stream: false;
-    },
-  ): Promise<LlmResponse | Record<string, any>>;
-  completeChatNonStreaming(
-    gameId: string,
-    payload: Omit<LlmResponsePayload, "stream"> & {
-      stream?: false;
-    },
-  ): Promise<LlmResponse | Record<string, any>>;
-  getSpeechVoices(): Promise<SpeechVoicesResponse>;
-  synthesizeSpeech(params: SpeechSynthesizeParams): Promise<BinaryResponse>;
-  synthesizeSpeechToAudio(params: {
-    text: string;
-    gameId: string;
-    voiceName?: string;
-    speakers?: Array<{
-      speaker: string;
-      voiceName: string;
-    }>;
-    audioContext?: AudioContext;
-    onStart?: () => void;
-    onComplete?: (res: BinaryResponse) => void;
-    onStop?: (reason: string) => void;
-    onError?: (error: Error) => void;
-  }): SpeechToAudioHandle;
   joinRoom(
     gameId: string,
     roomId: string,

@@ -32,7 +32,7 @@ export async function loginAsGuest(): Promise<User> {
 
 /**
  * Returns the current authenticated user, or signs in as a guest if needed.
- * The SDK facade calls this automatically for save/load, AI, TTS, storage,
+ * The SDK facade calls this automatically for save/load, storage,
  * and multiplayer operations when no user is logged in.
  */
 export async function ensureGuestSession(): Promise<User> {

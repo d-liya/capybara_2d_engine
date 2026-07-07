@@ -12,7 +12,7 @@ A scene module should be orchestration-only:
 6. Call input setup functions.
 7. Spawn initial entities from archetypes.
 8. Mount widgets with `game.useWidget(...)`.
-9. Register browser-gated audio work with the loading gate continue hook passed from `src/main.ts` (for example `createMainScene({ onAudioReady: loadingGate.onContinue })`). Start looping music, `AudioContext.resume()`, intro `sdk.audio.speak(...)`, and similar autoplay-sensitive calls there or from later gameplay inputs.
+9. Register browser-gated audio work with the loading gate continue hook passed from `src/main.ts` (for example `createMainScene({ onAudioReady: loadingGate.onContinue })`). Start looping music, `AudioContext.resume()`, and similar autoplay-sensitive calls there or from later gameplay inputs.
 10. Start any async SDK/save bootstrap without blocking scene return.
 11. Return `GameAPI`.
 
