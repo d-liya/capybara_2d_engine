@@ -22,6 +22,8 @@ If the capybara-mcp tools are **not** available in the assistant's tool list:
 2. **Direct them to** [https://developer.capybara.build/](https://developer.capybara.build/) — sign in, create an API key, and copy the MCP install command from the developer console.
 3. **Do not** attempt workarounds or treat generation as complete without real tool output. Wait for MCP setup, or ask the user to confirm once it is active.
 
+If an asset generation call was cancelled or failed, check `.capybara` for logs/job IDs and recover with `get_job_status` — client cancel does not stop a job already submitted.
+
 ## Mandatory post-generation rule
 
 **Generating assets is not done until they are wired into the game.** After every successful asset-generation tool call:
