@@ -1,5 +1,4 @@
 import * as esbuild from "esbuild";
-import { hashDistFile, updateIndexHtmlAssets } from "./asset-hash";
 import { buildCss } from "./build-css";
 
 async function runBuild(): Promise<void> {
@@ -15,10 +14,7 @@ async function runBuild(): Promise<void> {
     outfile: "dist/main.js",
   });
 
-  const stylesFile = hashDistFile("dist/styles.css", "styles", ".css");
-  const mainFile = hashDistFile("dist/main.js", "main", ".js");
-  updateIndexHtmlAssets({ main: mainFile, styles: stylesFile });
-  console.log(`[build] hashed assets: dist/${mainFile}, dist/${stylesFile}`);
+  console.log("[build] wrote dist/styles.css and dist/main.js");
 }
 
 runBuild().catch((error) => {
