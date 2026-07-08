@@ -1,5 +1,5 @@
 {
-  "name": "capybara_game",
+  "name": "capybara_2d_engine",
   "version": "1.0.0",
   "description": "Capybara Game template visit https://developer.capybara.build to learn more",
   "main": "dist/main.js",
