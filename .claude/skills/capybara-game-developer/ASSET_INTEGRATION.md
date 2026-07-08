@@ -1,6 +1,8 @@
 # Asset Integration Playbook
 
-Wire generated assets into gameplay. Read this **after** assets exist in `src/data/` / `src/data/assets.md`, and **before** writing scene or `main.ts` wiring code.
+**Required after every asset-generation tool call.** Generating assets does not finish the task — the agent must register and wire them into the engine before stopping (unless the user asked for generation only).
+
+Wire generated assets into gameplay. Read this **after** assets exist in `src/data/` / `src/data/assets.md`, and **before** treating generation as complete.
 
 For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep GameAPI contracts, see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md).
 

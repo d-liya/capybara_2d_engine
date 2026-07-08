@@ -2,8 +2,6 @@
 
 This is the template-level contract for building games in this repository without reading engine internals.
 
-It follows the same pattern Pi uses for its own extensibility: agents should learn the stable public surface from docs, generated manifests, and recipes instead of reverse-engineering implementation files.
-
 ## Mental model
 
 Treat the repo as four layers:
@@ -16,7 +14,7 @@ Treat the repo as four layers:
 2. **SDK facade** — `src/sdk/index.ts` plus `docs/SDK_FACADE.md`
    - auth/session
    - save/load
-    - save/load
+   - save/load
 3. **Generated facts** — `src/data/assets.md` and `src/scenes/SCENES.md`
    - current map handles, map VFX/spritesheets, characters, animations, props, widgets, audio, placement targets
    - active/recommended scene composition

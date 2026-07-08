@@ -73,3 +73,9 @@ To ensure background music loop generation functions correctly:
 - **Neutral State Rule**: Describe only the default/unselected states of HUD elements. Do not include active highlights, glowing selections, filled meters, or pre-loaded inventory items.
 - **Text Legibility Insets**: Provide flat, high-contrast, quiet background regions (e.g., _"blank warm parchment inset", "flat near-black glass panel"_) where text can be dynamically rendered by code.
 - **Corner Constraints**: Keep gameplay overlay elements (health indicators, hotbars, minimaps) compact and scaled to their corner anchors. Spanning layouts are reserved for start screens, full menus, shop interfaces, and dialogue overlays.
+
+---
+
+### After generation
+
+Prompting ends when the tool call succeeds. Next, **wire** the new assets into the engine — register handles, mount maps/characters/props/audio/HUD scaffolds, update the scene. Follow [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md). Do not leave generated files unwired unless the user asked for generation only.
