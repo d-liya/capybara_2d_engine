@@ -1,9 +1,9 @@
 ---
 name: capybara-game-developer
-description: REQUIRED GROUNDING. Load this skill BEFORE calling any asset generation tools or writing code. After generating assets, the agent MUST wire them into the game per ASSET_INTEGRATION.md — generation alone is incomplete. Covers Capybara 2.5D engine design rules, asset prompts, and architectural patterns.
+description: REQUIRED GROUNDING. Load this skill BEFORE calling any asset generation tools or writing code. Requires capybara-mcp to be active — if MCP tools are unavailable, direct the user to https://developer.capybara.build/ for the install command and API key. After generating assets, the agent MUST wire them into the game per ASSET_INTEGRATION.md — generation alone is incomplete. Covers Capybara 2.5D engine design rules, asset prompts, and architectural patterns.
 metadata:
   author: Capybara-Developer
-  version: 1.3.0
+  version: 1.4.0
 ---
 
 # Capybara Game Developer Skill
@@ -11,6 +11,16 @@ metadata:
 Required grounding for the Capybara 2.5D game engine and asset pipeline. Load this skill **before** calling asset generation tools or writing gameplay code.
 
 Tool payload structures and field validation are defined in Zod schemas. These docs focus on implementation rules, prompting practices, and integration patterns.
+
+## Capybara MCP prerequisite
+
+This repository requires **`capybara-mcp`** to be activated before asset generation tools can be used.
+
+If the capybara-mcp tools are **not** available in the assistant's tool list:
+
+1. **Notify the user** that asset generation is unavailable until the Capybara MCP is installed and enabled.
+2. **Direct them to** [https://developer.capybara.build/](https://developer.capybara.build/) — sign in, create an API key, and copy the MCP install command from the developer console.
+3. **Do not** attempt workarounds or treat generation as complete without real tool output. Wait for MCP setup, or ask the user to confirm once it is active.
 
 ## Mandatory post-generation rule
 
