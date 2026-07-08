@@ -1,7 +1,7 @@
 {
   "name": "capybara_game",
   "version": "1.0.0",
-  "description": "Capybara Game template",
+  "description": "Capybara Game template visit https://developer.capybara.build to learn more",
   "main": "dist/main.js",
   "scripts": {
     "dev": "tsx scripts/normalize-index.ts && npm run build:css && tsx scripts/build-css.ts --watch & esbuild src/main.ts --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=none --outfile=dist/main.js --watch",
