@@ -125,6 +125,8 @@ return game;
 
 ### Separate map transitions
 
+For registration, stitched extensions vs `loadMap`, and map overlay wiring, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
+
 Use `game.loadMap(...)` when moving between maps that are not stitched extension panels, such as house interior → village exterior or dungeon room → overworld. Existing resources, widgets, archetypes, and entities are preserved; gameplay code must deliberately destroy, hide, rebuild, or preserve map-local entities as needed. Do not assume `loadMap` clears NPCs, props, clue decals, or timers for the previous room.
 
 ```ts
@@ -217,13 +219,15 @@ HUD widgets should dispatch the same input actions as keyboard/pointer controls.
 
 ### Widgets
 
+For registering generated HUD scaffolds vs non-HUD widgets, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
+
 Widgets are DOM/HUD plugins mounted with:
 
 ```ts
 game.useWidget(createHudWidget); // exact factory name comes from assets.md
 ```
 
-Generated `Hud...` widgets are scaffolds, not complete gameplay UI. They usually map generated HUD artwork to DOM overlays, hotspots, and approximate display positions. Preserve that visual layout, but replace placeholder labels/handlers with resource reads and event/input dispatch.
+Generated `Hud...` widgets are scaffolds produced alongside HUD art, not complete gameplay UI. They usually map generated HUD artwork to DOM overlays, hotspots, and approximate display positions. Preserve that visual layout, but replace placeholder labels/handlers with resource reads and event/input dispatch. Not every widget needs generated HUD art (bubbles, tooltips, markers, tints).
 
 Widgets display resource state and dispatch intent. They should not own long-lived gameplay state. Gameplay-facing text feedback should go through a HUD/widget layer so players do not miss it. Use dialogue, bark subtitle, toast, prompt, objective, or result-message widgets for text such as NPC barks, quest updates, locked-door reasons, inventory-full messages, tutorial prompts, and action outcomes instead of relying only on console logs or tiny world-only labels. Every widget should reveal newly shown or changed player-facing text with a typing/typewriter effect; keep reveal progress in widget-local ephemeral state unless coordinating text across widgets requires a resource.
 
@@ -371,6 +375,8 @@ for (const target of game.getPlacementTargets()) {
 ```
 
 Generated map overlay states:
+
+For the overlay vs spawned-prop decision and wiring checklist, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
 
 `mapOverlays` are authored in the generated map JSON, not as spawned props in scene code. Use them for stateful map-baked props such as doors, safes, gates, barricades, or border/background props that need to swap images. Each overlay has an `id`, an initial `currentMapStateLabel`, and a list of `states` with image URLs and `box_2d` draw bounds:
 
@@ -552,6 +558,8 @@ Use one of these public patterns:
 For crop grids, prefer resource-stored tile bounds plus `canvasClientToNormalizedPoint(...)`.
 
 ### Audio/music pattern
+
+For registering audio in `common.json` and the loading-gate bootstrap pattern, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
 
 Use this split by default:
 
