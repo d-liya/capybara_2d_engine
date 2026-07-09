@@ -164,17 +164,36 @@ function boxesCloseEnoughForOverlayReplacement(
   );
 }
 
+function maskKeysForOverlayLink(mask: MapMaskEntry): string[] {
+  return [mask.label, mask.name]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => value.trim());
+}
+
+function overlayLinksToMask(
+  overlay: MapOverlayEntry,
+  mask: MapMaskEntry,
+): boolean {
+  const linkedLabel = overlay.linkedObstacleLabel?.trim();
+  if (
+    linkedLabel &&
+    maskKeysForOverlayLink(mask).some((key) => key === linkedLabel)
+  ) {
+    return true;
+  }
+
+  return overlay.states.some((state) =>
+    boxesCloseEnoughForOverlayReplacement(mask.box_2d, state.box_2d),
+  );
+}
+
 function maskHasCloseMapOverlay(
   mask: MapMaskEntry,
   overlays: MapOverlayEntry[],
 ): boolean {
   if (mask.type?.toLowerCase() === "boundary") return false;
 
-  return overlays.some((overlay) =>
-    overlay.states.some((state) =>
-      boxesCloseEnoughForOverlayReplacement(mask.box_2d, state.box_2d),
-    ),
-  );
+  return overlays.some((overlay) => overlayLinksToMask(overlay, mask));
 }
 
 interface BackgroundPanel {

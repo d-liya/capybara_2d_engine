@@ -3,7 +3,7 @@ name: capybara-game-developer
 description: REQUIRED GROUNDING. Load this skill BEFORE calling any asset generation tools or writing code. Requires capybara-mcp to be active — if MCP tools are unavailable, direct the user to https://developer.capybara.build/ for the install command and API key. After generating assets, the agent MUST wire them into the game per ASSET_INTEGRATION.md — generation alone is incomplete. Covers Capybara 2.5D engine design rules, asset prompts, and architectural patterns.
 metadata:
   author: Capybara-Developer
-  version: 1.4.0
+  version: 1.4.1
 ---
 
 # Capybara Game Developer Skill
@@ -31,6 +31,16 @@ If an asset generation call was cancelled or failed, check `.capybara` for logs/
 1. Read `src/data/assets.md` for the new handles, placement ids, overlays, audio names, and HUD/widget exports.
 2. Follow [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md) — register files (`index.ts` / `props.ts` / `common.json`), preload, and connect maps, characters, props, overlays, HUD scaffolds, and music into `createGame` / the active scene / `main.ts`.
 3. Do not stop at “assets were generated” or leave new JSON unused on disk. Wiring is part of the same task unless the user explicitly asks for generation only.
+
+## Generated bounding box order
+
+Generated asset JSON stores all 2D bounds as **`[y1, x1, y2, x2]`** — **y before x**, not `[x1, y1, x2, y2]`.
+
+This applies to `box_2d`, colliders, walkable masks, placement boxes, overlay draw bounds, and any other generated bounding array.
+
+- `box_2d[0]` = ymin, `box_2d[1]` = xmin, `box_2d[2]` = ymax, `box_2d[3]` = xmax
+- Do **not** assign `box_2d[0]` to `x1` or treat the array as x-first
+- At runtime, use `parseBox2d()` or facade helpers such as `game.getPlacementTargets()[].bounds` (`{ x1, y1, x2, y2 }`) instead of indexing raw arrays
 
 ## Quick workflow
 

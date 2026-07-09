@@ -355,6 +355,54 @@ export default class GameRuntime {
     this._archetypes.set(name, { ...defaults });
   }
 
+  applyEntityArchetype(
+    id: EntityId,
+    archetypeName: string,
+    props: ComponentBag = {},
+  ): void {
+    const base = this._archetypes.get(archetypeName);
+    if (!base) {
+      throw new Error(`Unknown archetype: ${archetypeName}`);
+    }
+
+    const entity = this._entities.get(id);
+    if (!entity) {
+      return;
+    }
+
+    const merged = { ...base, ...props };
+    const changes: ComponentBag = {
+      archetype: archetypeName,
+      ...props,
+    };
+
+    const variantKeys = [
+      "speed",
+      "radius",
+      "width",
+      "height",
+      "label",
+      "kind",
+      "tooltip",
+      "frameDurationMs",
+      "animationTransitionMs",
+      "shadow",
+    ] as const;
+
+    for (const key of variantKeys) {
+      if (key in merged) {
+        changes[key] = merged[key];
+      }
+    }
+
+    if (Array.isArray(merged.spriteSheets) && merged.spriteSheets.length > 0) {
+      changes.spriteSheets = merged.spriteSheets;
+      changes.activeAnimation = this._resolveVariantActiveAnimation(entity);
+    }
+
+    this.patchEntity(id, changes);
+  }
+
   spawn(archetype: string, props: ComponentBag = {}): EntityId {
     const base = this._archetypes.get(archetype);
     if (!base) {
@@ -1381,6 +1429,14 @@ export default class GameRuntime {
     if (animation) this.patchEntity(id, { activeAnimation: animation });
   }
 
+  private _resolveVariantActiveAnimation(entity: ComponentBag): string {
+    const current = String(entity.activeAnimation ?? "").toLowerCase();
+    if (current.includes("walk") || current.includes("run")) {
+      return "walk";
+    }
+    return "default_animation";
+  }
+
   private _findAnimationName(
     entity: ComponentBag,
     needles: string[],
@@ -1882,6 +1938,7 @@ export default class GameRuntime {
             ? animationTransitionMs
             : undefined,
           activeAnimation,
+          shadow: entity.shadow,
         });
         if (activeAnimation) {
           this._entityBoundAnimations.set(id, activeAnimation);
@@ -1919,6 +1976,7 @@ export default class GameRuntime {
       if (Number.isFinite(animationTransitionMs)) {
         actor.setAnimationTransitionMs(animationTransitionMs);
       }
+      actor.setShadow(entity.shadow);
       actor.x = x;
       actor.y = y;
       this._entityActors.set(id, actor);

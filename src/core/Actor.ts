@@ -40,6 +40,59 @@ interface ActorOptions {
   frameDurationMs?: number;
   animationTransitionMs?: number;
   activeAnimation?: string;
+  shadow?: unknown;
+}
+
+export interface ActorShadowConfig {
+  enabled: boolean;
+  opacity: number;
+  scaleX: number;
+  scaleY: number;
+  offsetX: number;
+  offsetY: number;
+  useEntityWidth: boolean;
+}
+
+export const DEFAULT_ACTOR_SHADOW: ActorShadowConfig = {
+  enabled: true,
+  opacity: 0.3,
+  scaleX: 1,
+  scaleY: 0.18,
+  offsetX: 0,
+  offsetY: 0,
+  useEntityWidth: false,
+};
+
+function normalizeActorShadowConfig(shadow: unknown): ActorShadowConfig {
+  const input =
+    shadow && typeof shadow === "object"
+      ? (shadow as Record<string, unknown>)
+      : {};
+
+  const opacity = Number(input.opacity);
+  const scaleX = Number(input.scaleX);
+  const scaleY = Number(input.scaleY);
+  const offsetX = Number(input.offsetX);
+  const offsetY = Number(input.offsetY);
+
+  return {
+    enabled: input.enabled !== false,
+    opacity:
+      Number.isFinite(opacity) && opacity >= 0
+        ? opacity
+        : DEFAULT_ACTOR_SHADOW.opacity,
+    scaleX:
+      Number.isFinite(scaleX) && scaleX > 0
+        ? scaleX
+        : DEFAULT_ACTOR_SHADOW.scaleX,
+    scaleY:
+      Number.isFinite(scaleY) && scaleY > 0
+        ? scaleY
+        : DEFAULT_ACTOR_SHADOW.scaleY,
+    offsetX: Number.isFinite(offsetX) ? offsetX : DEFAULT_ACTOR_SHADOW.offsetX,
+    offsetY: Number.isFinite(offsetY) ? offsetY : DEFAULT_ACTOR_SHADOW.offsetY,
+    useEntityWidth: input.useEntityWidth === true,
+  };
 }
 
 export interface GameMap {
@@ -81,6 +134,7 @@ export default class Actor {
   protected _animationTransitionMs: number;
   protected _isMoving: boolean;
   protected _facingX: number;
+  protected _shadow: ActorShadowConfig;
 
   constructor(
     x: number,
@@ -112,6 +166,7 @@ export default class Actor {
     this._animStartedAt = performance.now();
     this._isMoving = false;
     this._facingX = 1;
+    this._shadow = normalizeActorShadowConfig(options.shadow);
     this._configureSpriteSheets(sprite, options.activeAnimation);
   }
 
@@ -333,6 +388,10 @@ export default class Actor {
     if (facingX > 0) this._facingX = 1;
   }
 
+  setShadow(shadow: unknown): void {
+    this._shadow = normalizeActorShadowConfig(shadow);
+  }
+
   _setMovementState(dx: number, dy: number): void {
     this._isMoving = dx !== 0 || dy !== 0;
     const nextAnimation = this._isMoving
@@ -434,22 +493,39 @@ export default class Actor {
     worldPixelW?: number,
     worldPixelH?: number,
   ): void {
+    if (!this._shadow.enabled) {
+      return;
+    }
+
     const anim = this._animations[this._activeAnimation];
     const trim = anim?.trim;
+    const foot = this._footAt(this.x, this.y);
+    const feetCenterX = (foot.x1 + foot.x2) / 2;
 
     let worldX1;
     let worldX2;
     let worldBottom;
-    if (trim) {
+    if (this._shadow.useEntityWidth) {
+      const halfW = this._w / 2;
+      worldX1 = feetCenterX - halfW;
+      worldX2 = feetCenterX + halfW;
+      worldBottom = foot.y2;
+    } else if (trim) {
       worldX1 = this.x + trim.left * this._w;
       worldX2 = this.x + trim.right * this._w;
       worldBottom = this.y + trim.bottom * this._h;
     } else {
-      const foot = this._footAt(this.x, this.y);
       worldX1 = foot.x1;
       worldX2 = foot.x2;
       worldBottom = foot.y2;
     }
+
+    const centerX =
+      (worldX1 + worldX2) / 2 + this._shadow.offsetX * this._facingX;
+    const halfWidth = (worldX2 - worldX1) / 2;
+    worldX1 = centerX - halfWidth;
+    worldX2 = centerX + halfWidth;
+    worldBottom += this._shadow.offsetY;
 
     const { x: px1 } = toPixel(
       worldX1,
@@ -478,14 +554,14 @@ export default class Actor {
 
     const cx = (px1 + px2) / 2;
     const cy = py;
-    const rx = (px2 - px1) / 2;
-    const ry = Math.max(2, rx * 0.18);
+    const rx = ((px2 - px1) / 2) * this._shadow.scaleX;
+    const ry = Math.max(2, rx * this._shadow.scaleY);
 
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
     const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rx);
-    grad.addColorStop(0, "rgba(0,0,0,0.30)");
+    grad.addColorStop(0, `rgba(0,0,0,${this._shadow.opacity})`);
     grad.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = grad;
     ctx.fill();

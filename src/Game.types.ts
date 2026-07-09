@@ -278,6 +278,7 @@ export interface GameMapPanelContent {
     id: string;
     anchorLabel?: string;
     gamePlay?: string;
+    linkedObstacleLabel?: string;
     currentMapStateLabel?: string;
     states: Array<{
       name: string;
@@ -367,6 +368,46 @@ export interface EntityRenderComponents {
   tooltip?: TooltipContent;
   /** Optional explicit hover bounds in [y_min, x_min, y_max, x_max] normalized coordinates. */
   hoverBounds?: [number, number, number, number] | number[];
+  /**
+   * Feet ellipse shadow for animated `spriteSheets` actors.
+   * Omitted fields use {@link DEFAULT_ENTITY_SHADOW}.
+   */
+  shadow?: EntityShadowConfig;
+}
+
+/** Default feet shadow used by animated characters when `shadow` is omitted. */
+export const DEFAULT_ENTITY_SHADOW = {
+  enabled: true,
+  opacity: 0.3,
+  scaleX: 1,
+  scaleY: 0.18,
+  offsetX: 0,
+  offsetY: 0,
+  useEntityWidth: false,
+} as const satisfies Required<EntityShadowConfig>;
+
+/** Per-entity feet shadow tuning for animated characters. */
+export interface EntityShadowConfig {
+  /** Draw the feet ellipse shadow. Default `true`. */
+  enabled?: boolean;
+  /** Center opacity of the radial gradient. Default `0.3`. */
+  opacity?: number;
+  /** Horizontal radius multiplier. Default `1`. */
+  scaleX?: number;
+  /** Vertical radius as a fraction of the horizontal radius. Default `0.18`. */
+  scaleY?: number;
+  /**
+   * Horizontal offset in normalized map units. Positive shifts right when facing
+   * right; mirrors automatically when the actor faces left.
+   */
+  offsetX?: number;
+  /** Vertical offset in normalized map units. Positive moves the shadow down. Default `0`. */
+  offsetY?: number;
+  /**
+   * Span the shadow across the full entity width instead of trimmed sprite pixels.
+   * Useful for wide tool-holding variants.
+   */
+  useEntityWidth?: boolean;
 }
 
 export interface GameConfig {
@@ -479,6 +520,24 @@ export interface GameAPI {
    * });
    */
   defineArchetype(name: string, defaults: ComponentBag): void;
+
+  /**
+   * Apply a registered archetype's visual/stats to an existing entity.
+   *
+   * Use for player outfit swaps, tool-holding variants, or seasonal costumes.
+   * Position, facing, and gameplay fields you pass in `props` are preserved unless
+   * explicitly overridden. Swaps `spriteSheets` when present and keeps the current
+   * motion state (walk vs idle).
+   *
+   * @example
+   * game.defineArchetype("player_with_plow", toArchetype(charFarmerHoldingPlow, { speed: 190 }));
+   * game.applyEntityArchetype(playerId, "player_with_plow", { heldTool: "plow" });
+   */
+  applyEntityArchetype(
+    id: EntityId,
+    archetypeName: string,
+    props?: ComponentBag,
+  ): void;
 
   /**
    * Create one entity from an archetype, with optional overrides.
@@ -608,6 +667,9 @@ export interface GameAPI {
    *
    * @example
    * game.patch(playerId, { speed: 260, activeAnimation: "hero_run" });
+   *
+   * @example
+   * game.patch(playerId, { shadow: { scaleX: 1.2, opacity: 0.25 } });
    */
   patch(id: EntityId, changes: ComponentBag): void;
 

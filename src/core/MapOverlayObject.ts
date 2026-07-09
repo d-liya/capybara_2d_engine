@@ -38,6 +38,8 @@ export interface MapOverlayEntry {
   id: string;
   anchorLabel?: string;
   gamePlay?: string;
+  /** Mask label/name whose obstacle visual this overlay replaces. */
+  linkedObstacleLabel?: string;
   currentMapStateLabel?: string;
   states: MapOverlayStateEntry[];
   /** Default for states that omit renderLayer. */

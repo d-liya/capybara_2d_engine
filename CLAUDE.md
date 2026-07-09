@@ -14,13 +14,6 @@ npm run dev
 
 # Type checking
 npm run typecheck
-npm run typecheck:watch
-
-# Production build (typecheck + bundle + asset hashing)
-npm run build
-
-# CSS build only
-npm run build:css
 ```
 
 ## Architecture & Code Organization

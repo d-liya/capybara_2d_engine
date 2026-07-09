@@ -70,10 +70,28 @@ To ensure background music loop generation functions correctly:
 
 ### 6. HUD & UI Art Composition
 
-- **UI Chrome Integration**: Bake permanent frames, panel borders, neutral button containers, close medals, and slot outlines directly into the prompt.
-- **Neutral State Rule**: Describe only the default/unselected states of HUD elements. Do not include active highlights, glowing selections, filled meters, or pre-loaded inventory items.
-- **Text Legibility Insets**: Provide flat, high-contrast, quiet background regions (e.g., _"blank warm parchment inset", "flat near-black glass panel"_) where text can be dynamically rendered by code.
-- **Corner Constraints**: Keep gameplay overlay elements (health indicators, hotbars, minimaps) compact and scaled to their corner anchors. Spanning layouts are reserved for start screens, full menus, shop interfaces, and dialogue overlays.
+Use **art-vs-code**: the `prompt` describes stable visuals; `gamePlay` describes runtime wiring and changing state.
+
+**Bake into the `prompt`**
+
+- Frames, borders, slot outlines, portrait frames, neutral button chrome
+- Short stable labels and any **explicit baked visuals** you want (icons, title art, menu buttons)
+- Blank high-contrast text insets where code will render dynamic copy
+
+**Put in `gamePlay`, not the image**
+
+- Hit regions, hover/focus/active/disabled states, dynamic text, meter fills, and slot contents **only when code updates them at runtime**
+
+**Neutral state**
+
+- Default/unselected chrome only — no active highlights, glowing tabs, or filled meters
+- If you want a baked icon or label in the image, say so explicitly
+- If code renders slot contents later, describe **empty neutral slots**
+
+**Layout**
+
+- Gameplay overlays should be compact and corner/edge anchored
+- Full-width layouts are for start screens, shops, dialogue, and inspect views unless the user asks otherwise
 
 ---
 

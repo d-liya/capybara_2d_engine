@@ -110,6 +110,9 @@ export function createGame(config: GameConfig): GameAPI {
     defineArchetype: (name, defaults) => {
       runtime.defineArchetype(name, defaults);
     },
+    applyEntityArchetype: (id, archetypeName, props = {}) => {
+      runtime.applyEntityArchetype(id, archetypeName, props);
+    },
     spawn: (archetype, props = {}) => runtime.spawn(archetype, props),
     spawnAtFeet: (archetype, feetX, feetY, props = {}) =>
       runtime.spawnAtFeet(archetype, feetX, feetY, props),
