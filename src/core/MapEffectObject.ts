@@ -6,7 +6,7 @@ import {
   toPixel,
   NORM,
   type Rect,
-} from "../utils";
+} from "../utils/common";
 import type { HoverTarget } from "./HoverTypes";
 import type { RenderLayer } from "./renderSort";
 

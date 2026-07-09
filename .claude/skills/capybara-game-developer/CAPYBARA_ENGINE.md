@@ -129,28 +129,35 @@ Use `game.loadMap(...)` when moving between maps that are not stitched extension
 
 ```ts
 import { mapInterior, mapExterior, toMapData } from "../data";
+import { runScreenFade } from "../utils/screenFade";
 
-// Interior -> exterior. For characters, prefer the feet anchor.
-game.loadMap(toMapData(mapExterior), {
-  spawn: { x: 500, y: 820, anchor: "feet" },
+// Interior -> exterior. Wrap loadMap for a smooth fade (see ASSET_INTEGRATION.md).
+await runScreenFade(() => {
+  game.loadMap(toMapData(mapExterior), {
+    spawn: { x: 500, y: 820, anchor: "feet" },
+  });
 });
 ```
 
 A common gameplay pattern is to mark room-specific entities as map-local and clear them before loading the next room:
 
 ```ts
-for (const id of game.query((c) => c.mapLocal === true)) {
-  game.destroy(id);
-}
+import { runScreenFade } from "../utils/screenFade";
 
-game.loadMap(toMapData(mapInterior), {
-  spawn: { x: 480, y: 760, anchor: "feet" },
+await runScreenFade(() => {
+  for (const id of game.query((c) => c.mapLocal === true)) {
+    game.destroy(id);
+  }
+
+  game.loadMap(toMapData(mapInterior), {
+    spawn: { x: 480, y: 760, anchor: "feet" },
+  });
+
+  // Respawn only the entities that belong in this room.
+  spawnInteriorNpcsAndClues(game);
+
+  game.emit("map:entered", { mapId: "interior" });
 });
-
-// Respawn only the entities that belong in this room.
-spawnInteriorNpcsAndClues(game);
-
-game.emit("map:entered", { mapId: "interior" });
 ```
 
 For multi-map games, keep an explicit lifecycle table in the scene/plan: each NPC, clue prop, pickup, and room-only marker should be either `mapLocal` and rebuilt, hidden while off-map, or intentionally persistent. A courtyard clue or NPC should not remain visible in an interior/study map unless that is deliberate.

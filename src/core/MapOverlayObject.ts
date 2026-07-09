@@ -7,11 +7,15 @@ import {
   toPixel,
   NORM,
   type Rect,
-} from "../utils";
+} from "../utils/common";
 import type { HoverTarget, TooltipContent } from "./HoverTypes";
 import type { RenderLayer } from "./renderSort";
 
-export type MapOverlayRenderLayer = "background" | "ground" | "occluder" | "prop";
+export type MapOverlayRenderLayer =
+  | "background"
+  | "ground"
+  | "occluder"
+  | "prop";
 
 export interface MapOverlayColliderEntry {
   box_2d: number[];
@@ -129,7 +133,9 @@ export default class MapOverlayObject {
   }
 
   get currentState(): MapOverlayStateEntry | null {
-    return this.states.find((state) => state.name === this.currentStateName) ?? null;
+    return (
+      this.states.find((state) => state.name === this.currentStateName) ?? null
+    );
   }
 
   setState(stateName: string): boolean {
@@ -270,7 +276,11 @@ export default class MapOverlayObject {
     this._box2d = [...state.box_2d];
     this._bounds = parseBox2d(state.box_2d);
     if (this._normOffset) {
-      this._bounds = offsetRect(this._bounds, this._normOffset.x, this._normOffset.y);
+      this._bounds = offsetRect(
+        this._bounds,
+        this._normOffset.x,
+        this._normOffset.y,
+      );
       this._box2d = [
         this._bounds.y1,
         this._bounds.x1,
@@ -288,14 +298,16 @@ export default class MapOverlayObject {
           : rect,
       );
 
-    this._blocksMovement = state.blocksMovement ?? this._defaultBlocksMovement ?? false;
+    this._blocksMovement =
+      state.blocksMovement ?? this._defaultBlocksMovement ?? false;
     if (this._blocksMovement && this._colliders.length === 0) {
       this._colliders = [this._bounds];
     }
 
-    this.renderY = this._colliders.length > 0
-      ? this._colliders[this._colliders.length - 1].y2
-      : this._bounds.y2;
+    this.renderY =
+      this._colliders.length > 0
+        ? this._colliders[this._colliders.length - 1].y2
+        : this._bounds.y2;
     this._stateRenderLayer = isValidLayer(state.renderLayer)
       ? state.renderLayer
       : this._defaultRenderLayer;

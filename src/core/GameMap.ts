@@ -11,7 +11,7 @@ import {
   offsetRect,
   NORM,
   type Rect,
-} from "../utils";
+} from "../utils/common";
 import type {
   HoverTarget,
   MapOverlayTarget,

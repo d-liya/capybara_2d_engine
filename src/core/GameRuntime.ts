@@ -6,7 +6,7 @@ import {
   snapCanvasValue,
   toPixel,
   NORM,
-} from "../utils";
+} from "../utils/common";
 import GameMap from "./GameMap";
 import CameraViewportController from "./CameraViewportController";
 import type { Camera, Viewport } from "./CameraViewportController";
@@ -808,9 +808,7 @@ export default class GameRuntime {
       const feetYAtActor = foot.y2;
       const dx = feetX - centerX;
       const dy = feetY - feetYAtActor;
-      return this.map.checkCollision(
-        actor._footAt(actor.x + dx, actor.y + dy),
-      );
+      return this.map.checkCollision(actor._footAt(actor.x + dx, actor.y + dy));
     }
     return !this._getPathGrid(resolved).isPointWalkable(point);
   }
@@ -1290,18 +1288,12 @@ export default class GameRuntime {
       const currentFeetY = foot.y2;
       const dx = feet.x - centerX;
       const dy = feet.y - currentFeetY;
-      return this.map.checkCollision(
-        actor._footAt(actor.x + dx, actor.y + dy),
-      );
+      return this.map.checkCollision(actor._footAt(actor.x + dx, actor.y + dy));
     }
     return !this._getPathGrid(pathOptions).isPointWalkable(feet);
   }
 
-  private _placeEntityAtFeet(
-    id: EntityId,
-    feetX: number,
-    feetY: number,
-  ): void {
+  private _placeEntityAtFeet(id: EntityId, feetX: number, feetY: number): void {
     const actor = this._entityActors.get(id);
     if (actor) {
       const foot = actor._footAt(actor.x, actor.y);
@@ -1333,9 +1325,8 @@ export default class GameRuntime {
       return false;
     }
 
-    const nearest = this._getPathGrid(pathOptions).findNearestWalkablePoint(
-      feet,
-    );
+    const nearest =
+      this._getPathGrid(pathOptions).findNearestWalkablePoint(feet);
     if (!nearest) return false;
 
     this._placeEntityAtFeet(id, nearest.x, nearest.y);
@@ -2024,7 +2015,10 @@ export default class GameRuntime {
     };
   }
 
-  private _getSpawnRevealAlpha(spawnAtMs: number | undefined, now: number): number {
+  private _getSpawnRevealAlpha(
+    spawnAtMs: number | undefined,
+    now: number,
+  ): number {
     if (!Number.isFinite(spawnAtMs)) {
       return 1;
     }

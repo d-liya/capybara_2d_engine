@@ -26,11 +26,9 @@ export function toPixel(
   worldPixelHeight?: number,
 ): { x: number; y: number } {
   const pw =
-    worldPixelWidth ??
-    (worldNormWidth / NORM) * DEFAULT_PANEL_PIXEL_WIDTH;
+    worldPixelWidth ?? (worldNormWidth / NORM) * DEFAULT_PANEL_PIXEL_WIDTH;
   const ph =
-    worldPixelHeight ??
-    (worldNormHeight / NORM) * DEFAULT_PANEL_PIXEL_HEIGHT;
+    worldPixelHeight ?? (worldNormHeight / NORM) * DEFAULT_PANEL_PIXEL_HEIGHT;
   return {
     x: (nx / worldNormWidth) * pw,
     y: (ny / worldNormHeight) * ph,
@@ -180,7 +178,7 @@ import {
   type LoadingGate,
   type LoadingGateContinueDetail,
   type LoadingGateContinueListener,
-} from "./core/LoadingGate";
+} from "../core/LoadingGate";
 
 export { LOADING_GATE_CONTINUE_EVENT };
 export type {

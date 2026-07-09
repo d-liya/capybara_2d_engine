@@ -1,7 +1,11 @@
 import PF from "pathfinding";
 import type GameMap from "./GameMap";
-import type { Rect } from "../utils";
-import type { FindPathOptions, FindPathResult, PathPoint } from "../types/Navigation";
+import type { Rect } from "../utils/common";
+import type {
+  FindPathOptions,
+  FindPathResult,
+  PathPoint,
+} from "../types/Navigation";
 
 const DEFAULT_CELL_SIZE = 25;
 const DEFAULT_COLLISION_WIDTH = 28;
@@ -33,8 +37,14 @@ export default class PathfindingGrid {
   constructor(map: GameMap, options: FindPathOptions = {}) {
     this.map = map;
     this.options = this.resolveOptions(options);
-    this.cols = Math.max(1, Math.ceil(map.worldNormWidth / this.options.cellSize));
-    this.rows = Math.max(1, Math.ceil(map.worldNormHeight / this.options.cellSize));
+    this.cols = Math.max(
+      1,
+      Math.ceil(map.worldNormWidth / this.options.cellSize),
+    );
+    this.rows = Math.max(
+      1,
+      Math.ceil(map.worldNormHeight / this.options.cellSize),
+    );
     this.baseGrid = this.buildGrid();
   }
 
@@ -80,9 +90,13 @@ export default class PathfindingGrid {
     const collisionHeight = Number(options.collisionHeight);
 
     return {
-      cellSize: Number.isFinite(cellSize) && cellSize > 4 ? cellSize : DEFAULT_CELL_SIZE,
+      cellSize:
+        Number.isFinite(cellSize) && cellSize > 4
+          ? cellSize
+          : DEFAULT_CELL_SIZE,
       allowDiagonal: options.allowDiagonal ?? true,
-      stopDistance: Number.isFinite(stopDistance) && stopDistance > 0 ? stopDistance : 0,
+      stopDistance:
+        Number.isFinite(stopDistance) && stopDistance > 0 ? stopDistance : 0,
       collisionWidth:
         Number.isFinite(collisionWidth) && collisionWidth > 0
           ? collisionWidth
@@ -123,15 +137,27 @@ export default class PathfindingGrid {
 
   private worldToCell(point: PathPoint): GridCell {
     return {
-      x: Math.max(0, Math.min(this.cols - 1, Math.floor(point.x / this.options.cellSize))),
-      y: Math.max(0, Math.min(this.rows - 1, Math.floor(point.y / this.options.cellSize))),
+      x: Math.max(
+        0,
+        Math.min(this.cols - 1, Math.floor(point.x / this.options.cellSize)),
+      ),
+      y: Math.max(
+        0,
+        Math.min(this.rows - 1, Math.floor(point.y / this.options.cellSize)),
+      ),
     };
   }
 
   private cellToWorld(cell: GridCell): PathPoint {
     return {
-      x: Math.min(this.map.worldNormWidth, (cell.x + 0.5) * this.options.cellSize),
-      y: Math.min(this.map.worldNormHeight, (cell.y + 0.5) * this.options.cellSize),
+      x: Math.min(
+        this.map.worldNormWidth,
+        (cell.x + 0.5) * this.options.cellSize,
+      ),
+      y: Math.min(
+        this.map.worldNormHeight,
+        (cell.y + 0.5) * this.options.cellSize,
+      ),
     };
   }
 
@@ -149,7 +175,11 @@ export default class PathfindingGrid {
       for (let y = cell.y - radius; y <= cell.y + radius; y += 1) {
         for (let x = cell.x - radius; x <= cell.x + radius; x += 1) {
           if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) continue;
-          if (Math.abs(x - cell.x) !== radius && Math.abs(y - cell.y) !== radius) continue;
+          if (
+            Math.abs(x - cell.x) !== radius &&
+            Math.abs(y - cell.y) !== radius
+          )
+            continue;
           if (!this.baseGrid.isWalkableAt(x, y)) continue;
           const dx = x - cell.x;
           const dy = y - cell.y;
@@ -183,14 +213,20 @@ export default class PathfindingGrid {
     };
   }
 
-  private trimStopDistance(points: PathPoint[], stopDistance: number): PathPoint[] {
+  private trimStopDistance(
+    points: PathPoint[],
+    stopDistance: number,
+  ): PathPoint[] {
     if (points.length <= 1 || stopDistance <= 0) return points;
     const result = [...points];
     const destination = result[result.length - 1];
 
     while (result.length > 1) {
       const prev = result[result.length - 2];
-      const distance = Math.hypot(destination.x - prev.x, destination.y - prev.y);
+      const distance = Math.hypot(
+        destination.x - prev.x,
+        destination.y - prev.y,
+      );
       if (distance > stopDistance) break;
       result.pop();
     }

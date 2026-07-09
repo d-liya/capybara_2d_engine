@@ -4,7 +4,7 @@ import {
   toPixel,
   NORM,
   type Rect,
-} from "../utils";
+} from "../utils/common";
 import type { RenderLayer } from "./renderSort";
 
 export interface SpriteSheet {
@@ -389,7 +389,10 @@ export default class Actor {
 
     if (dx !== 0 || dy !== 0) {
       const magnitude = Math.hypot(dx, dy) || 1;
-      directions.push({ x: (dx / magnitude) * step, y: (dy / magnitude) * step });
+      directions.push({
+        x: (dx / magnitude) * step,
+        y: (dy / magnitude) * step,
+      });
     }
 
     for (const [offsetX, offsetY] of [

@@ -120,17 +120,39 @@ Clear room-only entities yourself — do not assume the previous map’s NPCs/pr
 
 ```ts
 import { mapInterior, mapExterior, toMapData } from "../data";
+import { runScreenFade } from "../utils/screenFade";
 
-for (const id of game.query((c) => c.mapLocal === true)) {
-  game.destroy(id);
-}
+await runScreenFade(() => {
+  for (const id of game.query((c) => c.mapLocal === true)) {
+    game.destroy(id);
+  }
 
-game.loadMap(toMapData(mapExterior), {
-  spawn: { x: 500, y: 820, anchor: "feet" },
+  game.loadMap(toMapData(mapExterior), {
+    spawn: { x: 500, y: 820, anchor: "feet" },
+  });
+  spawnExteriorStuff(game);
+  game.emit("map:entered", { mapId: "exterior" });
 });
-spawnExteriorStuff(game);
-game.emit("map:entered", { mapId: "exterior" });
 ```
+
+### Screen fade around `loadMap`
+
+`loadMap` is instant — wrap it in `runScreenFade` from `src/utils/screenFade.ts` for door/room transitions. The helper fades to black, runs your callback (destroy `mapLocal`, `loadMap`, respawn room content), waits one paint, then fades back in. Blocks pointer input during the fade.
+
+```ts
+import { runScreenFade } from "../utils/screenFade";
+
+await runScreenFade(
+  () => {
+    game.loadMap(toMapData(nextMap), {
+      spawn: { x: 500, y: 900, anchor: "feet" },
+    });
+  },
+  { fadeMs: 400 },
+);
+```
+
+Live pattern: `src/systems/MapTransitionSystem.ts`. Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
 
 Keep an explicit lifecycle: each NPC/clue/pickup is either `mapLocal` (rebuild), hidden off-map, or intentionally persistent.
 

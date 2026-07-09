@@ -7,7 +7,7 @@ import {
   rectsOverlap,
   NORM,
   type Rect,
-} from "../utils";
+} from "../utils/common";
 import type { HoverTarget } from "./HoverTypes";
 import type { RenderLayer } from "./renderSort";
 
@@ -258,7 +258,12 @@ export default class MapObject {
     worldPixelW?: number,
     worldPixelH?: number,
   ): void {
-    if (this._suppressStaticVisuals || this._suppressObstacleVisual || this._obstacleInBackground) return;
+    if (
+      this._suppressStaticVisuals ||
+      this._suppressObstacleVisual ||
+      this._obstacleInBackground
+    )
+      return;
     this._drawImageLayer(
       ctx,
       this._obstacleImage,
