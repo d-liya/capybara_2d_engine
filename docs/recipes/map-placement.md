@@ -19,10 +19,18 @@ Use `game.getPlacementTargets()` at runtime. Do not read map JSON just to discov
 
 Generated boxes use normalized `[y1, x1, y2, x2]` order. Convert before use — see `docs/recipes/spawning.md` for the coordinate contract and `boxToBounds` helper.
 
+**At runtime, prefer `target.bounds` from `game.getPlacementTargets()`** — it is already `{ x1, y1, x2, y2 }`. Do not destructure `target.box_2d` as `[x1, y1, x2, y2]`; that transposes the grid off the map.
+
 ```ts
 function boxToRect(box: readonly [number, number, number, number]) {
   const [y1, x1, y2, x2] = box;
   return { x1, y1, x2, y2, width: x2 - x1, height: y2 - y1 };
+}
+
+// Preferred at runtime:
+const target = game.getPlacementTargets().find((t) => t.id === "crop-field-1");
+if (target) {
+  const { x1, y1, x2, y2 } = target.bounds;
 }
 ```
 
@@ -46,7 +54,7 @@ For a target with a point or single box, `game.placeProp(archetype, target, prop
 
 ## Grid target pattern
 
-Some placement targets describe one large zone plus grid metadata. At runtime each target exposes `gridDimensions: number[]` in `[rows, cols]` order (e.g. `[4, 4]`); `assets.md` may render the same fact as `4 x 4`. `game.placeProp(...)` places one prop for the target; it does **not** automatically create one entity per grid cell.
+Some placement targets describe one large zone plus grid metadata. At runtime each target exposes `gridDimensions: number[]` as **`[cols, rows]`** (e.g. `[4, 3]` = 4 columns × 3 rows). `assets.md` renders the same fact as `cols x rows` (e.g. `4 x 3`). `game.placeProp(...)` places one prop for the target; it does **not** automatically create one entity per grid cell.
 
 For crop tiles, manually subdivide the target box and store the cell bounds in a resource.
 
@@ -67,17 +75,21 @@ export interface PlacementGridCell {
 }
 
 export function expandPlacementGrid(
-  target: { id: string; box_2d?: number[]; gridDimensions?: number[] },
-  fallbackRows = 1,
+  target: {
+    id: string;
+    bounds: { x1: number; y1: number; x2: number; y2: number };
+    gridDimensions?: number[];
+  },
   fallbackCols = 1,
+  fallbackRows = 1,
 ): PlacementGridCell[] {
-  if (!Array.isArray(target.box_2d)) return [];
-
-  const { x1, y1, width, height } = boxToRect(target.box_2d);
-  // Runtime targets expose `gridDimensions: [rows, cols]` (e.g. [4, 4]).
-  const [gridRows, gridCols] = target.gridDimensions ?? [];
-  const rows = Number(gridRows) || fallbackRows;
+  const { x1, y1, x2, y2 } = target.bounds;
+  const width = x2 - x1;
+  const height = y2 - y1;
+  // gridDimensions is [cols, rows] (e.g. [4, 3] for a 4×3 bed).
+  const [gridCols, gridRows] = target.gridDimensions ?? [];
   const cols = Number(gridCols) || fallbackCols;
+  const rows = Number(gridRows) || fallbackRows;
   const cellW = width / cols;
   const cellH = height / rows;
   const cells: PlacementGridCell[] = [];
@@ -109,7 +121,23 @@ export function expandPlacementGrid(
 }
 ```
 
-`getPlacementTargets()` is the source of truth for `gridDimensions`. If `assets.md` shows a grid for a target but the runtime `gridDimensions` is missing, pass explicit `fallbackRows` / `fallbackCols`; do not open generated JSON unless `assets.md` lacks the grid facts.
+`getPlacementTargets()` is the source of truth for `gridDimensions` and `bounds`. If `assets.md` shows a grid for a target but the runtime `gridDimensions` is missing, pass explicit `fallbackCols` / `fallbackRows`; do not open generated JSON unless `assets.md` lacks the grid facts.
+
+## Proximity checks (keyboard / tool range)
+
+Entity `x` / `y` from `game.get(id)` is the sprite **top-left**. For “stand near this cell” gameplay, compare against **`game.getEntityFeet(playerId)`** (feet center + ground line), not top-left.
+
+```ts
+const feet = game.getEntityFeet(playerId);
+if (!feet) return;
+
+const distance = Math.hypot(feet.x - cell.cx, feet.y - cell.cy);
+if (distance < 150) {
+  // plant, harvest, water, etc.
+}
+```
+
+See `src/systems/FarmingSystem.ts` for a working nearest-cell pattern over an expanded grid.
 
 ## Crop overlay sizing
 

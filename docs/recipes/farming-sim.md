@@ -17,6 +17,17 @@ Use this for day/season/crop/gold loops.
 
 `src/data/assets.md` wins for actual generated prop names, crop lifecycle item names, widget factories, and placement ids.
 
+## Live reference (this repo)
+
+`src/scenes/FarmScene.ts` + `src/systems/FarmingSystem.ts` implement a minimal loop:
+
+- Two generated zones (`crop-field-1`, `crop-field-2`) subdivided with `placement.bounds` and `gridDimensions` (`[cols, rows]`, e.g. `[4, 3]` = 4 columns × 3 rows)
+- `P` / `H` keyboard actions plant and harvest the nearest empty/mature cell within range
+- Proximity from `game.getEntityFeet(...)`; crop overlays spawned with `spawnCentered` + `getPropItemUrl`
+- Automatic timed growth through 5 prop stages (0–4), not the full hoe/water/seed day loop below
+
+Use that code when wiring placement grids; use the sections below for fuller day/season/economy sims.
+
 ## HUD visibility
 
 Use the generic `ui` resource with **game-defined** panel/overlay ids. Keep gameplay fields on `farm`:
@@ -170,6 +181,23 @@ const crop = farm.crops.find((crop) => crop.bounds &&
   point.y <= crop.bounds.y2,
 );
 ```
+
+## Keyboard / proximity pattern
+
+When actions are keyed off standing near a tile (not pointer clicks), compare the player’s **feet** to cell centers — not `game.get(id).x` / `.y` (top-left):
+
+```ts
+const playerId = game.getControlledEntity();
+const feet = playerId ? game.getEntityFeet(playerId) : null;
+if (!feet) return;
+
+const distance = Math.hypot(feet.x - cell.cx, feet.y - cell.cy);
+if (distance < INTERACTION_RADIUS) {
+  // plant, harvest, water, etc.
+}
+```
+
+Grid cells should be built from `placement.bounds` on `getPlacementTargets()`, not by reading `box_2d` as `[x1, y1, x2, y2]`. See `docs/recipes/map-placement.md`.
 
 ## Wrong-tool feedback
 

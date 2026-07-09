@@ -180,6 +180,29 @@ game.patch(overlayId, {
 
 Details: [`docs/recipes/map-placement.md`](../../../docs/recipes/map-placement.md), [`docs/recipes/spawning.md`](../../../docs/recipes/spawning.md).
 
+### Prop aspect ratio (generated art)
+
+Generated prop images have a natural aspect ratio. **If art looks stretched, squashed, or “wrong,” check sizing before regenerating assets.**
+
+- Prefer **one** of `width` or `height` in archetype/spawn/patch so the engine preserves source proportions (see `docs/recipes/spawning.md`).
+- Set **both** only when intentionally filling a box (UI icon, floor decal, stretched fill).
+- **Growth / lifecycle props** (crops, plants, trees): early stages are often flat patches; later stages are taller. Patch `width` *and* `height` per stage when height should grow, and **bottom-anchor** on a ground line (`y = groundY - height`) so the base stays on soil.
+- Tall sprites need room in the placement grid — tighten `spacingScale` or allow slight overlap within bounds so mature stages do not clip awkwardly.
+
+```ts
+// Patch stage + size together; anchor bottom on soil
+game.patch(cropId, {
+  imageUrl: getPropItemUrl("prop_tomato_growth", "mature plant with red tomatoes"),
+  width: 54,
+  height: 78,
+  x: cell.x - 27,
+  y: groundY - 78,
+  renderY: groundY + 2,
+});
+```
+
+Live pattern: `src/systems/FarmingSystem.ts` (`TOMATO_STAGE_LAYOUTS`, `syncCropVisual`).
+
 ## Recipe: music
 
 Audio names come from `assets.md` / `common.json`. Prefer `getAudio` for BGM (not one-shot `playAudio`).

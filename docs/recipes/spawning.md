@@ -25,6 +25,27 @@ const bounds = boxToBounds([692, 235, 802, 290]);
 
 Never write `const bounds = { x1: box[0], y1: box[1], ... }` for an `assets.md` placement box. That transposes the world position.
 
+### Placement targets at runtime
+
+`game.getPlacementTargets()` returns each target with:
+
+- **`bounds`** — `{ x1, y1, x2, y2 }` already converted for gameplay math (**use this**)
+- **`box_2d`** — still `[y1, x1, y2, x2]`; do not read as `[x1, y1, x2, y2]`
+
+```ts
+const spawn = game
+  .getPlacementTargets()
+  .find((t) => t.id === "player-spawn-point-452");
+
+if (spawn) {
+  const { x1, x2, y2 } = spawn.bounds;
+  const playerId = game.spawnAtFeet("player", (x1 + x2) / 2, y2);
+  game.setControlledEntity(playerId);
+}
+```
+
+For proximity to grid cells or interactables, use **`game.getEntityFeet(controlledId)`** — not `game.get(id).x` / `.y` (top-left corner).
+
 | API | Arguments mean | Resulting `entity.x` / `entity.y` |
 |-----|----------------|-----------------------------------|
 | `spawn({ x, y })` | Top-left | Same |

@@ -83,28 +83,34 @@ When generating new assets (maps, characters, props, audio):
 ### Scene Creation Pattern
 
 Scenes should:
+
 - Return synchronously (no top-level `async`)
 - Accept optional `onAudioReady` hook from loading gate for browser-gated playback (music, `AudioContext.resume()`)
 - Register resources, archetypes, systems, inputs, widgets in scene setup
 - Start SDK/save-load as async tasks that update resources when complete
 
 Example:
+
 ```typescript
 import { createGame } from "../Game";
 import { mapMain, toMapData, charPlayer, toArchetype } from "../data";
 
-export function createMainScene({ onAudioReady }: { onAudioReady?: () => void }) {
+export function createMainScene({
+  onAudioReady,
+}: {
+  onAudioReady?: () => void;
+}) {
   const game = createGame({
     canvasId: "game",
     map: toMapData(mapMain),
     cameraEdgePadding: 120,
   });
-  
+
   // Register resources, archetypes, systems, inputs, widgets
   game.defineArchetype("player", toArchetype(charPlayer, { speed: 190 }));
   const playerId = game.spawnAtFeet("player", 500, 820);
   game.setControlledEntity(playerId);
-  
+
   // Browser-gated audio
   if (onAudioReady) {
     onAudioReady(() => {
@@ -123,7 +129,13 @@ export function createMainScene({ onAudioReady }: { onAudioReady?: () => void })
 import { mapStudy, charPlayer, toMapData, toArchetype } from "./data";
 
 // Asset and audio helpers
-import { getAssetUrl, getPropData, getPropItemUrl, playAudio, stopAudio } from "./Game";
+import {
+  getAssetUrl,
+  getPropData,
+  getPropItemUrl,
+  playAudio,
+  stopAudio,
+} from "./Game";
 
 // SDK
 import { sdk } from "./sdk";
@@ -160,8 +172,8 @@ game.destroy(enemyId);
 game.registerSystem("combat", (dt, game) => {
   const player = game.getControlledEntity();
   const enemies = game.query({ tags: ["enemy"] });
-  
-  enemies.forEach(enemy => {
+
+  enemies.forEach((enemy) => {
     const distance = Math.hypot(player.x - enemy.x, player.y - enemy.y);
     if (distance < 100) {
       // Combat logic
@@ -260,6 +272,10 @@ game.onInputAction("interact", () => {
 // Mobile/HUD can dispatch same actions
 game.dispatchInputAction("interact");
 ```
+
+## Notes
+
+Do not cast type to unknow to bypass typescript error
 
 ## Build Output
 
