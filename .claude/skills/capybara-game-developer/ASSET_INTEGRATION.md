@@ -152,6 +152,19 @@ game.on("mapOverlay:changed", ({ id, state }) => {
 
 Optional per-state physics: `blocksMovement: true` plus `collider`/`colliders` (or the state’s full `box_2d`) blocks movement/pathfinding. Open states use `blocksMovement: false` or omit it. Successful changes clear pathfinding cache and emit `mapOverlay:changed`.
 
+## Map walkability / collision (generated JSON)
+
+All of this lives in the generated `map_*.json` (`walkableBoxes`, colliders, masks). Prefer editing those boxes over gameplay hacks.
+
+| Symptom | Fix |
+|---|---|
+| Walking over edge props (fences, borders) | Shrink `walkableBoxes` inward from the edges |
+| Walking on top of / too far behind an obstacle | Enlarge that obstacle’s collider box |
+| Can walk “behind” props visually | Expected — y-sorting + layered masks; colliders block movement, not draw order |
+| Bound total roam area | `walkableBoxes` = the playable footprint |
+
+**Roles:** walkable boxes = where the player may go; colliders = solid blockers; masks + y-sort = depth (walk-behind look).
+
 ## Recipe: spawned prop state (not overlays)
 
 Portable items, crop stages, and clues use placement + entity image swaps:
