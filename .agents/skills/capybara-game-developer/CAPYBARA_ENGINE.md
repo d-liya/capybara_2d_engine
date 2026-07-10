@@ -572,7 +572,7 @@ Use this split by default:
 - **Background music / ambient music beds** -> use provided audio assets from `src/data/assets.md` with `getAudio(...)`, `stopAudio(...)`, and low volume.
 - **Non-vocal frequent SFX** -> footsteps, UI bleeps, impacts, pickups, weapon sounds, alerts, and short non-verbal stingers should usually be procedural WebAudio by default. Do not invent or import new SFX files unless the task explicitly provides them.
 
-For looping music, use `getAudio(name)`, but start playback from the loading gate continue gesture (or another direct player interaction), not from passive scene startup:
+For looping music, use `getAudio(name)`, but **never** call `play()` from passive scene startup. Browsers require a real user gesture. Use **both** paths below — production gate alone is not enough in local/dev:
 
 ```ts
 // src/main.ts
@@ -581,25 +581,43 @@ createMainScene({ onAudioReady: loadingGate.onContinue });
 await loadingGate.waitForCompletion();
 loadingGate.teardown();
 
-// scene/audio setup
+// scene/audio setup — required dual-path pattern
 export function createMainScene(
   options: {
     onAudioReady?: (listener: () => void) => () => void;
   } = {},
 ) {
-  const music = getAudio("<music_name>");
-  if (music) {
+  let musicStarted = false;
+  const startMusic = () => {
+    if (musicStarted) return;
+    const music = getAudio("<music_name>");
+    if (!music) return;
+    musicStarted = true;
     music.loop = true;
     music.volume = 0.05; // keep BGM subtle; raise only if the asset is mastered very quietly
-    music.playbackRate = 1;
-    options.onAudioReady?.(() => {
-      void music.play();
+    void music.play().catch(() => {
+      musicStarted = false;
     });
-  }
+  };
+
+  // 1) Production: Tap To Continue gesture via loading gate
+  options.onAudioReady?.(startMusic);
+
+  // 2) Local/dev + fallback: first key/pointer (same gesture as movement).
+  //    In local/dev, onContinue is a no-op — without this, music never starts.
+  //    Call play() synchronously in the handler; do NOT wait for a later
+  //    system tick that detects movement (outside the user-gesture window).
+  window.addEventListener("pointerdown", startMusic, {
+    once: true,
+    passive: true,
+  });
+  window.addEventListener("keydown", startMusic, { once: true });
 }
 ```
 
-The template's production loading gate emits `onContinue` synchronously from the **Tap To Continue** click/tap/key gesture. Put browser-gated work there: `music.play()`, `AudioContext.resume()`, and other APIs that rely on user activation. Preloading audio on startup is fine; playback should wait for `onContinue` or a later gameplay input. In local dev the gate completes immediately and `onContinue` is a no-op, so use normal gameplay inputs when testing gated audio.
+The template's production loading gate emits `onContinue` synchronously from the **Tap To Continue** click/tap/key gesture. Put browser-gated work there: `music.play()`, `AudioContext.resume()`, and other APIs that rely on user activation. Preloading audio on startup is fine.
+
+**Agent rule:** always wire both `onAudioReady` and a one-shot `keydown`/`pointerdown` unlock when starting looping BGM. Relying only on `onAudioReady` fails in local/dev where the gate is a no-op.
 
 Use a low volume for background music by default, around `0.05`, so BGM does not overpower UI feedback or gameplay sounds.
 

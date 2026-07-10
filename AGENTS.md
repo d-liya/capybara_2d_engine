@@ -81,19 +81,20 @@ Scenes should:
 
 - Return synchronously (no top-level `async`)
 - Accept optional `onAudioReady` hook from loading gate for browser-gated playback (music, `AudioContext.resume()`)
+- Also unlock looping BGM on first `keydown`/`pointerdown` — in local/dev `onContinue` is a no-op
 - Register resources, archetypes, systems, inputs, widgets in scene setup
 - Start SDK/save-load as async tasks that update resources when complete
 
 Example:
 
 ```typescript
-import { createGame } from "../Game";
+import { createGame, getAudio } from "../Game";
 import { mapMain, toMapData, charPlayer, toArchetype } from "../data";
 
 export function createMainScene({
   onAudioReady,
 }: {
-  onAudioReady?: () => void;
+  onAudioReady?: (start: () => void) => void;
 }) {
   const game = createGame({
     canvasId: "game",
@@ -106,12 +107,25 @@ export function createMainScene({
   const playerId = game.spawnAtFeet("player", 500, 820);
   game.setControlledEntity(playerId);
 
-  // Browser-gated audio
-  if (onAudioReady) {
-    onAudioReady(() => {
-      playAudio("music_main", { loop: true });
+  // Browser-gated audio: production gate + first-input fallback (required in local/dev)
+  let musicStarted = false;
+  const startMusic = () => {
+    if (musicStarted) return;
+    const music = getAudio("music_main");
+    if (!music) return;
+    musicStarted = true;
+    music.loop = true;
+    music.volume = 0.05;
+    void music.play().catch(() => {
+      musicStarted = false;
     });
-  }
+  };
+  onAudioReady?.(startMusic);
+  window.addEventListener("pointerdown", startMusic, {
+    once: true,
+    passive: true,
+  });
+  window.addEventListener("keydown", startMusic, { once: true });
 }
 ```
 
@@ -280,11 +294,11 @@ Do not cast type to unknow to bypass typescript error
 
 ## Agent harness layout
 
-| Path | Role |
-|------|------|
-| `AGENTS.md` | Shared instructions (this file) — source of truth for all agents |
-| `CLAUDE.md` | Claude entry — imports this file via `@AGENTS.md` |
-| `.claude/skills/` | Project skills for Claude Code |
+| Path              | Role                                                               |
+| ----------------- | ------------------------------------------------------------------ |
+| `AGENTS.md`       | Shared instructions (this file) — source of truth for all agents   |
+| `CLAUDE.md`       | Claude entry — imports this file via `@AGENTS.md`                  |
+| `.claude/skills/` | Project skills for Claude Code                                     |
 | `.agents/skills/` | Same skills for Codex / other harnesses (real copy, not a symlink) |
 
 Keep `.claude/skills/` and `.agents/skills/` in sync when editing a skill. Load **`capybara-game-developer`** before asset generation or gameplay work.

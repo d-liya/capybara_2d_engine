@@ -293,6 +293,8 @@ await loadingGate.waitForCompletion();
 loadingGate.teardown();
 ```
 
+Inside the scene, start looping BGM with the **dual-path** unlock (`onAudioReady` **and** one-shot `keydown`/`pointerdown`) — see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md) “Audio/music pattern”. Gate-only wiring fails in local/dev.
+
 After wiring a scene, update `src/scenes/SCENES.md` (active file, map/extensions, resources, archetypes, systems, inputs, widgets, audio, SDK). Checklist: [`src/scenes/README.md`](../../../src/scenes/README.md).
 
 ## Name collisions: “overlay”
