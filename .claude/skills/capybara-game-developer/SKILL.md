@@ -32,6 +32,10 @@ If an asset generation call was cancelled or failed, check `.capybara` for logs/
 2. Follow [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md) — register files (`index.ts` / `props.ts` / `common.json`), preload, and connect maps, characters, props, overlays, HUD scaffolds, and music into `createGame` / the active scene / `main.ts`.
 3. Do not stop at “assets were generated” or leave new JSON unused on disk. Wiring is part of the same task unless the user explicitly asks for generation only.
 
+## When the user says an asset looks bad
+
+If the user complains that a particular prop/character/image “isn’t good,” “looks wrong,” or “feels off,” **check integration aspect ratio before regenerating**. Stretching or squashing via arbitrary fixed `width`/`height` often ruins the feel of otherwise fine art. Prefer preserving source proportions (see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md) — Prop aspect ratio). Only regenerate when the art itself is the problem.
+
 ## Generated bounding box order
 
 Generated asset JSON stores all 2D bounds as **`[y1, x1, y2, x2]`** — **y before x**, not `[x1, y1, x2, y2]`.

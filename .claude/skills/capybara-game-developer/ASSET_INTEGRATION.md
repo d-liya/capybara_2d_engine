@@ -8,7 +8,7 @@ For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep
 
 ## Source of truth
 
-1. **`src/data/assets.md`** — map/character/prop/audio/widget/placement names and handles for *this* game. Never invent names from recipes or placeholders.
+1. **`src/data/assets.md`** — map/character/prop/audio/widget/placement names and handles for _this_ game. Never invent names from recipes or placeholders.
 2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `toArchetype`). Stable across regenerations.
 3. **`src/Game.ts`** — public gameplay API (`createGame`, `loadMap`, overlays, audio helpers, spawning).
 
@@ -47,14 +47,14 @@ Map-authored spritesheet VFX?
   → gameplay: triggerMapEffect / triggerNearestMapEffect
 ```
 
-| Intent | API |
-|---|---|
-| First / only panel at boot | `createGame({ map: toMapData(mapHandle) })` |
-| Stitch adjacent panels into one world | `toMapData(base, { extensions })` |
-| Swap to a non-stitched map | `game.loadMap(toMapData(...), { spawn })` |
-| Toggle baked overlay state | `setMapOverlayState` |
-| Spawn / stage portable props | `placeProp` + `getPropItemUrl` |
-| Trigger map VFX | `triggerMapEffect` / `triggerNearestMapEffect` |
+| Intent                                | API                                            |
+| ------------------------------------- | ---------------------------------------------- |
+| First / only panel at boot            | `createGame({ map: toMapData(mapHandle) })`    |
+| Stitch adjacent panels into one world | `toMapData(base, { extensions })`              |
+| Swap to a non-stitched map            | `game.loadMap(toMapData(...), { spawn })`      |
+| Toggle baked overlay state            | `setMapOverlayState`                           |
+| Spawn / stage portable props          | `placeProp` + `getPropItemUrl`                 |
+| Trigger map VFX                       | `triggerMapEffect` / `triggerNearestMapEffect` |
 
 ## Recipe: new game / first map
 
@@ -106,7 +106,7 @@ const game = createGame({
 });
 ```
 
-**Origin gotcha:** stitched world origin is the top-left of the *compiled* map. Extending east/south is easiest; west/north can shift the origin so spawn coords must be adjusted. Prefer extending right/down when designing the layout.
+**Origin gotcha:** stitched world origin is the top-left of the _compiled_ map. Extending east/south is easiest; west/north can shift the origin so spawn coords must be adjusted. Prefer extending right/down when designing the layout.
 
 You can also pass the same `extensions` option into `loadMap(toMapData(...))` when replacing the whole stitched world.
 
@@ -178,12 +178,12 @@ Optional per-state physics: `blocksMovement: true` plus `collider`/`colliders` (
 
 All of this lives in the generated `map_*.json` (`walkableBoxes`, colliders, masks). Prefer editing those boxes over gameplay hacks.
 
-| Symptom | Fix |
-|---|---|
-| Walking over edge props (fences, borders) | Shrink `walkableBoxes` inward from the edges |
-| Walking on top of / too far behind an obstacle | Enlarge that obstacle’s collider box |
-| Can walk “behind” props visually | Expected — y-sorting + layered masks; colliders block movement, not draw order |
-| Bound total roam area | `walkableBoxes` = the playable footprint |
+| Symptom                                        | Fix                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| Walking over edge props (fences, borders)      | Shrink `walkableBoxes` inward from the edges                                   |
+| Walking on top of / too far behind an obstacle | Enlarge that obstacle’s collider box                                           |
+| Can walk “behind” props visually               | Expected — y-sorting + layered masks; colliders block movement, not draw order |
+| Bound total roam area                          | `walkableBoxes` = the playable footprint                                       |
 
 **Roles:** walkable boxes = where the player may go; colliders = solid blockers; masks + y-sort = depth (walk-behind look).
 
@@ -204,17 +204,23 @@ Details: [`docs/recipes/map-placement.md`](../../../docs/recipes/map-placement.m
 
 ### Prop aspect ratio (generated art)
 
-Generated prop images have a natural aspect ratio. **If art looks stretched, squashed, or “wrong,” check sizing before regenerating assets.**
+**Integrating with the correct aspect ratio matters.** Generated prop images have a natural width/height relationship; forcing arbitrary fixed `width` + `height` (or reusing one size for every prop/stage) stretches or squashes the art and ruins how the image feels in-world. Prefer matching each asset’s proportions over a convenient constant size.
+
+**If art looks stretched, squashed, or “wrong,” check sizing before regenerating assets.**
 
 - Prefer **one** of `width` or `height` in archetype/spawn/patch so the engine preserves source proportions (see `docs/recipes/spawning.md`).
-- Set **both** only when intentionally filling a box (UI icon, floor decal, stretched fill).
-- **Growth / lifecycle props** (crops, plants, trees): early stages are often flat patches; later stages are taller. Patch `width` *and* `height` per stage when height should grow, and **bottom-anchor** on a ground line (`y = groundY - height`) so the base stays on soil.
+- Set **both** only when you know the target box matches the art’s aspect ratio, or when intentionally filling a box (UI icon, floor decal, stretched fill).
+- Do **not** slap the same fixed dimensions on unrelated props — each item’s layout should follow its own image.
+- **Growth / lifecycle props** (crops, plants, trees): early stages are often flat patches; later stages are taller. Patch `width` _and_ `height` per stage when height should grow (keep each stage’s aspect ratio), and **bottom-anchor** on a ground line (`y = groundY - height`) so the base stays on soil.
 - Tall sprites need room in the placement grid — tighten `spacingScale` or allow slight overlap within bounds so mature stages do not clip awkwardly.
 
 ```ts
 // Patch stage + size together; anchor bottom on soil
 game.patch(cropId, {
-  imageUrl: getPropItemUrl("prop_tomato_growth", "mature plant with red tomatoes"),
+  imageUrl: getPropItemUrl(
+    "prop_tomato_growth",
+    "mature plant with red tomatoes",
+  ),
   width: 54,
   height: 78,
   x: cell.x - 27,
@@ -225,49 +231,15 @@ game.patch(cropId, {
 
 Live pattern: `src/systems/FarmingSystem.ts` (`TOMATO_STAGE_LAYOUTS`, `syncCropVisual`).
 
-## Recipe: music
-
-Audio names come from `assets.md` / `common.json`. Prefer `getAudio` for BGM (not one-shot `playAudio`).
-
-```ts
-// src/main.ts
-const loadingGate = createLoadingGate(canvas);
-createMainScene({ onAudioReady: loadingGate.onContinue });
-await loadingGate.waitForCompletion();
-loadingGate.teardown();
-
-// scene
-import { getAudio, stopAudio } from "../Game";
-
-export function createMainScene(
-  options: { onAudioReady?: (listener: () => void) => () => void } = {},
-) {
-  const music = getAudio("<music_name>");
-  if (music) {
-    music.loop = true;
-    music.volume = 0.05;
-    options.onAudioReady?.(() => {
-      void music.play();
-    });
-  }
-  // Later / on map change:
-  // stopAudio("<music_name>");
-}
-```
-
-Start looping music from the loading-gate continue gesture (or another user gesture), not from passive scene startup. Preload is fine; `play()` must wait for activation. In local dev the gate may complete immediately and `onContinue` can be a no-op — use a gameplay input when testing gated audio.
-
-Default BGM volume ≈ `0.05`. Frequent SFX should stay procedural WebAudio unless the task provides SFX files.
-
 ## Recipe: HUD scaffolds and widgets
 
 **HUD art** and **widgets** are related but not the same thing.
 
-| Kind | What you get | Needs generated HUD art? |
-|---|---|---|
-| **Generated HUD scaffold** | Asset art + a boilerplate `createHud…` factory in `src/widgets/` (layout, hotspots, image positions) | Yes — generation creates both |
-| **Hand-written / stock widget** | Factory you own or already in the repo (NPC bubbles, tooltips, season tint, world markers) | No — mount with `useWidget` only |
-| **Gameplay feedback widget** | Dialogue, toast, bark subtitle, prompt, objective tracker | Often no new art; reuse DOM + typing reveal |
+| Kind                            | What you get                                                                                         | Needs generated HUD art?                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **Generated HUD scaffold**      | Asset art + a boilerplate `createHud…` factory in `src/widgets/` (layout, hotspots, image positions) | Yes — generation creates both               |
+| **Hand-written / stock widget** | Factory you own or already in the repo (NPC bubbles, tooltips, season tint, world markers)           | No — mount with `useWidget` only            |
+| **Gameplay feedback widget**    | Dialogue, toast, bark subtitle, prompt, objective tracker                                            | Often no new art; reuse DOM + typing reveal |
 
 Generated `Hud...` files are **temporary visual scaffolds**, not the engine contract. Your game owns panel/overlay ids. Preserve the visual layout; replace placeholder labels/handlers with resource reads and input/events.
 
@@ -325,12 +297,12 @@ After wiring a scene, update `src/scenes/SCENES.md` (active file, map/extensions
 
 ## Name collisions: “overlay”
 
-| Term | What it is | API |
-|---|---|---|
-| **`mapOverlays`** | Map-baked stateful visuals/colliders in map JSON | `setMapOverlayState` |
-| **HUD `ui.overlays`** | DOM modal/full-screen UI visibility | `patchUi({ overlays: ... })` |
-| **Season “prop overlay”** | Atmosphere/tint layers in season recipes | season systems — not `mapOverlays` |
-| **Spawned prop** | Entity from `placeProp` / spawn with swappable `imageUrl` | `getPropItemUrl` + `patch` |
+| Term                      | What it is                                                | API                                |
+| ------------------------- | --------------------------------------------------------- | ---------------------------------- |
+| **`mapOverlays`**         | Map-baked stateful visuals/colliders in map JSON          | `setMapOverlayState`               |
+| **HUD `ui.overlays`**     | DOM modal/full-screen UI visibility                       | `patchUi({ overlays: ... })`       |
+| **Season “prop overlay”** | Atmosphere/tint layers in season recipes                  | season systems — not `mapOverlays` |
+| **Spawned prop**          | Entity from `placeProp` / spawn with swappable `imageUrl` | `getPropItemUrl` + `patch`         |
 
 ## See also
 
