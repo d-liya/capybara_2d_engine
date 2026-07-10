@@ -9,15 +9,16 @@ The schema automatically validates asset types, IDs, dependencies (`referenceId`
 ### 1. Style & Perspective Constraints
 
 - **Orthogonal Oblique Perspective**: The asset pipeline enforces a fixed $3/4$ oblique angle. **Do not** write camera-angle keywords in world-space prompts (e.g., _"top-down", "2.5D", "isometric", "camera angle", "zoomed out", "wide angle"_). Describe physical materials, rectangular layouts, and flat surface orientations instead.
-- **Art Style Consistency**: Use the batch-level `artStyle` field to specify global aesthetic rules (e.g., _"16-bit pixel art, vibrant color palette"_). Do not repeat these style phrases inside individual asset prompts.
-- **Base Map Art Reference**: On the first `base_map`, in addition to the global `artStyle`, you may pass `art_reference_url`. It can be a local filepath or a remote URL to a reference image that further anchors the visual style (palette, line weight, material look). Prefer this when the user supplies mood-board art or an existing screenshot; still set `artStyle` for textual style rules. Downstream assets inherit style from the base map via `referenceId` — do not invent separate style references for every asset.
+- **Art Style Consistency**: Use the batch-level `artStyle` field to specify global aesthetic rules (e.g., _"modern pixel art, vibrant color palette"_). Do not repeat these style phrases inside individual asset prompts.
+- **Batch Art Reference**: `art_reference_url` is also **batch-level** (not a field on `base_map`). Pass a local filepath or remote URL to a reference image that anchors palette, line weight, and material look — prefer this when the user supplies mood-board art or an existing screenshot. Still set `artStyle` for textual style rules. Downstream world-space assets stay aligned via `referenceId` to the `base_map`; do not invent separate style references per asset.
+- **Style persistence across turns**: After the first successful generation run in a session, the batch `artStyle` and `art_reference_url` (if provided) are reused for future turns. You do not need to re-send them unless the user asks to change the look.
 - **Technical Shading**: Specify flat ambient lighting with small, clean, high-contrast drop shadows directly underneath each asset. Avoid long cast shadows, heavy vignettes, or environmental fog.
 
 ---
 
 ### 2. Base Map Composition & Pathing
 
-List the `base_map` before any extend maps, `props_map_overlay` assets, or other assets that depend on a `referenceId` in the same batch payload. Downstream prompts should copy floor materials, wall language, and spatial scale from this map. Set batch `artStyle` and, when available, `art_reference_url` on that first `base_map`.
+List the `base_map` before any extend maps, `props_map_overlay` assets, or other assets that depend on a `referenceId` in the same batch payload. Downstream prompts should copy floor materials, wall language, and spatial scale from this map. Set batch-level `artStyle` and, when available, batch-level `art_reference_url` on the generation request (not on the `base_map` asset).
 
 - **Open-Edge Layout**: Compose maps with the North boundary containing the structural walls, cliff faces, buildings, or deep foliage. Leave the East, West, and South edges open and walkable to facilitate future map extensions.
 - **The North-Wall Buffer Rule**: If an NPC or player must stand or move behind a counter, bar, desk, or workstation along the North wall, you must describe a horizontal walkable aisle or gap between that furniture piece and the North wall. If the furniture is flush against the North wall, place the interactive space on its open South side.
