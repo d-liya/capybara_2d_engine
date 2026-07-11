@@ -1,6 +1,10 @@
 # Capybara 2.5D Engine
 
-My hope with this engine is to make building games fun. I wanted to see how much grunt work I could remove so you (and your coding agents) can focus on the fun stuff like gameplay and story.
+[![Engine walkthrough using coding agents](https://vumbnail.com/1209069080.jpg)](https://vimeo.com/1209069080)
+
+**Watch:** [Engine walkthrough using coding agents](https://vimeo.com/1209069080)
+
+**Community:** [Join the Discord](https://discord.gg/GTfuBwCRd)
 
 The entire public engine interface lives in a single file: `src/Game.ts`. This gives your agent a stable, predictable surface to learn and call without getting lost in a massive codebase.
 
