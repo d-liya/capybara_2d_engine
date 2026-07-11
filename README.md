@@ -4,6 +4,8 @@
 
 **Watch:** [Engine walkthrough using coding agents](https://vimeo.com/1209069080)
 
+**MCP & API key:** [developer.capybara.build](https://developer.capybara.build/)
+
 **Community:** [Join the Discord](https://discord.gg/GTfuBwCRd)
 
 The entire public engine interface lives in a single file: `src/Game.ts`. This gives your agent a stable, predictable surface to learn and call without getting lost in a massive codebase.
