@@ -1,50 +1,52 @@
 # Capybara 2.5D Engine
 
-A **lightweight, dependency-light** game engine built for coding agents.
+My hope with this engine is to make building games fun. I wanted to see how much grunt work I could remove so you (and your coding agents) can focus on the fun stuff like gameplay and story.
 
-The entire public engine interface lives in one file — [`src/Game.ts`](src/Game.ts) — so agents (and humans) have a single, stable surface to learn and call. Deep modules sit underneath for camera, input, maps, rendering, and widgets; you customize those when you need to, without the facade getting in the way.
+The entire public engine interface lives in a single file: `src/Game.ts`. This gives your agent a stable, predictable surface to learn and call without getting lost in a massive codebase.
 
-It also ships an **SDK** ([`src/sdk/`](src/sdk/)) for server-side concerns: save/load, auth, and multiplayer.
+## What’s Inside
 
-## Why this shape
+- **AI-First Workflow:** Built from the ground up for generated maps, characters, props, audio, and widgets.
+- **Simple Interfaces:** Thin public APIs with deep modules underneath. It gives agents room to customize without the engine limiting what they can build.
+- **Dependency-Light:** Fewer moving parts means fewer version fights, easier extensions, and a codebase small enough for agents to hold in context.
+- **Server SDK:** Includes a built-in SDK (`src/sdk/`) to handle the boring parts like player accounts, cloud saves, and multiplayer in just a line or two.
 
-- **AI assets are first-class** — generated maps, characters, props, audio, and widgets are part of the workflow, not bolted on later.
-- **Simple interfaces, deep modules** — thin public APIs with room to customize underneath, so the engine does not limit what coding agents can build.
-- **Dependency-light** — fewer moving parts means easier extension, fewer version fights, and a codebase agents can actually hold in context.
+## Quick Start
 
-## Quick start
+**Prerequisite:** You'll need to set up the Capybara MCP first to handle asset generation. Grab an API key and follow the setup instructions at [developer.capybara.build](https://developer.capybara.build/).
 
-**Prerequisite:** set up **Capybara MCP** (API key + MCP install) to generate assets — [developer.capybara.build](https://developer.capybara.build/).
+Once that's ready, get the engine running locally:
 
 ```bash
 npm install
 npm run dev
+
 ```
 
-Typecheck with `npm run typecheck`.
+## Repository Layout
 
-## Layout (high level)
+I've kept the project structure as clean as possible so it's easy to navigate:
 
-| Path | Role |
-|------|------|
-| `src/Game.ts` | Public facade — primary API for gameplay code |
-| `src/sdk/` | Server functionality (save, auth, multiplayer) |
-| `src/scenes/` | Scene entrypoints and orchestration |
-| `src/systems/` | Per-frame gameplay logic |
-| `src/archetypes/` | Reusable entity defaults |
-| `src/widgets/` | DOM HUD plugins |
-| `src/data/` | Generated assets and adapters |
-| `docs/recipes/` | Optional implementation patterns |
+| Path              | What it does                                                     |
+| ----------------- | ---------------------------------------------------------------- |
+| `src/Game.ts`     | The main facade. This is the primary API for your gameplay code. |
+| `src/sdk/`        | Server functionality (save, auth, and multiplayer).              |
+| `src/scenes/`     | Scene entrypoints and orchestration.                             |
+| `src/systems/`    | Per-frame gameplay logic.                                        |
+| `src/archetypes/` | Reusable entity defaults.                                        |
+| `src/widgets/`    | DOM HUD plugins.                                                 |
+| `src/data/`       | Your generated assets and adapters.                              |
+| `docs/recipes/`   | Optional implementation patterns to help agents build.           |
 
-See [`AGENTS.md`](AGENTS.md) for architecture rules, coordinate conventions, and common patterns.
+For detailed architecture rules, coordinate conventions, and common patterns, check out `AGENTS.md`.
 
-## Agent harnesses
+## Agent Harnesses
 
-One shared engine on `main`; harness folders coexist:
+The engine lives on `main`, and the agent harness folders coexist right alongside it:
 
-| Path | Role |
-|------|------|
-| [`AGENTS.md`](AGENTS.md) | Shared agent instructions (Codex, Cursor, and others) |
-| [`CLAUDE.md`](CLAUDE.md) | Claude entry — imports via `@AGENTS.md` |
-| `.claude/skills/` | Project skills for Claude Code |
-| `.agents/skills/` | Same skills for other harnesses (copied, not symlinked) |
+| Path              | What it does                                                   |
+| ----------------- | -------------------------------------------------------------- |
+| `AGENTS.md`       | Shared agent instructions (for Codex, Cursor, etc.).           |
+| `CLAUDE.md`       | Claude entry point (imports via `@AGENTS.md`).                 |
+| `.claude/skills/` | Project skills specifically for Claude Code.                   |
+| `.agents/skills/` | The same project skills copied over for other agent harnesses. |
