@@ -1,8 +1,8 @@
 # Capybara 2.5D Engine
 
-[![Engine walkthrough using coding agents](https://vumbnail.com/1209069080.jpg)](https://vimeo.com/1209069080)
+[![Engine walkthrough using coding agents](https://vumbnail.com/1209288685.jpg)](https://vimeo.com/1209288685)
 
-**Watch:** [Engine walkthrough using coding agents](https://vimeo.com/1209069080)
+**Watch:** [Engine walkthrough using coding agents](https://vimeo.com/1209288685)
 
 **MCP & API key:** [developer.capybara.build](https://developer.capybara.build/)
 
