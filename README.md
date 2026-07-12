@@ -19,9 +19,11 @@ The entire public engine interface lives in a single file: `src/Game.ts`. This g
 
 ## Quick Start
 
-**Prerequisite:** You'll need to set up the Capybara MCP first to handle asset generation. Grab an API key and follow the setup instructions at [developer.capybara.build](https://developer.capybara.build/).
+The engine works as a **standalone product** — you can run it, write gameplay code, and ship without any extra services.
 
-Once that's ready, get the engine running locally:
+If you want the convenience of the **asset generation pipeline** (maps, characters, props, audio, HUD art), set up the Capybara MCP. Coding agents can't natively generate those assets on their own. Grab an API key and follow the setup instructions at [developer.capybara.build](https://developer.capybara.build/).
+
+Get the engine running locally:
 
 ```bash
 npm install
