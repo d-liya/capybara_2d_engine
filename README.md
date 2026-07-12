@@ -29,30 +29,6 @@ npm run dev
 
 ```
 
-## Repository Layout
+### Assets look wrong?
 
-I've kept the project structure as clean as possible so it's easy to navigate:
-
-| Path              | What it does                                                     |
-| ----------------- | ---------------------------------------------------------------- |
-| `src/Game.ts`     | The main facade. This is the primary API for your gameplay code. |
-| `src/sdk/`        | Server functionality (save, auth, and multiplayer).              |
-| `src/scenes/`     | Scene entrypoints and orchestration.                             |
-| `src/systems/`    | Per-frame gameplay logic.                                        |
-| `src/archetypes/` | Reusable entity defaults.                                        |
-| `src/widgets/`    | DOM HUD plugins.                                                 |
-| `src/data/`       | Your generated assets and adapters.                              |
-| `docs/recipes/`   | Optional implementation patterns to help agents build.           |
-
-For detailed architecture rules, coordinate conventions, and common patterns, check out `AGENTS.md`.
-
-## Agent Harnesses
-
-The engine lives on `main`, and the agent harness folders coexist right alongside it:
-
-| Path              | What it does                                                   |
-| ----------------- | -------------------------------------------------------------- |
-| `AGENTS.md`       | Shared agent instructions (for Codex, Cursor, etc.).           |
-| `CLAUDE.md`       | Claude entry point (imports via `@AGENTS.md`).                 |
-| `.claude/skills/` | Project skills specifically for Claude Code.                   |
-| `.agents/skills/` | The same project skills copied over for other agent harnesses. |
+**Check the original file in `src/data` before regenerating.** Generated art is usually fine — coding agents often wire it in with the wrong aspect ratio.

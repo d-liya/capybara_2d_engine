@@ -3,7 +3,7 @@ name: capybara-game-developer
 description: REQUIRED GROUNDING. Load this skill BEFORE calling any asset generation tools or writing code. Requires capybara-mcp to be active — if MCP tools are unavailable, direct the user to https://developer.capybara.build/ for the install command and API key. After generating assets, the agent MUST wire them into the game per ASSET_INTEGRATION.md — generation alone is incomplete. Covers Capybara 2.5D engine design rules, asset prompts, and architectural patterns.
 metadata:
   author: Capybara-Developer
-  version: 1.4.2
+  version: 1.4.3
 ---
 
 # Capybara Game Developer Skill
@@ -59,6 +59,15 @@ This applies to `box_2d`, colliders, walkable masks, placement boxes, overlay dr
 3. **Wire immediately** — register and integrate per [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md) (required after step 2).
 4. **Gameplay code** — use the public facade (`src/Game.ts`), generated manifests (`src/data/assets.md`, `src/scenes/SCENES.md`), and gameplay modules. Do not modify `src/core/` unless fixing a platform issue.
 5. **Cloud features** — import `sdk` from `src/sdk/index.ts` for save/load, auth, and multiplayer; do not open SDK internals by default.
+6. **Verify before handing off** — always run `npm run typecheck` first. Only after it passes, respond to the user and ask if they see anything in the browser.
+
+## Mandatory handoff check
+
+Before telling the user work is ready to look at:
+
+1. **Always** run `npm run typecheck`.
+2. Fix any type errors that fail the check.
+3. Then ask the user whether they see anything in the browser (e.g. the expected scene, assets, or gameplay change).
 
 ## Additional resources
 
