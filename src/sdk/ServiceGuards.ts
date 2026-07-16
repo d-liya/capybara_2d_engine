@@ -25,7 +25,9 @@ function safeWindow(): (Window & typeof globalThis) | null {
 }
 
 function isProdEnv(): boolean {
-  const win = safeWindow() as (Window & typeof globalThis & { env?: string }) | null;
+  const win = safeWindow() as
+    | (Window & typeof globalThis & { env?: string })
+    | null;
   return win?.env === "prod";
 }
 
@@ -71,7 +73,9 @@ export function getErrorStatus(error: unknown): number | null {
 }
 
 export function isUsageLimitError(error: unknown): boolean {
-  return getErrorStatus(error) === 429 || error instanceof ServiceUsageLimitError;
+  return (
+    getErrorStatus(error) === 429 || error instanceof ServiceUsageLimitError
+  );
 }
 
 function getHeaderValue(error: unknown, name: string): string | null {
@@ -85,10 +89,14 @@ function getHeaderValue(error: unknown, name: string): string | null {
 
   if (!headers) return null;
   if (typeof (headers as Headers).get === "function") {
-    return (headers as Headers).get(name) ?? (headers as Headers).get(name.toLowerCase());
+    return (
+      (headers as Headers).get(name) ??
+      (headers as Headers).get(name.toLowerCase())
+    );
   }
 
-  const direct = (headers as Record<string, unknown>)[name] ??
+  const direct =
+    (headers as Record<string, unknown>)[name] ??
     (headers as Record<string, unknown>)[name.toLowerCase()];
   return typeof direct === "string" || typeof direct === "number"
     ? String(direct)
@@ -109,27 +117,38 @@ function parseRetryAfterMs(error: unknown): number | null {
 }
 
 function getUsageLimitCooldownMs(error?: unknown): number {
-  const win = safeWindow() as (Window & typeof globalThis & {
-    sdkUsageLimitCooldownMs?: number;
-  }) | null;
+  const win = safeWindow() as
+    | (Window &
+        typeof globalThis & {
+          sdkUsageLimitCooldownMs?: number;
+        })
+    | null;
   const configured = Number(win?.sdkUsageLimitCooldownMs);
   const retryAfterMs = parseRetryAfterMs(error);
   return Math.max(
     1_000,
-    retryAfterMs ?? (Number.isFinite(configured) && configured > 0
-      ? configured
-      : DEFAULT_USAGE_LIMIT_COOLDOWN_MS),
+    retryAfterMs ??
+      (Number.isFinite(configured) && configured > 0
+        ? configured
+        : DEFAULT_USAGE_LIMIT_COOLDOWN_MS),
   );
 }
 
 function formatRetryMessage(message: string, blockedUntil?: number): string {
   if (!blockedUntil) return message;
-  const remainingSeconds = Math.max(1, Math.ceil((blockedUntil - Date.now()) / 1000));
+  const remainingSeconds = Math.max(
+    1,
+    Math.ceil((blockedUntil - Date.now()) / 1000),
+  );
   return `${message} Retrying is paused for ${remainingSeconds}s.`;
 }
 
-export function getPlayerSafeServiceErrorMessage(error: unknown, serviceName = "Service"): string {
-  if (isUsageLimitError(error)) return `${serviceName} usage limit reached. Try again later.`;
+export function getPlayerSafeServiceErrorMessage(
+  error: unknown,
+  serviceName = "Service",
+): string {
+  if (isUsageLimitError(error))
+    return `${serviceName} usage limit reached. Try again later.`;
   return `${serviceName} failed. Try again.`;
 }
 
@@ -145,7 +164,10 @@ export class ServiceUsageLimitError extends Error {
 }
 
 export function getStoredUsageLimit(): ServiceUsageLimitRecord | null {
-  return readJson<ServiceUsageLimitRecord | null>(USAGE_LIMIT_STORAGE_KEY, null);
+  return readJson<ServiceUsageLimitRecord | null>(
+    USAGE_LIMIT_STORAGE_KEY,
+    null,
+  );
 }
 
 export function clearStoredUsageLimit(): void {
@@ -159,11 +181,17 @@ export function clearStoredUsageLimit(): void {
   hideDevServiceError();
 }
 
-export function recordUsageLimit(service: GuardedServiceName | string, error?: unknown): ServiceUsageLimitRecord {
+export function recordUsageLimit(
+  service: GuardedServiceName | string,
+  error?: unknown,
+): ServiceUsageLimitRecord {
   const now = Date.now();
   const retryAfterMs = getUsageLimitCooldownMs(error);
   const blockedUntil = now + retryAfterMs;
-  const message = getPlayerSafeServiceErrorMessage(error ?? new ServiceUsageLimitError(service), `${service.toUpperCase()} service`);
+  const message = getPlayerSafeServiceErrorMessage(
+    error ?? new ServiceUsageLimitError(service),
+    `${service.toUpperCase()} service`,
+  );
   const record: ServiceUsageLimitRecord = {
     service,
     status: 429,
@@ -177,7 +205,9 @@ export function recordUsageLimit(service: GuardedServiceName | string, error?: u
   return record;
 }
 
-export function assertServiceAvailable(service: GuardedServiceName | string): void {
+export function assertServiceAvailable(
+  service: GuardedServiceName | string,
+): void {
   const record = getStoredUsageLimit();
   if (!record) return;
   if (record.service !== service) return;
@@ -194,12 +224,16 @@ export function assertServiceAvailable(service: GuardedServiceName | string): vo
 }
 
 function getRequestLimit(): { windowMs: number; maxRequests: number } {
-  const win = safeWindow() as (Window & typeof globalThis & {
-    sdkRequestWindowMs?: number;
-    sdkMaxRequestsPerWindow?: number;
-  }) | null;
+  const win = safeWindow() as
+    | (Window &
+        typeof globalThis & {
+          sdkRequestWindowMs?: number;
+          sdkMaxRequestsPerWindow?: number;
+        })
+    | null;
   const windowMs = Number(win?.sdkRequestWindowMs) || DEFAULT_REQUEST_WINDOW_MS;
-  const maxRequests = Number(win?.sdkMaxRequestsPerWindow) || DEFAULT_MAX_REQUESTS_PER_WINDOW;
+  const maxRequests =
+    Number(win?.sdkMaxRequestsPerWindow) || DEFAULT_MAX_REQUESTS_PER_WINDOW;
   return { windowMs, maxRequests };
 }
 
@@ -211,7 +245,9 @@ export function recordSdkRequest(service: GuardedServiceName | string): void {
   recent.push({ service, at: now });
   writeJson(REQUEST_LOG_STORAGE_KEY, recent.slice(-200));
 
-  const countForService = recent.filter((entry) => entry.service === service).length;
+  const countForService = recent.filter(
+    (entry) => entry.service === service,
+  ).length;
   if (countForService > maxRequests) {
     const record = recordUsageLimit(
       service,
@@ -263,7 +299,8 @@ function ensureDevErrorElement(): HTMLDivElement | null {
   el.style.background = "rgba(0,0,0,0.58)";
   el.style.backdropFilter = "blur(18px) saturate(1.4)";
   el.style.color = "white";
-  el.style.font = "600 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  el.style.font =
+    "600 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   el.style.boxShadow = "0 16px 44px rgba(0,0,0,0.35)";
   el.style.pointerEvents = "none";
   el.hidden = true;
@@ -280,6 +317,8 @@ export function showDevServiceError(message: string): void {
 
 export function hideDevServiceError(): void {
   const win = safeWindow();
-  const el = win?.document?.getElementById("sdk-dev-service-error") as HTMLDivElement | null;
+  const el = win?.document?.getElementById(
+    "sdk-dev-service-error",
+  ) as HTMLDivElement | null;
   if (el) el.hidden = true;
 }

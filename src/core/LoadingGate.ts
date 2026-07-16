@@ -1,11 +1,11 @@
 const ANIMATION_DURATION_MS = 5000;
+const LOGO_CROSSFADE_MS = 420;
 const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
-const MASCOT_URL =
-  "https://www.capybara.build/_next/image?url=%2Fmascot-capybara.png&w=1920&q=75";
 
 function isDevMode(): boolean {
+  return false;
   const host = window.location.hostname;
   const path = window.location.pathname;
   if (path.includes("/workspace/")) {
@@ -28,7 +28,11 @@ function injectLoadingStyles(): void {
       z-index: 9999;
       background-color: #0c0c0c;
       color: #ececec;
-      font-family: "Bebas Neue", cursive;
+      /* Google Fonts only ships Geist Pixel at weight 400. Safari is strict about
+         weight matching and will fall back to system sans if we request 500/700. */
+      font-family: "Geist Pixel", sans-serif;
+      font-weight: 400;
+      font-synthesis: none;
       opacity: 1;
       transition: opacity ${OVERLAY_FADE_MS}ms ease;
     }
@@ -41,29 +45,32 @@ function injectLoadingStyles(): void {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 20px;
+      gap: 0;
       opacity: 0;
       animation: cpy-loading-fade-in 1s ease forwards;
-    }
-
-    .cpy-loading-mascot {
-      width: min(220px, 42vw);
-      height: auto;
-      display: block;
-      object-fit: contain;
-      user-select: none;
-      pointer-events: none;
     }
 
     .cpy-loading-logo {
       position: relative;
       display: inline-block;
+      opacity: 1;
+      transform: scale(1);
+      transition:
+        opacity ${LOGO_CROSSFADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform ${LOGO_CROSSFADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .cpy-loading-logo.is-swapping {
+      opacity: 0;
+      transform: scale(0.985);
+      pointer-events: none;
     }
 
     .cpy-loading-logo-content {
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 15px;
+      gap: 12px;
       width: max-content;
     }
 
@@ -76,21 +83,58 @@ function injectLoadingStyles(): void {
     }
 
     .cpy-loading-brand {
-      font-size: 28px;
-      font-weight: 500;
-      letter-spacing: -0.5px;
+      margin: 0;
+      font-size: clamp(32px, 8vw, 48px);
+      font-weight: 400;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1;
     }
 
+    .cpy-loading-subtitle {
+      margin: 0;
+      font-size: clamp(12px, 2.6vw, 14px);
+      letter-spacing: 0.34em;
+      text-indent: 0.34em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+
+    .cpy-loading-subtitle:empty {
+      display: none;
+    }
+
+    /* Continue is solid white — no dim grey base, no second wipe. */
     .cpy-loading-logo.is-continue {
       cursor: pointer;
     }
 
-    .cpy-loading-logo.is-continue .cpy-loading-brand {
+    .cpy-loading-logo.is-continue .cpy-loading-logo-dim {
+      visibility: hidden;
+    }
+
+    .cpy-loading-logo.is-continue .cpy-loading-reveal-mask {
+      position: relative;
+      width: 100% !important;
+      transition: none;
+    }
+
+    .cpy-loading-logo.is-continue .cpy-loading-logo-bright {
+      opacity: 1;
       transition: opacity 180ms ease;
     }
 
-    .cpy-loading-logo.is-continue:active .cpy-loading-brand {
-      opacity: 0.75;
+    .cpy-loading-logo.is-continue:hover .cpy-loading-logo-bright,
+    .cpy-loading-logo.is-continue:focus-visible .cpy-loading-logo-bright {
+      opacity: 0.7;
+    }
+
+    .cpy-loading-logo.is-continue:focus-visible {
+      outline: none;
+    }
+
+    .cpy-loading-logo.is-continue:active .cpy-loading-logo-bright {
+      opacity: 0.55;
     }
 
     .cpy-loading-reveal-mask {
@@ -108,9 +152,10 @@ function injectLoadingStyles(): void {
       bottom: 30px;
       left: 50%;
       transform: translateX(-50%);
-      font-family: "Geist", sans-serif;
+      font-family: "Geist Pixel", sans-serif;
       font-size: 12px;
       font-weight: 400;
+      font-synthesis: none;
       letter-spacing: 0.02em;
       color: #fff;
       opacity: 0;
@@ -148,12 +193,40 @@ function injectLoadingStyles(): void {
   document.head.appendChild(style);
 }
 
+interface TitleBlock {
+  root: HTMLDivElement;
+  brand: HTMLHeadingElement;
+  subtitle: HTMLParagraphElement;
+}
+
+function createTitleBlock(
+  toneClass: "cpy-loading-logo-dim" | "cpy-loading-logo-bright",
+  brandText: string,
+  subtitleText: string,
+): TitleBlock {
+  const root = document.createElement("div");
+  root.className = `cpy-loading-logo-content ${toneClass}`;
+
+  const brand = document.createElement("h1");
+  brand.className = "cpy-loading-brand";
+  brand.textContent = brandText;
+
+  const subtitle = document.createElement("p");
+  subtitle.className = "cpy-loading-subtitle";
+  subtitle.textContent = subtitleText;
+
+  root.appendChild(brand);
+  root.appendChild(subtitle);
+
+  return { root, brand, subtitle };
+}
+
 interface OverlayElements {
   overlay: HTMLDivElement;
   status: HTMLDivElement;
   logo: HTMLDivElement;
-  brand: HTMLHeadingElement;
-  brightBrand: HTMLHeadingElement;
+  dim: TitleBlock;
+  bright: TitleBlock;
   revealMask: HTMLDivElement;
   progress: HTMLDivElement;
   progressLine: HTMLDivElement;
@@ -168,37 +241,22 @@ function createProductionOverlay(): OverlayElements {
   const center = document.createElement("div");
   center.className = "cpy-loading-center";
 
-  const mascot = document.createElement("img");
-  mascot.className = "cpy-loading-mascot";
-  mascot.src = MASCOT_URL;
-  mascot.alt = "Capybara mascot";
-  mascot.decoding = "async";
-  center.appendChild(mascot);
-
   const logo = document.createElement("div");
   logo.className = "cpy-loading-logo";
 
-  const dim = document.createElement("div");
-  dim.className = "cpy-loading-logo-content cpy-loading-logo-dim";
-
-  const brand = document.createElement("h1");
-  brand.className = "cpy-loading-brand";
-  brand.textContent = "Capybara";
-  dim.appendChild(brand);
+  const dim = createTitleBlock("cpy-loading-logo-dim", "Capybara", "Presents");
 
   const revealMask = document.createElement("div");
   revealMask.className = "cpy-loading-reveal-mask";
 
-  const bright = document.createElement("div");
-  bright.className = "cpy-loading-logo-content cpy-loading-logo-bright";
+  const bright = createTitleBlock(
+    "cpy-loading-logo-bright",
+    "Capybara",
+    "Presents",
+  );
 
-  const brightBrand = document.createElement("h1");
-  brightBrand.className = "cpy-loading-brand";
-  brightBrand.textContent = "Capybara";
-  bright.appendChild(brightBrand);
-
-  revealMask.appendChild(bright);
-  logo.appendChild(dim);
+  revealMask.appendChild(bright.root);
+  logo.appendChild(dim.root);
   logo.appendChild(revealMask);
   center.appendChild(logo);
 
@@ -221,12 +279,49 @@ function createProductionOverlay(): OverlayElements {
     overlay,
     status,
     logo,
-    brand,
-    brightBrand,
+    dim,
+    bright,
     revealMask,
     progress,
     progressLine,
   };
+}
+
+function setLogoCopy(
+  dim: TitleBlock,
+  bright: TitleBlock,
+  brandText: string,
+  subtitleText: string,
+): void {
+  dim.brand.textContent = brandText;
+  bright.brand.textContent = brandText;
+  dim.subtitle.textContent = subtitleText;
+  bright.subtitle.textContent = subtitleText;
+}
+
+function waitForTransitionEnd(
+  element: HTMLElement,
+  propertyName: string,
+  fallbackMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      element.removeEventListener("transitionend", onEnd);
+      resolve();
+    };
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === element && event.propertyName === propertyName) {
+        finish();
+      }
+    };
+    element.addEventListener("transitionend", onEnd);
+    setTimeout(finish, fallbackMs + 40);
+  });
 }
 
 export const LOADING_GATE_CONTINUE_EVENT = "capybara:loading-gate-continue";
@@ -243,8 +338,8 @@ export type LoadingGateContinueListener = (
 export interface LoadingGate {
   /**
    * Fires synchronously from the loading gate continue gesture in production.
-    * Put browser-gated work such as music.play() or AudioContext.resume()
-    * here instead of passive scene startup.
+   * Put browser-gated work such as music.play() or AudioContext.resume()
+   * here instead of passive scene startup.
    */
   onContinue(listener: LoadingGateContinueListener): () => void;
   waitForCompletion(): Promise<void>;
@@ -274,8 +369,15 @@ export function createCoreLoadingGate(
     canvas.style.visibility = "hidden";
   }
 
-  const { overlay, logo, brand, brightBrand, revealMask, progress, progressLine } =
-    createProductionOverlay();
+  const {
+    overlay,
+    logo,
+    dim,
+    bright,
+    revealMask,
+    progress,
+    progressLine,
+  } = createProductionOverlay();
   document.body.appendChild(overlay);
 
   let isResolved = false;
@@ -309,14 +411,11 @@ export function createCoreLoadingGate(
     resolvePromise();
   };
 
-  const showContinuePrompt = () => {
-    progress.classList.add("is-complete");
-    brand.textContent = "Tap To Continue";
-    brightBrand.textContent = "Tap To Continue";
+  const enableContinue = () => {
     logo.classList.add("is-continue");
     logo.setAttribute("role", "button");
     logo.setAttribute("tabindex", "0");
-    logo.setAttribute("aria-label", "Tap to continue");
+    logo.setAttribute("aria-label", "Continue");
 
     const onContinue = () => {
       emitContinueIfNeeded({ userActivated: true });
@@ -336,12 +435,37 @@ export function createCoreLoadingGate(
     );
   };
 
+  const showContinuePrompt = async () => {
+    progress.classList.add("is-complete");
+
+    // Fade out title card, swap to solid white "Continue", fade it in.
+    logo.classList.add("is-swapping");
+    await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
+
+    setLogoCopy(dim, bright, "Continue", "");
+    revealMask.style.transition = "none";
+    revealMask.style.width = "100%";
+    logo.classList.add("is-continue");
+
+    // Next frame so the browser paints the new copy before fading in.
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+
+    logo.classList.remove("is-swapping");
+    await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
+
+    enableContinue();
+  };
+
   setTimeout(() => {
     progressLine.style.width = "100%";
     revealMask.style.width = "100%";
   }, 50);
 
-  setTimeout(showContinuePrompt, ANIMATION_DURATION_MS);
+  setTimeout(() => {
+    void showContinuePrompt();
+  }, ANIMATION_DURATION_MS);
 
   return {
     onContinue: (listener) => {

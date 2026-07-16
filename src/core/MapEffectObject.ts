@@ -218,7 +218,7 @@ export default class MapEffectObject {
     ctx.fillRect(x, y, x2 - x, y2 - y);
 
     ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.font = "11px monospace";
+    ctx.font = "11px 'Geist Pixel', sans-serif";
     ctx.fillText(`${this.label} (${this.type})`, x + 4, y + 14);
     ctx.restore();
   }

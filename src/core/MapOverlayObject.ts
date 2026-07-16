@@ -237,7 +237,7 @@ export default class MapOverlayObject {
     ctx.fillStyle = this._blocksMovement
       ? "rgba(255, 170, 30, 0.16)"
       : "rgba(255, 210, 80, 0.06)";
-    ctx.font = "11px monospace";
+    ctx.font = "11px 'Geist Pixel', sans-serif";
 
     for (const [index, collider] of this._colliders.entries()) {
       const { x, y } = toPixel(

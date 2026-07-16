@@ -125,7 +125,7 @@ export function createTooltipWidget(): Widget {
       root = document.createElement("div");
       root.className = [
         "absolute left-0 top-0 pointer-events-none max-w-[calc(100vw-24px)]",
-        "font-['Geist',_sans-serif] text-white will-change-transform",
+        "font-['Geist Pixel',_sans-serif] text-white will-change-transform",
       ].join(" ");
       root.style.transform = "translate3d(0, 0, 0)";
 

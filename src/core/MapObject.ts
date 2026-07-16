@@ -323,7 +323,7 @@ export default class MapObject {
     ctx.strokeStyle = "rgba(255, 50, 50, 0.85)";
     ctx.lineWidth = 2;
     ctx.fillStyle = "rgba(255, 50, 50, 0.15)";
-    ctx.font = "11px monospace";
+    ctx.font = "11px 'Geist Pixel', sans-serif";
 
     for (const [index, collider] of this._colliders.entries()) {
       const { x, y } = toPixel(
