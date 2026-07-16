@@ -5,7 +5,6 @@ const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
 
 function isDevMode(): boolean {
-  return false;
   const host = window.location.hostname;
   const path = window.location.pathname;
   if (path.includes("/workspace/")) {
@@ -369,15 +368,8 @@ export function createCoreLoadingGate(
     canvas.style.visibility = "hidden";
   }
 
-  const {
-    overlay,
-    logo,
-    dim,
-    bright,
-    revealMask,
-    progress,
-    progressLine,
-  } = createProductionOverlay();
+  const { overlay, logo, dim, bright, revealMask, progress, progressLine } =
+    createProductionOverlay();
   document.body.appendChild(overlay);
 
   let isResolved = false;
