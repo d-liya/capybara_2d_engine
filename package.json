@@ -4,10 +4,10 @@
   "description": "Capybara Game template visit https://developer.capybara.build to learn more",
   "main": "dist/main.js",
   "scripts": {
-    "dev": "concurrently -k -n css,js,serve -c yellow,cyan,green \"npm run dev:css\" \"npm run dev:js\" \"npm run dev:serve\"",
+    "dev": "concurrently -k -n css,js,open -c yellow,cyan,green \"npm run dev:css\" \"npm run dev:js\" \"npm run dev:open\"",
     "dev:css": "npm run build:css && tsx scripts/build-css.ts --watch",
-    "dev:js": "esbuild src/main.ts --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=none --outfile=dist/main.js --watch",
-    "dev:serve": "live-server --port=3000 --open=/index.html --watch=dist,src,index.html --no-css-inject .",
+    "dev:js": "esbuild src/main.ts --bundle --format=esm --platform=browser --target=es2022 --minify --legal-comments=none --outfile=dist/main.js --servedir=. --serve=0.0.0.0:3000 --watch=forever",
+    "dev:open": "node scripts/dev-open.mjs",
     "build:css": "tsx scripts/build-css.ts",
     "build": "npm run typecheck && npm run bundle",
     "bundle": "rm -rf dist && tsx scripts/build.ts",
@@ -23,7 +23,6 @@
     "concurrently": "^10.0.3",
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.0",
-    "live-server": "^1.2.2",
     "ts-morph": "^28.0.0",
     "tsx": "^4.22.2",
     "typescript": "^6.0.3"
