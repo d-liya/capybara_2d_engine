@@ -45,9 +45,17 @@ interface MapMaskCollider {
 interface MapMaskEntry {
   label: string;
   name?: string;
-  box_2d: Box2D;
+  /** Normalized visual footprint. Optional when pixel_bbox is used. */
+  box_2d?: Box2D;
+  /**
+   * Pixel crop on the map background. Resolved with the loaded image's
+   * naturalWidth/Height — no per-sprite map_size required.
+   */
+  pixel_bbox?: { x: number; y: number; w: number; h: number };
   backgroundImageBox2d?: Box2D;
   collider: MapMaskCollider[];
+  /** Solid collision polygons in normalized map space (map v2 sprites). */
+  collisionPolygons?: Array<Array<{ x: number; y: number }>>;
   backgroundImage?: string;
   obstacleImage?: string;
   spriteSheetUrl?: string;
@@ -66,6 +74,25 @@ interface PlacementEntry {
   grid_dimensions?: number[];
   bounding_box?: number[];
   box_2d: Box2D;
+}
+
+interface MapOverwriteEntry {
+  id: string;
+  label: string;
+  type: "spritesheet" | "remove";
+  mode?: "background" | "gameplay";
+  url: string;
+  frame_count?: number;
+  pixel_bbox: { x: number; y: number; w: number; h: number };
+  box_2d?: Box2D;
+}
+
+/** Static visual patch from a `remove` overwrite. */
+interface RemoveOverwritePatch {
+  id: string;
+  label: string;
+  bounds: Rect;
+  image: HTMLImageElement | null;
 }
 
 export type CardinalDirection = "north" | "south" | "east" | "west";
@@ -92,6 +119,22 @@ export interface MapPanelContent {
   walkableBoxes?: WalkableBox[];
   placement?: PlacementEntry[];
   mapOverlays?: MapOverlayEntry[];
+  overwrites?: MapOverwriteEntry[];
+}
+
+function pixelBBoxToBox2d(
+  pixel: { x: number; y: number; w: number; h: number },
+  mapWidth: number,
+  mapHeight: number,
+): Box2D {
+  const w = mapWidth > 0 ? mapWidth : 1;
+  const h = mapHeight > 0 ? mapHeight : 1;
+  return [
+    (pixel.y / h) * NORM,
+    (pixel.x / w) * NORM,
+    ((pixel.y + pixel.h) / h) * NORM,
+    ((pixel.x + pixel.w) / w) * NORM,
+  ];
 }
 
 /**
@@ -182,8 +225,9 @@ function overlayLinksToMask(
     return true;
   }
 
+  if (!mask.box_2d) return false;
   return overlay.states.some((state) =>
-    boxesCloseEnoughForOverlayReplacement(mask.box_2d, state.box_2d),
+    boxesCloseEnoughForOverlayReplacement(mask.box_2d!, state.box_2d),
   );
 }
 
@@ -230,16 +274,27 @@ export default class GameMap {
   private _mapSprites: MapEffectObject[];
   private _placements: MapPlacementTarget[];
   private _overlays: MapOverlayObject[];
+  private _removePatches: RemoveOverwritePatch[];
   private _walkable: Rect[];
+  private _numCols: number;
+  private _numRows: number;
+  private _panelSizeLocked: boolean;
+  private _metricsListeners: Array<() => void> = [];
+  private _readyResolvers: Array<() => void> = [];
+  private _backgroundLoadsPending: number;
+  private _ready = false;
 
-  readonly panelPixelWidth: number;
-  readonly panelPixelHeight: number;
-  readonly worldPixelWidth: number;
-  readonly worldPixelHeight: number;
+  panelPixelWidth: number;
+  panelPixelHeight: number;
+  worldPixelWidth: number;
+  worldPixelHeight: number;
   readonly worldNormWidth: number;
   readonly worldNormHeight: number;
 
   constructor(mapData: MapData) {
+    const hasExplicitPanelSize =
+      mapData.panelPixelWidth != null || mapData.panelPixelHeight != null;
+    this._panelSizeLocked = hasExplicitPanelSize;
     const panelPixelWidth =
       mapData.panelPixelWidth ?? DEFAULT_PANEL_PIXEL_WIDTH;
     const panelPixelHeight =
@@ -272,6 +327,8 @@ export default class GameMap {
 
     const numCols = maxGridX - minGridX + 1;
     const numRows = maxGridY - minGridY + 1;
+    this._numCols = numCols;
+    this._numRows = numRows;
 
     this.worldNormWidth = numCols * NORM;
     this.worldNormHeight = numRows * NORM;
@@ -284,10 +341,9 @@ export default class GameMap {
     this._mapSprites = [];
     this._placements = [];
     this._overlays = [];
+    this._removePatches = [];
     this._walkable = [];
-
-    const wnw = this.worldNormWidth;
-    const wnh = this.worldNormHeight;
+    this._backgroundLoadsPending = cells.length;
 
     for (const cell of cells) {
       const panel = cell.data.panel;
@@ -295,17 +351,6 @@ export default class GameMap {
       const normY = (cell.gridY - minGridY) * NORM;
       const normOffset =
         normX !== 0 || normY !== 0 ? { x: normX, y: normY } : undefined;
-
-      // Background image panel
-      const bgPanel: BackgroundPanel = { image: null, normX, normY };
-      loadImage(panel.url)
-        .then((img) => {
-          bgPanel.image = img;
-        })
-        .catch(() => {
-          bgPanel.image = null;
-        });
-      this._backgroundPanels.push(bgPanel);
 
       const spriteSheetData = panel.spriteSheets ?? [];
       const mapOverlayData = panel.mapOverlays ?? [];
@@ -318,6 +363,8 @@ export default class GameMap {
         if (mode === "replace") replaceLinkedMaskKeys.add(key);
       }
 
+      // Background image panel — natural size drives pixel_bbox placement.
+      const bgPanel: BackgroundPanel = { image: null, normX, normY };
       const panelObjects = (panel.masks ?? []).map((mask) => {
         const keys = [mask.label, mask.name]
           .filter((v): v is string => Boolean(v?.trim()))
@@ -333,9 +380,40 @@ export default class GameMap {
         return new MapObject(mask, normOffset, {
           suppressStaticVisuals,
           suppressObstacleVisual,
+          // Only convert pixel_bbox immediately when panel size was caller-forced.
+          // Otherwise wait for the background image natural size.
+          mapPixelWidth: this._panelSizeLocked
+            ? this.panelPixelWidth
+            : undefined,
+          mapPixelHeight: this._panelSizeLocked
+            ? this.panelPixelHeight
+            : undefined,
         });
       });
       this._objects.push(...panelObjects);
+
+      const panelOverwrites = panel.overwrites ?? [];
+
+      loadImage(panel.url)
+        .then((img) => {
+          bgPanel.image = img;
+          this._onBackgroundImageLoaded(
+            img,
+            panelObjects,
+            panelOverwrites,
+            normOffset,
+          );
+        })
+        .catch(() => {
+          bgPanel.image = null;
+          this._onBackgroundImageLoaded(
+            null,
+            panelObjects,
+            panelOverwrites,
+            normOffset,
+          );
+        });
+      this._backgroundPanels.push(bgPanel);
 
       const objectRenderYByKey = new Map<string, number>();
       for (const obj of panelObjects) {
@@ -351,19 +429,30 @@ export default class GameMap {
         return objectRenderYByKey.get(key);
       };
 
-      const maskSortAnchors = (panel.masks ?? []).map((mask, index) => {
-        const rawBounds = parseBox2d(mask.box_2d);
-        const bounds = normOffset
-          ? offsetRect(rawBounds, normOffset.x, normOffset.y)
-          : rawBounds;
-        return {
-          bounds,
-          renderY: panelObjects[index]?.renderY ?? bounds.y2,
-          area:
-            Math.max(0, bounds.x2 - bounds.x1) *
-            Math.max(0, bounds.y2 - bounds.y1),
-        };
-      });
+      const maskSortAnchors = (panel.masks ?? [])
+        .map((mask, index) => {
+          if (!mask.box_2d) return null;
+          const rawBounds = parseBox2d(mask.box_2d);
+          const bounds = normOffset
+            ? offsetRect(rawBounds, normOffset.x, normOffset.y)
+            : rawBounds;
+          return {
+            bounds,
+            renderY: panelObjects[index]?.renderY ?? bounds.y2,
+            area:
+              Math.max(0, bounds.x2 - bounds.x1) *
+              Math.max(0, bounds.y2 - bounds.y1),
+          };
+        })
+        .filter(
+          (
+            anchor,
+          ): anchor is {
+            bounds: Rect;
+            renderY: number;
+            area: number;
+          } => anchor != null,
+        );
 
       const inferRenderYFromOverlappingMask = (
         box: Box2D,
@@ -395,7 +484,7 @@ export default class GameMap {
 
       for (const mask of panel.masks ?? []) {
         const spriteSheetUrl = mask.spriteSheetUrl?.trim();
-        if (!spriteSheetUrl) continue;
+        if (!spriteSheetUrl || !mask.box_2d) continue;
 
         const linkedRenderY =
           resolveLinkedRenderY(mask.label) ??
@@ -468,6 +557,153 @@ export default class GameMap {
         this._overlays.push(new MapOverlayObject(overlay, normOffset));
       }
     }
+
+    if (this._backgroundLoadsPending === 0) {
+      this._markReady();
+    }
+  }
+
+  /**
+   * Fired when background panel size / pixel placement is resolved so the
+   * runtime can resync camera canvas metrics.
+   */
+  onMetricsChanged(listener: () => void): () => void {
+    this._metricsListeners.push(listener);
+    return () => {
+      this._metricsListeners = this._metricsListeners.filter(
+        (entry) => entry !== listener,
+      );
+    };
+  }
+
+  /** Resolves once all background panels have finished loading (or failed). */
+  whenReady(): Promise<void> {
+    if (this._ready) return Promise.resolve();
+    return new Promise((resolve) => {
+      this._readyResolvers.push(resolve);
+    });
+  }
+
+  private _onBackgroundImageLoaded(
+    img: HTMLImageElement | null,
+    panelObjects: MapObject[],
+    overwrites: MapOverwriteEntry[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    if (img?.naturalWidth && img.naturalHeight) {
+      // Prefer the real loaded map size unless the caller locked panel pixels.
+      if (!this._panelSizeLocked) {
+        const nextW = img.naturalWidth;
+        const nextH = img.naturalHeight;
+        if (
+          nextW !== this.panelPixelWidth ||
+          nextH !== this.panelPixelHeight
+        ) {
+          this.panelPixelWidth = nextW;
+          this.panelPixelHeight = nextH;
+          this.worldPixelWidth = this._numCols * nextW;
+          this.worldPixelHeight = this._numRows * nextH;
+          for (const listener of this._metricsListeners) listener();
+        }
+      }
+
+      // Place cut-outs from pixel_bbox using the loaded map image size.
+      // (When size is locked, still use locked panel metrics for consistency.)
+      const placeW = this._panelSizeLocked
+        ? this.panelPixelWidth
+        : img.naturalWidth;
+      const placeH = this._panelSizeLocked
+        ? this.panelPixelHeight
+        : img.naturalHeight;
+      for (const obj of panelObjects) {
+        obj.resolveFromMapPixels(placeW, placeH);
+      }
+
+      this._applyOverwrites(overwrites, panelObjects, placeW, placeH, normOffset);
+    }
+
+    this._backgroundLoadsPending = Math.max(
+      0,
+      this._backgroundLoadsPending - 1,
+    );
+    if (this._backgroundLoadsPending === 0) {
+      this._markReady();
+    }
+  }
+
+  /**
+   * Apply map overwrites once panel pixel size is known:
+   * - spritesheet → MapEffectObject (background loops / gameplay triggered)
+   * - remove → static patch image + disable overlapping sprite collision/visual
+   */
+  private _applyOverwrites(
+    overwrites: MapOverwriteEntry[],
+    panelObjects: MapObject[],
+    mapWidth: number,
+    mapHeight: number,
+    normOffset?: { x: number; y: number },
+  ): void {
+    if (!overwrites.length) return;
+
+    for (const overwrite of overwrites) {
+      const box2d = pixelBBoxToBox2d(overwrite.pixel_bbox, mapWidth, mapHeight);
+      let bounds = parseBox2d(box2d);
+      if (normOffset) {
+        bounds = offsetRect(bounds, normOffset.x, normOffset.y);
+      }
+
+      if (overwrite.type === "remove") {
+        const patch: RemoveOverwritePatch = {
+          id: overwrite.id,
+          label: overwrite.label,
+          bounds,
+          image: null,
+        };
+        loadImage(overwrite.url)
+          .then((image) => {
+            patch.image = image;
+          })
+          .catch(() => {
+            patch.image = null;
+          });
+        this._removePatches.push(patch);
+
+        // Any map sprite whose visual bbox overlaps the remove patch loses
+        // collision (and cut-out draw) — the obstacle was patched away.
+        for (const obj of panelObjects) {
+          if (rectsOverlap(obj.getBounds(), bounds)) {
+            obj.applyRemoveOverwrite();
+          }
+        }
+        continue;
+      }
+
+      // spritesheet overwrite — same modes as normal map spritesheets.
+      const mode =
+        overwrite.mode === "gameplay" ? "gameplay" : "background";
+      this._mapSprites.push(
+        new MapEffectObject(
+          {
+            label: overwrite.label,
+            mask_prompt: overwrite.id,
+            type: mode,
+            box_2d: box2d,
+            frame_count: overwrite.frame_count ?? 1,
+            spriteSheetUrl: overwrite.url,
+          },
+          bounds.y2,
+          normOffset,
+          { defaultType: mode },
+        ),
+      );
+    }
+  }
+
+  private _markReady(): void {
+    if (this._ready) return;
+    this._ready = true;
+    const resolvers = this._readyResolvers.splice(0);
+    for (const resolve of resolvers) resolve();
   }
 
   // ── Collision ────────────────────────────────────────────────────────────
@@ -576,6 +812,36 @@ export default class GameMap {
         py,
         snapCanvasValue(this.panelPixelWidth),
         snapCanvasValue(this.panelPixelHeight),
+      );
+    }
+
+    // `remove` overwrites: static patches drawn on top of the base map so the
+    // area looks cleared even before Y-sorted cut-outs are suppressed.
+    for (const patch of this._removePatches) {
+      const image = patch.image;
+      if (!image?.complete || !image.naturalWidth) continue;
+      const { x, y } = toPixel(
+        patch.bounds.x1,
+        patch.bounds.y1,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      const { x: x2, y: y2 } = toPixel(
+        patch.bounds.x2,
+        patch.bounds.y2,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      ctx.drawImage(
+        image,
+        snapCanvasValue(x),
+        snapCanvasValue(y),
+        snapCanvasValue(x2 - x),
+        snapCanvasValue(y2 - y),
       );
     }
 
@@ -716,6 +982,38 @@ export default class GameMap {
     const wnh = this.worldNormHeight;
     const wpw = this.worldPixelWidth;
     const wph = this.worldPixelHeight;
+
+    // Remove overwrite patches — magenta outline
+    for (const patch of this._removePatches) {
+      const { x, y } = toPixel(
+        patch.bounds.x1,
+        patch.bounds.y1,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      const { x: x2, y: y2 } = toPixel(
+        patch.bounds.x2,
+        patch.bounds.y2,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 80, 220, 0.9)";
+      ctx.fillStyle = "rgba(255, 80, 220, 0.1)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(x, y, x2 - x, y2 - y);
+      ctx.fillRect(x, y, x2 - x, y2 - y);
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(255,200,255,0.95)";
+      ctx.font = "11px 'Geist Pixel', sans-serif";
+      ctx.fillText(`remove:${patch.label}`, x + 4, y + 14);
+      ctx.restore();
+    }
 
     // Walkable areas — green outline
     for (const wb of this._walkable) {

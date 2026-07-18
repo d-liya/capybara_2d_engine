@@ -6,6 +6,7 @@ interface GameLike {
   canvas: HTMLCanvasElement;
   keys: MovementInput;
   debug: boolean;
+  hideMapBackground: boolean;
   handleInputAction(action: string, phase: InputActionPhase): void;
   handlePointerMove(clientX: number, clientY: number): void;
   handlePointerLeave(): void;
@@ -91,6 +92,11 @@ export default class InputController {
 
     if (e.code === "Backquote") {
       this.game.debug = !this.game.debug;
+    }
+
+    // Toggle map background so cut-out masks/sprites are easy to inspect.
+    if (e.code === "KeyB" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      this.game.hideMapBackground = !this.game.hideMapBackground;
     }
   }
 

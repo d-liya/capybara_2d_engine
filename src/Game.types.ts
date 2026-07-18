@@ -234,19 +234,61 @@ export type Box2D = [number, number, number, number] | number[];
 /** Public Game facade type. Same pattern as PathPoint. */
 export type CardinalDirection = "north" | "south" | "east" | "west";
 
+/** Normalized polygon vertex for map collision (0–1000 space). */
+export interface GameMapCollisionPoint {
+  x: number;
+  y: number;
+}
+
+/** Pixel crop of a cut-out on the map background image. */
+export interface GameMapPixelBBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Public Game facade type. Same pattern as PathPoint. */
 export interface GameMapMaskEntry {
   label: string;
   name?: string;
-  box_2d: Box2D;
+  /**
+   * Normalized visual footprint `[y1,x1,y2,x2]`. Optional when `pixel_bbox` is
+   * set — then bounds are resolved from the loaded map image size.
+   */
+  box_2d?: Box2D;
+  /**
+   * Pixel placement on the map background. Converted using the background
+   * image's natural width/height when it loads (no per-sprite map_size needed).
+   */
+  pixel_bbox?: GameMapPixelBBox;
   backgroundImageBox2d?: Box2D;
   collider: Array<{ box_2d: Box2D; label: string }>;
+  /**
+   * Optional solid polygons in normalized map space. When present, movement
+   * collision uses these instead of (or in addition to) AABB colliders.
+   */
+  collisionPolygons?: GameMapCollisionPoint[][];
   backgroundImage?: string;
   obstacleImage?: string;
   spriteSheetUrl?: string;
   frame_count?: number;
   spriteSheetType?: string;
   type?: string;
+}
+
+/** Map overwrite entry (spritesheet VFX or remove patch). */
+export interface GameMapOverwriteEntry {
+  id: string;
+  label: string;
+  type: "spritesheet" | "remove";
+  /** spritesheet: loops (`background`) or triggered (`gameplay`). */
+  mode?: "background" | "gameplay";
+  url: string;
+  frame_count?: number;
+  pixel_bbox: GameMapPixelBBox;
+  /** Optional pre-resolved normalized bounds; usually filled at map-image load. */
+  box_2d?: Box2D;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -294,6 +336,11 @@ export interface GameMapPanelContent {
     renderLayer?: "background" | "ground" | "occluder" | "prop";
     blocksMovement?: boolean;
   }>;
+  /**
+   * Map overwrites: spritesheet VFX (`background`/`gameplay`) or `remove`
+   * patches that cover an area and clear overlapping sprite collision.
+   */
+  overwrites?: GameMapOverwriteEntry[];
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */

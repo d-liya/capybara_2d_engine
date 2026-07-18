@@ -159,6 +159,8 @@ export default class GameRuntime {
   viewport: Viewport;
   cameraFollowEnabled: boolean;
   debug: boolean;
+  /** When true, skip map background panels so cut-out masks/sprites are easy to inspect. */
+  hideMapBackground: boolean;
   keys: MovementInput;
   map: GameMap;
   widgets: WidgetManager<GameRuntime>;
@@ -209,8 +211,17 @@ export default class GameRuntime {
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
 
     this.debug = false;
+    this.hideMapBackground = false;
     this.keys = createEmptyMovementInput();
     this.map = map;
+    // When the map background loads, pixel size may update from naturalWidth/Height.
+    map.onMetricsChanged(() => {
+      this.cameraController.panelPixelWidth = map.panelPixelWidth;
+      this.cameraController.panelPixelHeight = map.panelPixelHeight;
+      this.cameraController.worldPixelWidth = map.worldPixelWidth;
+      this.cameraController.worldPixelHeight = map.worldPixelHeight;
+      this._resizeCanvas();
+    });
     this.widgets = new WidgetManager<GameRuntime>(this.canvas, "hud-root", {
       plugins: [],
       state: {},
@@ -269,6 +280,13 @@ export default class GameRuntime {
     this.cameraController.panelPixelHeight = newMap.panelPixelHeight;
     this.cameraController.worldPixelWidth = newMap.worldPixelWidth;
     this.cameraController.worldPixelHeight = newMap.worldPixelHeight;
+    newMap.onMetricsChanged(() => {
+      this.cameraController.panelPixelWidth = newMap.panelPixelWidth;
+      this.cameraController.panelPixelHeight = newMap.panelPixelHeight;
+      this.cameraController.worldPixelWidth = newMap.worldPixelWidth;
+      this.cameraController.worldPixelHeight = newMap.worldPixelHeight;
+      this._resizeCanvas();
+    });
 
     this._pathGridCache.clear();
     this._entityNavigation.clear();
@@ -1042,7 +1060,9 @@ export default class GameRuntime {
     );
     ctx.scale(this.camera.zoom, this.camera.zoom);
 
-    map.drawBackground(ctx, now);
+    if (!this.hideMapBackground) {
+      map.drawBackground(ctx, now);
+    }
 
     const queue: QueueRenderable[] = [
       ...map.getRenderables(),
@@ -1074,30 +1094,34 @@ export default class GameRuntime {
 
     ctx.restore();
 
-    if (this.debug) this._drawDebugHUD(ctx);
+    if (this.debug || this.hideMapBackground) this._drawDebugHUD(ctx);
 
     requestAnimationFrame((nextNow) => this._loop(nextNow));
   }
 
   _drawDebugHUD(ctx: CanvasRenderingContext2D): void {
-    if (!this._controlledEntityId) {
-      return;
-    }
-    const player = this._entityActors.get(this._controlledEntityId);
-    if (!player) {
-      return;
-    }
+    const player = this._controlledEntityId
+      ? this._entityActors.get(this._controlledEntityId)
+      : null;
+
+    const flags = [
+      this.debug ? "debug" : null,
+      this.hideMapBackground ? "bg off" : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const pos = player
+      ? `pos (${Math.round(player.x)}, ${Math.round(player.y)})`
+      : "pos —";
+    const line = flags ? `${pos}  ${flags}` : pos;
 
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(8, 8, 210, 36);
+    ctx.fillRect(8, 8, Math.max(210, 12 + line.length * 7.2), 36);
     ctx.fillStyle = "#fff";
     ctx.font = "13px monospace";
-    ctx.fillText(
-      `pos (${Math.round(player.x)}, ${Math.round(player.y)})  debug ON`,
-      14,
-      30,
-    );
+    ctx.fillText(line, 14, 30);
     ctx.restore();
   }
 

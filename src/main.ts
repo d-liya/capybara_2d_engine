@@ -1,7 +1,7 @@
 import { preloadAllAudio } from "./core/audio";
 import { createLoadingGate, preloadDataAssets } from "./utils/common";
 import { allDataFiles } from "./data";
-import { sdk } from "./sdk";
+import { createMainScene } from "./scenes/mainScene";
 
 async function bootstrap() {
   preloadDataAssets(allDataFiles);
@@ -10,12 +10,8 @@ async function bootstrap() {
   const canvas = document.getElementById("game") as HTMLCanvasElement;
   const loadingGate = createLoadingGate(canvas);
 
-  // Create and start the game scene here, for example:
-  // createMainScene({ onAudioReady: loadingGate.onContinue });
-  // Start browser-gated audio from loadingGate.onContinue, not from passive
-  // scene startup. The production loading gate emits this from the Tap To
-  // Continue gesture so calls like music.play() and AudioContext.resume()
-  // are much less likely to be blocked by autoplay rules.
+  // Starter scene — blank panel until you generate and wire a map/player.
+  createMainScene({ onAudioReady: loadingGate.onContinue });
 
   await loadingGate.waitForCompletion();
   loadingGate.teardown();

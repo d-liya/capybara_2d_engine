@@ -65,6 +65,7 @@ function generatedMapFromGameMapData(mapData: GameMapData): GeneratedMap {
     walkableBoxes: panel.walkableBoxes as GeneratedMap["walkableBoxes"],
     placement: panel.placement as GeneratedMap["placement"],
     mapOverlays: panel.mapOverlays as GeneratedMap["mapOverlays"],
+    sprites: panel.sprites as GeneratedMap["sprites"],
   };
 }
 
@@ -232,18 +233,21 @@ function createStaticWorldContextFromPositionedMaps(
     seenMaps.add(mapId);
 
     for (const rawWalkable of ((map as unknown as UnknownRecord).walkableBoxes as UnknownRecord[] | undefined) ?? []) {
-      const localBounds = normalizeBox(rawWalkable.box_2d);
+      // Legacy: box_2d. Map v2: bbox.
+      const localBounds = normalizeBox(rawWalkable.box_2d ?? rawWalkable.bbox);
       const bounds = offsetBox(localBounds, offsetX, offsetY);
       const center = centerOf(bounds);
       addItem(items, counts, {
         preferredId: `${mapId}-walkable`,
-        sourceId: compactText(rawWalkable.id, 80),
-        name: compactText(rawWalkable.label, 80) || "Walkable area",
+        sourceId: compactText(rawWalkable.id ?? rawWalkable.floor_id, 80),
+        name:
+          compactText(rawWalkable.label ?? rawWalkable.description, 80) ||
+          "Walkable area",
         kind: "walkable_area",
         x: center.x,
         y: center.y,
         bounds,
-        description: "Area entities can move in.",
+        description: compactText(rawWalkable.description, 150) || "Area entities can move in.",
         tags: ["walkable"],
         mapId,
       });
@@ -256,7 +260,13 @@ function createStaticWorldContextFromPositionedMaps(
       const center = centerOf(bounds);
       const name = compactText(rawMask.name ?? rawMask.label, 80) || `Mask ${maskIndex + 1}`;
       const colliders = Array.isArray(rawMask.collider) ? rawMask.collider.length : 0;
-      const blocks = colliders > 0 || /boundary/i.test(String(rawMask.type ?? name));
+      const polygons = Array.isArray(rawMask.collisionPolygons)
+        ? rawMask.collisionPolygons.length
+        : 0;
+      const blocks =
+        colliders > 0 ||
+        polygons > 0 ||
+        /boundary/i.test(String(rawMask.type ?? name));
       addItem(items, counts, {
         preferredId: `${mapId}-${name}`,
         name,
@@ -264,11 +274,37 @@ function createStaticWorldContextFromPositionedMaps(
         x: center.x,
         y: center.y,
         bounds,
-        description: `${compactText(rawMask.label, 140)}${blocks ? ` Blocks movement (${colliders || "boundary"}).` : ""}`,
+        description: `${compactText(rawMask.label, 140)}${blocks ? ` Blocks movement (${polygons ? `${polygons} poly` : colliders || "boundary"}).` : ""}`,
         tags: tagsFromText(name, rawMask.label, rawMask.type, blocks ? "blocked" : ""),
         mapId,
       });
       maskIndex += 1;
+    }
+
+    // Map v2 sprites (when raw generated map is used before toMapData conversion).
+    let spriteIndex = 0;
+    for (const rawSprite of ((map as unknown as UnknownRecord).sprites as UnknownRecord[] | undefined) ?? []) {
+      const localBounds = normalizeBox(rawSprite.collision_bbox);
+      const bounds = offsetBox(localBounds, offsetX, offsetY);
+      const center = centerOf(bounds);
+      const name =
+        compactText(rawSprite.label, 80) || `Sprite ${spriteIndex + 1}`;
+      const category = compactText(rawSprite.category, 40) || "walkable_area";
+      const polys = Array.isArray(rawSprite.collision_polygons)
+        ? rawSprite.collision_polygons.length
+        : 0;
+      addItem(items, counts, {
+        preferredId: `${mapId}-${name}`,
+        name,
+        kind: /boundary/i.test(category) ? "blocked_mask" : "map_sprite",
+        x: center.x,
+        y: center.y,
+        bounds,
+        description: polys ? `Collision polys: ${polys}.` : undefined,
+        tags: tagsFromText(name, category, "blocked"),
+        mapId,
+      });
+      spriteIndex += 1;
     }
 
     let vfxIndex = 0;

@@ -73,6 +73,144 @@ export function rectContainedBy(inner: Rect, outer: Rect): boolean {
   );
 }
 
+/** 2D point in normalized map space. */
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** Axis-aligned bounds of a polygon (empty poly → zero rect at origin). */
+export function polygonBounds(polygon: Point[]): Rect {
+  if (polygon.length === 0) {
+    return { x1: 0, y1: 0, x2: 0, y2: 0 };
+  }
+  let x1 = polygon[0].x;
+  let y1 = polygon[0].y;
+  let x2 = polygon[0].x;
+  let y2 = polygon[0].y;
+  for (let i = 1; i < polygon.length; i += 1) {
+    const p = polygon[i];
+    if (p.x < x1) x1 = p.x;
+    if (p.y < y1) y1 = p.y;
+    if (p.x > x2) x2 = p.x;
+    if (p.y > y2) y2 = p.y;
+  }
+  return { x1, y1, x2, y2 };
+}
+
+export function offsetPoint(point: Point, dx: number, dy: number): Point {
+  return { x: point.x + dx, y: point.y + dy };
+}
+
+export function offsetPolygon(polygon: Point[], dx: number, dy: number): Point[] {
+  return polygon.map((p) => offsetPoint(p, dx, dy));
+}
+
+/** Ray-cast point-in-polygon (even-odd fill rule). */
+export function pointInPolygon(point: Point, polygon: Point[]): boolean {
+  if (polygon.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x;
+    const yi = polygon[i].y;
+    const xj = polygon[j].x;
+    const yj = polygon[j].y;
+    const intersects =
+      yi > point.y !== yj > point.y &&
+      point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + Number.EPSILON) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function orientation(a: Point, b: Point, c: Point): number {
+  return (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+}
+
+function onSegment(a: Point, b: Point, c: Point): boolean {
+  return (
+    Math.min(a.x, b.x) <= c.x &&
+    c.x <= Math.max(a.x, b.x) &&
+    Math.min(a.y, b.y) <= c.y &&
+    c.y <= Math.max(a.y, b.y)
+  );
+}
+
+/** True when segments ab and cd properly intersect or touch. */
+export function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+
+  if (o1 === 0 && onSegment(a, b, c)) return true;
+  if (o2 === 0 && onSegment(a, b, d)) return true;
+  if (o3 === 0 && onSegment(c, d, a)) return true;
+  if (o4 === 0 && onSegment(c, d, b)) return true;
+
+  return (
+    (o1 > 0) !== (o2 > 0) &&
+    (o3 > 0) !== (o4 > 0) &&
+    o1 !== 0 &&
+    o2 !== 0 &&
+    o3 !== 0 &&
+    o4 !== 0
+  );
+}
+
+/**
+ * True when an axis-aligned rect overlaps a polygon (vertex-in, edge cross, or containment).
+ */
+export function rectOverlapsPolygon(rect: Rect, polygon: Point[]): boolean {
+  if (polygon.length < 3) return false;
+
+  const bounds = polygonBounds(polygon);
+  if (!rectsOverlap(rect, bounds)) return false;
+
+  const corners: Point[] = [
+    { x: rect.x1, y: rect.y1 },
+    { x: rect.x2, y: rect.y1 },
+    { x: rect.x2, y: rect.y2 },
+    { x: rect.x1, y: rect.y2 },
+  ];
+
+  // Any rect corner inside the polygon.
+  for (const corner of corners) {
+    if (pointInPolygon(corner, polygon)) return true;
+  }
+
+  // Any polygon vertex inside the rect.
+  for (const vertex of polygon) {
+    if (
+      vertex.x >= rect.x1 &&
+      vertex.x <= rect.x2 &&
+      vertex.y >= rect.y1 &&
+      vertex.y <= rect.y2
+    ) {
+      return true;
+    }
+  }
+
+  // Edge intersections (handles partial overlaps with no contained vertices).
+  const rectEdges: Array<[Point, Point]> = [
+    [corners[0], corners[1]],
+    [corners[1], corners[2]],
+    [corners[2], corners[3]],
+    [corners[3], corners[0]],
+  ];
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    for (const [c, d] of rectEdges) {
+      if (segmentsIntersect(a, b, c, d)) return true;
+    }
+  }
+
+  // Polygon fully contains the rect (already covered by corners) or rect fully
+  // contains the polygon (covered by vertex-in-rect). Done.
+  return false;
+}
+
 type ImageCrossOrigin = "" | "anonymous" | "use-credentials" | null;
 
 interface LoadImageOptions {
@@ -123,6 +261,8 @@ const PRELOAD_URL_KEYS = new Set([
   "obstacleImage",
   "croppedImageUrl",
   "spriteSheetUrl",
+  "spriteUrl",
+  "sprite_overlay",
 ]);
 
 function collectUrls(value: unknown, out: string[]): void {
