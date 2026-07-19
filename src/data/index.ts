@@ -2,9 +2,20 @@ export {
   toArchetype,
   toMapData,
   toPlayerSprite,
+  toSpriteSheets,
+  directionalToSpriteSheets,
+  multiClipDirectionalToSpriteSheets,
+  legacyDirectionalToSpriteSheets,
+  isDirectionalCharacter,
+  isMultiClipDirectionalCharacter,
+  isLegacyDirectionalCharacter,
   pixelBBoxToBox2d,
+  type AnyGeneratedCharacter,
+  type CharacterFacing,
   type GeneratedCharacter,
   type GeneratedCollisionPoint,
+  type GeneratedDirectionalCharacter,
+  type GeneratedDirectionalSheet,
   type GeneratedMap,
   type GeneratedMapOverwrite,
   type GeneratedMapSprite,
@@ -21,14 +32,4 @@ export {
   type PropItem,
 } from "./props";
 
-/**
- * Register generated JSON handles here after asset generation, e.g.:
- *
- *   import mapMain from "./map.json";
- *   import charPlayer from "./char_player.json";
- *   export { mapMain, charPlayer };
- *   export const allDataFiles = [mapMain, charPlayer];
- *
- * `allDataFiles` is preloaded by `src/main.ts`.
- */
 export const allDataFiles: unknown[] = [];

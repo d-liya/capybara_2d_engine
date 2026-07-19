@@ -1146,7 +1146,41 @@ export default class GameRuntime {
       player.y,
       player.renderY,
     );
-    this._setEntityFacing(this._controlledEntityId, player.facingX);
+    this._syncActorVisualState(this._controlledEntityId, player);
+  }
+
+  /** Push actor anim / facing / hold-frame into the entity bag for widgets & API. */
+  private _syncActorVisualState(
+    id: EntityId,
+    actor: {
+      facingX: number;
+      activeAnimationName?: string;
+      holdFrame?: number | null;
+      facingDir?: string;
+      isDirectional?: boolean;
+    },
+  ): void {
+    const entity = this._entities.get(id);
+    if (!entity) return;
+    const next: ComponentBag = {
+      ...entity,
+      facingX: actor.facingX,
+    };
+    if (typeof actor.activeAnimationName === "string") {
+      next.activeAnimation = actor.activeAnimationName;
+    }
+    if ("holdFrame" in actor) {
+      next.animHoldFrame =
+        actor.holdFrame === undefined ? null : actor.holdFrame;
+    }
+    if (typeof actor.facingDir === "string") {
+      next.facingDir = actor.facingDir;
+    }
+    this._entities.set(id, next);
+    this._entityBoundAnimations.set(
+      id,
+      String(next.activeAnimation ?? this._entityBoundAnimations.get(id) ?? ""),
+    );
   }
 
   private _updateNavigation(dt: number): void {
@@ -1237,8 +1271,16 @@ export default class GameRuntime {
         continue;
       }
       this._setEntityPosition(id, nextPosition.x, nextPosition.y);
-      this._setEntityFacing(id, dx);
-      this._setEntityMoveAnimation(id);
+      if (actor) {
+        actor.x = nextPosition.x;
+        actor.y = nextPosition.y;
+        // Native 4-way (or classic flip) from path direction.
+        actor.applyLocomotionIntent(dx, dy);
+        this._syncActorVisualState(id, actor);
+      } else {
+        this._setEntityFacing(id, dx);
+        this._setEntityMoveAnimation(id);
+      }
     }
   }
 
@@ -1437,6 +1479,16 @@ export default class GameRuntime {
   }
 
   private _setEntityMoveAnimation(id: EntityId): void {
+    const actor = this._entityActors.get(id);
+    if (actor?.isDirectional) {
+      // Keep last non-zero intent if any; treat as moving using last facing.
+      actor.applyLocomotionIntent(
+        Number(this._entities.get(id)?.facingX) || 1,
+        0,
+      );
+      this._syncActorVisualState(id, actor);
+      return;
+    }
     const entity = this._entities.get(id);
     if (!entity) return;
     const animation = this._findAnimationName(entity, ["walk", "run"]);
@@ -1444,6 +1496,12 @@ export default class GameRuntime {
   }
 
   private _setEntityIdleAnimation(id: EntityId): void {
+    const actor = this._entityActors.get(id);
+    if (actor) {
+      actor.applyLocomotionIntent(0, 0);
+      this._syncActorVisualState(id, actor);
+      return;
+    }
     const entity = this._entities.get(id);
     if (!entity) return;
     const animation = this._findAnimationName(entity, [
@@ -1997,6 +2055,12 @@ export default class GameRuntime {
       );
       const facingX = Number(entity.facingX);
       if (Number.isFinite(facingX)) actor.setFacingX(facingX);
+      // Freeze a walk-strip frame when there is no dedicated idle art.
+      if (entity.animHoldFrame === null || entity.animHoldFrame === undefined) {
+        actor.setHoldFrame(null);
+      } else if (Number.isFinite(Number(entity.animHoldFrame))) {
+        actor.setHoldFrame(Number(entity.animHoldFrame));
+      }
       if (Number.isFinite(animationTransitionMs)) {
         actor.setAnimationTransitionMs(animationTransitionMs);
       }

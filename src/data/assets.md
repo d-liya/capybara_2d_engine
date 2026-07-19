@@ -1,51 +1,76 @@
 # Generated Assets Manifest
 
-Agent-facing source of truth for handles in this game. Prefer this file over opening raw JSON for names and placement facts.
-
-**Starter state:** no generated maps, characters, or props yet. After generation, list handles here and register them in `src/data/index.ts`.
+Agent-facing source of truth for handles in this game.
 
 ## Maps
 
-_(none registered yet)_
-
-### Map format (v2)
-
-Use this shape when wiring a generated map with `toMapData(...)` from `src/data/adapters.ts`.
-
-- **`url`** — full background image (map size = this image's natural width/height when loaded)
-- **`walkableBoxes`** — playable floor regions (`bbox` is `[y1,x1,y2,x2]` normalized 0–1000)
-- **`sprites[]`** — cut-out overlays for Y-sorting + collision
-  - `label` — name
-  - `category`: `boundary` | `walkable_area`
-  - `pixel_bbox` — placement crop on the background (`{x,y,w,h}` in pixels)
-  - `spriteUrl` — cut-out image
-  - `collision_polygons` — solid movement footprint (normalized `{x,y}` points)
-  - `collision_bbox` — optional AABB collider
-  - Map size comes from the loaded background `url`
-
-- **`overwrites[]`** — visual (and sometimes collision) patches on the map
-  - `type: "spritesheet"` — animated overlay
-    - `mode: "background"` — loops automatically
-    - `mode: "gameplay"` — one-shot; trigger with `game.triggerMapEffect(label)`
-    - `url`, `frame_count`, `pixel_bbox`
-  - `type: "remove"` — static image patch that covers an area
-    - `url`, `pixel_bbox`
-    - Overlapping map sprites lose **collision + cut-out visual** (obstacle removed)
-
-Wire with:
-
-```ts
-import { mapMain, toMapData } from "../data";
-createGame({ canvasId: "game", map: toMapData(mapMain) });
-```
+_(none — scene uses an inline blank starter panel)_
 
 ## Characters
 
-_(none registered yet)_
+| Handle       | File        | Notes |
+| ------------ | ----------- | ----- |
+| `charPlayer` | `char.json` | Multi-clip directional pack (`animations.walk` × front/back/right). Left = flip `right`. |
+
+### Character JSON (recommended)
+
+```json
+{
+  "label": "hero",
+  "defaultAnimation": "idle",
+  "defaultFacing": "front",
+  "animations": {
+    "idle": {
+      "front": { "url": "...", "metadata": { "frame_count": 4, "frame_w": 64, "frame_h": 64 } },
+      "back":  { "url": "...", "metadata": { ... } },
+      "right": { "url": "...", "metadata": { ... } }
+    },
+    "walk": {
+      "front": { "url": "...", "metadata": { "frame_count": 8, ... } },
+      "back":  { ... },
+      "right": { ... }
+    },
+    "run": { "front": { ... }, "back": { ... }, "right": { ... } },
+    "attack": { "front": { ... }, "back": { ... }, "right": { ... } }
+  }
+}
+```
+
+**Rules**
+
+| Field | Meaning |
+|-------|---------|
+| `animations.{clip}.{facing}` | One horizontal strip per clip × facing |
+| Sheet name at runtime | `{clip}_{facing}` → `walk_front`, `idle_right` |
+| `front` | Toward camera (move down) |
+| `back` | Away from camera (move up) |
+| `right` | Side; engine mirrors with `facingX = -1` for left |
+| `left` | Optional unique left art (no flip) |
+| Missing `idle` | Actor freezes **frame 0** of the walk strip for that facing |
+
+Wire:
+
+```ts
+import { charPlayer, toArchetype } from "../data";
+game.defineArchetype("player", toArchetype(charPlayer, { speed: 200 }));
+game.spawnAtFeet("player", 500, 520);
+// 4-way is native on Actor — no extra system
+```
+
+One-shot clips (attack, emote):
+
+```ts
+game.setEntityAnimation(id, "attack_front");
+// when done, movement will restore walk/idle on next move intent
+```
+
+### Legacy single-clip pack (still supported)
+
+Top-level `front` / `back` / `right` + `"animation": "walking"` still expands to `walking_*` sheets.
 
 ## Props
 
-_(none registered yet)_
+_(none)_
 
 ## Common / audio
 

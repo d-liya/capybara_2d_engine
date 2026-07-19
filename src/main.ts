@@ -1,3 +1,4 @@
+import "../styles.css";
 import { preloadAllAudio } from "./core/audio";
 import { createLoadingGate, preloadDataAssets } from "./utils/common";
 import { allDataFiles } from "./data";

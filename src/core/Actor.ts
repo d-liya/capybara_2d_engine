@@ -110,6 +110,19 @@ const DEFAULT_TRANSITION_MS = 0;
 const DEFAULT_MAP_WIDTH_PX = 2508;
 const DEFAULT_MAP_HEIGHT_PX = 1672;
 
+/** Cardinal facing for 4-way character strips (`walk_front`, …). */
+export type ActorFacingDir = "front" | "back" | "right" | "left";
+
+const FACING_DIRS: ActorFacingDir[] = ["front", "back", "right", "left"];
+const MOVE_DIR_EPS = 0.001;
+
+function parseFacingSuffix(key: string): ActorFacingDir | null {
+  for (const dir of FACING_DIRS) {
+    if (key === dir || key.endsWith(`_${dir}`)) return dir;
+  }
+  return null;
+}
+
 /**
  * Reusable world actor base class.
  *
@@ -134,6 +147,23 @@ export default class Actor {
   protected _animationTransitionMs: number;
   protected _isMoving: boolean;
   protected _facingX: number;
+  /**
+   * True when sprite sheet names include directional clips
+   * (`walk_front`, `idle_back`, `walking_right`, …).
+   * Locomotion + facing are then handled in `_setMovementState`.
+   */
+  protected _directionalMode: boolean;
+  /** Current cardinal facing (front = toward camera / +Y). */
+  protected _facingDir: ActorFacingDir;
+  /** Preferred move clip base when several exist (`walk` | `walking` | `run`). */
+  protected _moveClipBase: string;
+  /** True when at least one `idle_*` directional strip exists. */
+  protected _hasDirectionalIdle: boolean;
+  /**
+   * When set, always draw this frame index (e.g. 0 = freeze first frame of a
+   * walk strip when there is no separate idle art).
+   */
+  protected _holdFrame: number | null;
   protected _shadow: ActorShadowConfig;
 
   constructor(
@@ -166,6 +196,11 @@ export default class Actor {
     this._animStartedAt = performance.now();
     this._isMoving = false;
     this._facingX = 1;
+    this._directionalMode = false;
+    this._facingDir = "front";
+    this._moveClipBase = "walk";
+    this._hasDirectionalIdle = false;
+    this._holdFrame = null;
     this._shadow = normalizeActorShadowConfig(options.shadow);
     this._configureSpriteSheets(sprite, options.activeAnimation);
   }
@@ -187,11 +222,38 @@ export default class Actor {
     const allKeys = Object.keys(this._animations);
     this._idleAnimKey =
       allKeys.find((k) => k.includes("default_animation")) ??
+      allKeys.find((k) => k === "idle" || k.startsWith("idle_")) ??
       allKeys[0] ??
       "idle";
+    const moveKeys = allKeys.filter(
+      (k) =>
+        k.includes("walk") || k.includes("run") || k.includes("walking"),
+    );
     this._moveAnimKey =
-      allKeys.find((k) => k.includes("walk") || k.includes("run")) ??
-      this._idleAnimKey;
+      moveKeys.length === 1 ? moveKeys[0] : this._idleAnimKey;
+
+    // Directional mode: any clip named *_front / *_back / *_right / *_left
+    const directionalKeys = allKeys.filter((k) => parseFacingSuffix(k));
+    this._directionalMode = directionalKeys.length >= 2;
+    this._hasDirectionalIdle = allKeys.some(
+      (k) =>
+        (k.startsWith("idle_") || k.includes("default_animation_")) &&
+        parseFacingSuffix(k),
+    );
+    if (allKeys.some((k) => k.startsWith("walk_"))) this._moveClipBase = "walk";
+    else if (allKeys.some((k) => k.startsWith("walking_")))
+      this._moveClipBase = "walking";
+    else if (allKeys.some((k) => k.startsWith("run_")))
+      this._moveClipBase = "run";
+    else this._moveClipBase = "walk";
+
+    // Infer initial facing from preferred active / idle_front / first dir sheet
+    const seedKey =
+      this._normalizeAnimationKey(activeAnimation) ||
+      allKeys.find((k) => k === "idle_front" || k.endsWith("_front")) ||
+      directionalKeys[0] ||
+      "";
+    this._facingDir = parseFacingSuffix(seedKey) ?? "front";
 
     const mapWidth = Number(sprite.mapWidth);
     const mapHeight = Number(sprite.mapHeight);
@@ -216,9 +278,125 @@ export default class Actor {
         ? (heightPx / baseMapHeight) * 1000
         : DEFAULT_H;
 
-    this._activeAnimation =
-      this._resolveAnimationKey(activeAnimation) ?? this._idleAnimKey;
+    if (this._directionalMode) {
+      this._applyDirectionalLocomotion(false);
+    } else {
+      this._activeAnimation =
+        this._resolveAnimationKey(activeAnimation) ?? this._idleAnimKey;
+      this._holdFrame = null;
+    }
     this._animStartedAt = performance.now();
+  }
+
+  get facingDir(): ActorFacingDir {
+    return this._facingDir;
+  }
+
+  get activeAnimationName(): string {
+    return this._activeAnimation;
+  }
+
+  get isDirectional(): boolean {
+    return this._directionalMode;
+  }
+
+  /**
+   * Apply locomotion/facing from a movement intent (input or pathfinding).
+   * `dx`/`dy` are direction (not required to be normalized); zero = idle.
+   */
+  applyLocomotionIntent(dx: number, dy: number): void {
+    this._setMovementState(dx, dy);
+  }
+
+  /**
+   * Resolve a directional strip name for a clip + facing, with fallbacks.
+   * e.g. clip `walk`, dir `front` → `walk_front` | `walking_front` | …
+   */
+  private _resolveDirectionalClip(
+    clip: string,
+    dir: ActorFacingDir,
+  ): string | null {
+    const bases =
+      clip === "idle"
+        ? ["idle", "default_animation"]
+        : clip === "walk" || clip === "walking"
+          ? [this._moveClipBase, "walk", "walking", "run"]
+          : [clip, this._moveClipBase, "walk", "walking", "run"];
+
+    const seen = new Set<string>();
+    for (const base of bases) {
+      if (!base || seen.has(base)) continue;
+      seen.add(base);
+      const exact = `${base}_${dir}`;
+      if (this._animations[exact]) return exact;
+    }
+    // Any sheet for this facing (last resort)
+    const any = Object.keys(this._animations).find(
+      (k) => parseFacingSuffix(k) === dir,
+    );
+    return any ?? null;
+  }
+
+  private _updateFacingFromDelta(dx: number, dy: number): void {
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    if (ax < MOVE_DIR_EPS && ay < MOVE_DIR_EPS) return;
+
+    if (ay >= ax) {
+      this._facingDir = dy > 0 ? "front" : "back";
+      this._facingX = 1;
+      return;
+    }
+
+    if (dx < 0) {
+      const hasLeft =
+        Boolean(this._animations.idle_left) ||
+        Boolean(this._animations[`${this._moveClipBase}_left`]) ||
+        Boolean(this._animations.walk_left) ||
+        Boolean(this._animations.walking_left) ||
+        Boolean(this._animations.run_left);
+      if (hasLeft) {
+        this._facingDir = "left";
+        this._facingX = 1;
+      } else {
+        this._facingDir = "right";
+        this._facingX = -1;
+      }
+      return;
+    }
+
+    this._facingDir = "right";
+    this._facingX = 1;
+  }
+
+  /** Pick clip strip + hold-frame for current moving/idle + facingDir. */
+  private _applyDirectionalLocomotion(moving: boolean): void {
+    if (moving) {
+      const name =
+        this._resolveDirectionalClip(this._moveClipBase, this._facingDir) ??
+        this._resolveDirectionalClip("walk", this._facingDir);
+      if (name) this._transitionToAnimation(name);
+      this._holdFrame = null;
+      return;
+    }
+
+    // Idle: prefer idle_* ; else freeze frame 0 of the move strip for this facing.
+    if (this._hasDirectionalIdle) {
+      const idleName = this._resolveDirectionalClip("idle", this._facingDir);
+      if (idleName) {
+        this._transitionToAnimation(idleName);
+        this._holdFrame = null;
+        return;
+      }
+    }
+
+    const moveName =
+      this._resolveDirectionalClip(this._moveClipBase, this._facingDir) ??
+      this._resolveDirectionalClip("walk", this._facingDir);
+    if (moveName) {
+      this._transitionToAnimation(moveName);
+      this._holdFrame = 0;
+    }
   }
 
   private _normalizeAnimationKey(name: string | undefined): string {
@@ -284,6 +462,22 @@ export default class Actor {
 
   setActiveAnimation(animationName: string, transitionMs?: number): void {
     this._transitionToAnimation(animationName, transitionMs);
+  }
+
+  /**
+   * Freeze on a single frame of the active strip, or pass null to resume.
+   * Use frame 0 on a walk sheet when the pack has no true idle animation.
+   */
+  setHoldFrame(frame: number | null): void {
+    if (frame == null || !Number.isFinite(Number(frame))) {
+      this._holdFrame = null;
+      return;
+    }
+    this._holdFrame = Math.max(0, Math.floor(Number(frame)));
+  }
+
+  get holdFrame(): number | null {
+    return this._holdFrame;
   }
 
   setSpriteSheets(
@@ -393,16 +587,24 @@ export default class Actor {
   }
 
   _setMovementState(dx: number, dy: number): void {
-    this._isMoving = dx !== 0 || dy !== 0;
-    const nextAnimation = this._isMoving
-      ? this._moveAnimKey
-      : this._idleAnimKey;
+    const moving =
+      Math.abs(dx) > MOVE_DIR_EPS || Math.abs(dy) > MOVE_DIR_EPS;
+    this._isMoving = moving;
+
+    if (this._directionalMode) {
+      if (moving) this._updateFacingFromDelta(dx, dy);
+      this._applyDirectionalLocomotion(moving);
+      return;
+    }
+
+    // Classic 2-way: one idle strip + one walk strip, flip with facingX.
+    const nextAnimation = moving ? this._moveAnimKey : this._idleAnimKey;
     if (nextAnimation !== this._activeAnimation) {
       this._transitionToAnimation(nextAnimation);
     }
-
-    if (dx > 0) this._facingX = 1;
-    if (dx < 0) this._facingX = -1;
+    this._holdFrame = null;
+    if (dx > MOVE_DIR_EPS) this._facingX = 1;
+    if (dx < -MOVE_DIR_EPS) this._facingX = -1;
   }
 
   moveByDirection(
@@ -481,6 +683,13 @@ export default class Actor {
   _getFrameIndex(now = performance.now()): number {
     const animation = this._animations[this._activeAnimation];
     if (!animation) return 0;
+
+    if (this._holdFrame != null) {
+      return Math.min(
+        this._holdFrame,
+        Math.max(0, animation.frameCount - 1),
+      );
+    }
 
     const elapsed = Math.max(0, now - this._animStartedAt);
     return Math.floor(elapsed / this._frameDurationMs) % animation.frameCount;

@@ -6,6 +6,7 @@ import type {
 } from "./capybara-sdk-globals";
 
 declare module "*.js";
+declare module "*.css";
 
 declare global {
   type GameServerClient = SDKGameServerClient;
@@ -15,6 +16,8 @@ declare global {
 
   interface Window {
     gameId?: string;
+    /** Display title for the production loading gate (set in index.html). */
+    game_title?: string;
     webkitAudioContext?: typeof AudioContext;
     GameServerClient: new (
       options?: SDKGameServerClientOptions,

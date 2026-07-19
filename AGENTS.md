@@ -11,11 +11,14 @@ The public engine interface is **`src/Game.ts`**. Prefer that facade over `src/c
 ## Development Commands
 
 ```bash
-# Development (watch mode with CSS and TypeScript bundling)
+# Development (Vite: live reload + Tailwind/PostCSS)
 npm run dev
 
 # Type checking
 npm run typecheck
+
+# Production build (Vite → dist/)
+npm run build
 ```
 
 ## Architecture & Code Organization
@@ -288,8 +291,9 @@ Do not cast type to unknow to bypass typescript error
 
 ## Build Output
 
-- Production build outputs to `dist/` with hashed filenames
-- `scripts/build.ts` bundles TypeScript with esbuild, builds CSS with Tailwind, and updates `index.html` with hashed asset references
+- **Dev:** `npm run dev` runs Vite on port 3000 (auto-opens browser, full-page reload on save)
+- **Production:** `npm run build` typechecks then runs `vite build` → `dist/` with hashed assets and rewritten `index.html`
+- CSS uses root `styles.css` with `@import "tailwindcss"` and the `@tailwindcss/vite` plugin (no PostCSS config)
 - TypeScript strict mode is **disabled** for flexibility during rapid prototyping
 
 ## Agent harness layout

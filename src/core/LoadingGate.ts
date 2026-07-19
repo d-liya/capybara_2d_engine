@@ -4,18 +4,32 @@ const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
 
+function isE2bHost(hostname: string): boolean {
+  // e.g. 3000-xxxx.e2b.dev, *.e2b.app
+  return (
+    hostname === "e2b.dev" ||
+    hostname === "e2b.app" ||
+    hostname.endsWith(".e2b.dev") ||
+    hostname.endsWith(".e2b.app")
+  );
+}
+
 function isDevMode(): boolean {
   const host = window.location.hostname;
   const path = window.location.pathname;
   if (path.includes("/workspace/")) {
     return true;
   }
+  if (isE2bHost(host)) {
+    return true;
+  }
   return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
 }
 
 function injectLoadingStyles(): void {
-  if (document.getElementById(STYLE_ID)) {
-    return;
+  const existing = document.getElementById(STYLE_ID);
+  if (existing) {
+    existing.remove();
   }
 
   const style = document.createElement("style");
@@ -88,6 +102,7 @@ function injectLoadingStyles(): void {
       letter-spacing: 0.04em;
       text-transform: uppercase;
       line-height: 1;
+      text-align: center;
     }
 
     .cpy-loading-subtitle {
@@ -97,42 +112,42 @@ function injectLoadingStyles(): void {
       text-indent: 0.34em;
       text-transform: uppercase;
       line-height: 1;
+      text-align: center;
     }
 
     .cpy-loading-subtitle:empty {
       display: none;
     }
 
-    /* Continue is solid white — no dim grey base, no second wipe. */
-    .cpy-loading-logo.is-continue {
+    /* Game title phase: solid white, no grey base / wipe; also a continue target. */
+    .cpy-loading-logo.is-title {
       cursor: pointer;
     }
 
-    .cpy-loading-logo.is-continue .cpy-loading-logo-dim {
+    .cpy-loading-logo.is-title .cpy-loading-logo-dim {
       visibility: hidden;
     }
 
-    .cpy-loading-logo.is-continue .cpy-loading-reveal-mask {
-      position: relative;
+    .cpy-loading-logo.is-title .cpy-loading-reveal-mask {
       width: 100% !important;
       transition: none;
     }
 
-    .cpy-loading-logo.is-continue .cpy-loading-logo-bright {
+    .cpy-loading-logo.is-title .cpy-loading-logo-bright {
       opacity: 1;
       transition: opacity 180ms ease;
     }
 
-    .cpy-loading-logo.is-continue:hover .cpy-loading-logo-bright,
-    .cpy-loading-logo.is-continue:focus-visible .cpy-loading-logo-bright {
+    .cpy-loading-logo.is-title:hover .cpy-loading-logo-bright,
+    .cpy-loading-logo.is-title:focus-visible .cpy-loading-logo-bright {
       opacity: 0.7;
     }
 
-    .cpy-loading-logo.is-continue:focus-visible {
+    .cpy-loading-logo.is-title:focus-visible {
       outline: none;
     }
 
-    .cpy-loading-logo.is-continue:active .cpy-loading-logo-bright {
+    .cpy-loading-logo.is-title:active .cpy-loading-logo-bright {
       opacity: 0.55;
     }
 
@@ -159,6 +174,52 @@ function injectLoadingStyles(): void {
       color: #fff;
       opacity: 0;
       animation: cpy-loading-fade-in 1s ease 0.5s forwards;
+    }
+
+    .cpy-loading-status.is-hidden {
+      opacity: 0 !important;
+      animation: none;
+      pointer-events: none;
+    }
+
+    /* Bottom Continue CTA — separate from the title card. */
+    .cpy-loading-continue {
+      position: absolute;
+      bottom: 48px;
+      left: 50%;
+      transform: translateX(-50%);
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: #fff;
+      font-family: "Geist Pixel", sans-serif;
+      font-size: clamp(14px, 3vw, 16px);
+      font-weight: 400;
+      font-synthesis: none;
+      letter-spacing: 0.28em;
+      text-indent: 0.28em;
+      text-transform: uppercase;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity ${LOGO_CROSSFADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .cpy-loading-continue.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .cpy-loading-continue:hover,
+    .cpy-loading-continue:focus-visible {
+      opacity: 0.7;
+      outline: none;
+    }
+
+    .cpy-loading-continue:active {
+      opacity: 0.55;
     }
 
     .cpy-loading-progress {
@@ -229,6 +290,20 @@ interface OverlayElements {
   revealMask: HTMLDivElement;
   progress: HTMLDivElement;
   progressLine: HTMLDivElement;
+  continueBtn: HTMLButtonElement;
+}
+
+function getGameTitle(): string {
+  const fromWindow =
+    typeof window.game_title === "string" ? window.game_title.trim() : "";
+  if (fromWindow) {
+    return fromWindow;
+  }
+  const fromDocument = document.title?.trim();
+  if (fromDocument) {
+    return fromDocument;
+  }
+  return "Game";
 }
 
 function createProductionOverlay(): OverlayElements {
@@ -263,6 +338,12 @@ function createProductionOverlay(): OverlayElements {
   status.className = "cpy-loading-status";
   status.textContent = "www.capybara.build";
 
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "cpy-loading-continue";
+  continueBtn.textContent = "Continue";
+  continueBtn.setAttribute("aria-label", "Continue");
+
   const progress = document.createElement("div");
   progress.className = "cpy-loading-progress";
 
@@ -272,6 +353,7 @@ function createProductionOverlay(): OverlayElements {
 
   overlay.appendChild(center);
   overlay.appendChild(status);
+  overlay.appendChild(continueBtn);
   overlay.appendChild(progress);
 
   return {
@@ -283,6 +365,7 @@ function createProductionOverlay(): OverlayElements {
     revealMask,
     progress,
     progressLine,
+    continueBtn,
   };
 }
 
@@ -320,6 +403,12 @@ function waitForTransitionEnd(
     };
     element.addEventListener("transitionend", onEnd);
     setTimeout(finish, fallbackMs + 40);
+  });
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
   });
 }
 
@@ -368,8 +457,17 @@ export function createCoreLoadingGate(
     canvas.style.visibility = "hidden";
   }
 
-  const { overlay, logo, dim, bright, revealMask, progress, progressLine } =
-    createProductionOverlay();
+  const {
+    overlay,
+    status,
+    logo,
+    dim,
+    bright,
+    revealMask,
+    progress,
+    progressLine,
+    continueBtn,
+  } = createProductionOverlay();
   document.body.appendChild(overlay);
 
   let isResolved = false;
@@ -404,49 +502,54 @@ export function createCoreLoadingGate(
   };
 
   const enableContinue = () => {
-    logo.classList.add("is-continue");
-    logo.setAttribute("role", "button");
-    logo.setAttribute("tabindex", "0");
-    logo.setAttribute("aria-label", "Continue");
-
     const onContinue = () => {
       emitContinueIfNeeded({ userActivated: true });
       resolveIfNeeded();
     };
 
-    logo.addEventListener("click", onContinue, { once: true });
-    logo.addEventListener(
-      "keydown",
-      (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onContinue();
-        }
-      },
-      { once: true },
-    );
+    // Both game title and bottom Continue dismiss the gate.
+    logo.setAttribute("role", "button");
+    logo.setAttribute("tabindex", "0");
+    logo.setAttribute("aria-label", "Continue");
+
+    for (const target of [logo, continueBtn] as HTMLElement[]) {
+      target.addEventListener("click", onContinue, { once: true });
+      target.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onContinue();
+          }
+        },
+        { once: true },
+      );
+    }
   };
 
-  const showContinuePrompt = async () => {
+  /**
+   * 1. Capybara presents + letter wipe + progress bar (full load)
+   * 2. When bar ends → opacity to game title (center)
+   * 3. Continue button fades in at the bottom
+   * 4. Clicking either the game title or Continue proceeds
+   */
+  const showTitleAndContinue = async () => {
     progress.classList.add("is-complete");
+    status.classList.add("is-hidden");
 
-    // Fade out title card, swap to solid white "Continue", fade it in.
     logo.classList.add("is-swapping");
     await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
 
-    setLogoCopy(dim, bright, "Continue", "");
+    setLogoCopy(dim, bright, getGameTitle(), "");
     revealMask.style.transition = "none";
     revealMask.style.width = "100%";
-    logo.classList.add("is-continue");
+    logo.classList.add("is-title");
 
-    // Next frame so the browser paints the new copy before fading in.
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve());
-    });
-
+    await nextFrame();
     logo.classList.remove("is-swapping");
     await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
 
+    continueBtn.classList.add("is-visible");
     enableContinue();
   };
 
@@ -456,7 +559,7 @@ export function createCoreLoadingGate(
   }, 50);
 
   setTimeout(() => {
-    void showContinuePrompt();
+    void showTitleAndContinue();
   }, ANIMATION_DURATION_MS);
 
   return {

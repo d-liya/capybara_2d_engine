@@ -2,8 +2,8 @@ import { createGame, type GameAPI, type GameMapData } from "../Game";
 import { toMapData } from "../data";
 
 /**
- * Minimal blank panel so `createGame` can boot before any assets are generated.
- * Replace with `toMapData(yourGeneratedMap)` after generation — see assets.md.
+ * Minimal blank panel so `createGame` can boot without a generated map.
+ * Full-walkable floor for character animation tests.
  */
 const STARTER_MAP: GameMapData = toMapData({
   name: "starter",
@@ -11,7 +11,13 @@ const STARTER_MAP: GameMapData = toMapData({
     "data:image/svg+xml," +
     encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720">
-  <rect width="100%" height="100%" fill="#12121a"/>
+  <defs>
+    <pattern id="g" width="40" height="40" patternUnits="userSpaceOnUse">
+      <rect width="40" height="40" fill="#1a1a24"/>
+      <path d="M40 0H0V40" fill="none" stroke="#2a2a38" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#g)"/>
 </svg>`,
     ),
   walkableBoxes: [{ bbox: [0, 0, 1000, 1000], label: "floor" }],
@@ -19,16 +25,9 @@ const STARTER_MAP: GameMapData = toMapData({
 });
 
 /**
- * Starter scene scaffold.
- *
- * Wire generated content here after using the Capybara asset pipeline:
- * 1. Generate a `base_map` (+ characters/props as needed)
- * 2. Register handles in `src/data/index.ts` and `src/data/assets.md`
- * 3. Swap `STARTER_MAP` for `toMapData(mapYourHandle)`
- * 4. `defineArchetype` / `spawnAtFeet` / `setControlledEntity` for the player
- * 5. Register systems, inputs, and widgets as needed
- *
- * Scene creation stays synchronous. Use `onAudioReady` for browser-gated music.
+ * Demo scene: directional character (`char.json` multi-clip pack).
+ * 4-way facing is native on Actor — no extra systems.
+ * WASD / arrows to move. Side uses `walk_right` flipped for left.
  */
 export function createMainScene(_options?: {
   onAudioReady?: (start: () => void) => void;
@@ -38,18 +37,6 @@ export function createMainScene(_options?: {
     map: STARTER_MAP,
     cameraEdgePadding: 120,
   });
-
-  // Example (uncomment after assets exist):
-  //
-  // import { mapMain, charPlayer, toMapData, toArchetype } from "../data";
-  // const game = createGame({ canvasId: "game", map: toMapData(mapMain) });
-  // game.defineArchetype("player", toArchetype(charPlayer, { speed: 190 }));
-  // const playerId = game.spawnAtFeet("player", 500, 820);
-  // game.setControlledEntity(playerId);
-  //
-  // let musicStarted = false;
-  // const startMusic = () => { /* getAudio + play */ };
-  // onAudioReady?.(startMusic);
 
   return game;
 }

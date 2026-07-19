@@ -99,7 +99,7 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
       root.className = "absolute inset-0 pointer-events-none";
       return root;
     },
-    update: ({ game, hudRoot, now }) => {
+    update: ({ game, hudRoot, canvas, now }) => {
       if (!root) return;
       const state = getNpcStateSafe(
         game as { getResource<T = unknown>(name: string): T },
@@ -110,7 +110,12 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
         return;
       }
 
+      // normalizedToCanvasPoint is canvas-local CSS px, not viewport client coords.
+      const canvasRect = canvas.getBoundingClientRect();
       const hudRect = hudRoot.getBoundingClientRect();
+      const canvasToHudX = canvasRect.left - hudRect.left;
+      const canvasToHudY = canvasRect.top - hudRect.top;
+
       for (const npc of Object.values(state.npcs)) {
         const entity = game.get(npc.entityId);
         if (!entity) continue;
@@ -138,8 +143,8 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
 
         node.name.textContent = npc.displayName;
         node.text.textContent = revealText(text, node.revealStartedAt, now);
-        const x = point.x - hudRect.left - 130;
-        const y = point.y - hudRect.top - node.root.offsetHeight - 64;
+        const x = point.x + canvasToHudX - 130;
+        const y = point.y + canvasToHudY - node.root.offsetHeight - 64;
         node.root.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
         node.root.style.opacity = "1";
         activeIds.add(npc.id);

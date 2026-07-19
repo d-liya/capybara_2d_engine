@@ -25,10 +25,246 @@ export interface GeneratedSpriteSheet {
   height?: number;
 }
 
-/** Generated character handle, e.g. the default export of `char_*.json`. */
+/**
+ * Legacy flat character: already has engine-ready `spriteSheets`.
+ * e.g. older `char_*.json` exports.
+ */
 export interface GeneratedCharacter {
-  label: string;
+  label?: string;
   spriteSheets: GeneratedSpriteSheet[];
+}
+
+/**
+ * Cardinal facing for directional character packs.
+ * - `front` — toward camera (+Y / down the map)
+ * - `back`  — away from camera
+ * - `right` — side; engine flips with facingX=-1 for left when no `left` strip
+ * - `left`  — optional dedicated left art (no flip)
+ */
+export type CharacterFacing = "front" | "back" | "right" | "left";
+
+export interface GeneratedDirectionalSheet {
+  animation?: string;
+  facing?: string;
+  url: string;
+  metadata?: {
+    width?: number;
+    height?: number;
+    frame_w?: number;
+    frame_h?: number;
+    frame_count?: number;
+    output_format?: string;
+  };
+}
+
+/**
+ * Preferred multi-clip directional character JSON.
+ *
+ * ```json
+ * {
+ *   "label": "pip",
+ *   "defaultAnimation": "idle",
+ *   "defaultFacing": "front",
+ *   "animations": {
+ *     "idle": {
+ *       "front": { "url": "...", "metadata": { "frame_count": 4, "frame_w": 64, "frame_h": 64 } },
+ *       "back":  { "url": "...", "metadata": { ... } },
+ *       "right": { "url": "...", "metadata": { ... } }
+ *     },
+ *     "walk": {
+ *       "front": { "url": "...", "metadata": { "frame_count": 8, ... } },
+ *       "back":  { ... },
+ *       "right": { ... }
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * Adapter emits sheet names `{clip}_{facing}` (`walk_front`, `idle_right`, …).
+ * Actor picks clip + facing natively on move. Missing `idle` → hold frame 0 of walk.
+ */
+export interface GeneratedDirectionalCharacter {
+  label?: string;
+  defaultAnimation?: string;
+  defaultFacing?: CharacterFacing | string;
+  /** Multi-clip map: clip name → facing → strip. */
+  animations?: Record<
+    string,
+    Partial<Record<CharacterFacing | string, GeneratedDirectionalSheet>>
+  >;
+  /**
+   * Legacy single-clip pack (still supported):
+   * top-level `front`/`back`/`right` + optional `animation` name.
+   */
+  animation?: string;
+  baseUrl?: string;
+  directions?: string[];
+  front?: GeneratedDirectionalSheet;
+  back?: GeneratedDirectionalSheet;
+  right?: GeneratedDirectionalSheet;
+  left?: GeneratedDirectionalSheet;
+}
+
+export type AnyGeneratedCharacter =
+  | GeneratedCharacter
+  | GeneratedDirectionalCharacter;
+
+const FACING_KEYS: CharacterFacing[] = ["front", "back", "right", "left"];
+
+function isSheetEntry(value: unknown): value is GeneratedDirectionalSheet {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as GeneratedDirectionalSheet).url === "string" &&
+    Boolean((value as GeneratedDirectionalSheet).url.trim())
+  );
+}
+
+/** Multi-clip `animations` map present. */
+export function isMultiClipDirectionalCharacter(
+  character: unknown,
+): character is GeneratedDirectionalCharacter {
+  if (!character || typeof character !== "object") return false;
+  const c = character as GeneratedDirectionalCharacter;
+  if (Array.isArray((c as GeneratedCharacter).spriteSheets)) return false;
+  const anims = c.animations;
+  if (!anims || typeof anims !== "object") return false;
+  return Object.values(anims).some(
+    (byFacing) =>
+      byFacing &&
+      typeof byFacing === "object" &&
+      FACING_KEYS.some((f) => isSheetEntry(byFacing[f])),
+  );
+}
+
+/** Legacy top-level front/back/right pack (single clip). */
+export function isLegacyDirectionalCharacter(
+  character: unknown,
+): character is GeneratedDirectionalCharacter {
+  if (!character || typeof character !== "object") return false;
+  const c = character as Record<string, unknown>;
+  if (Array.isArray(c.spriteSheets)) return false;
+  if (c.animations && typeof c.animations === "object") return false;
+  return FACING_KEYS.some((key) => isSheetEntry(c[key]));
+}
+
+/** True for either multi-clip or legacy directional packs. */
+export function isDirectionalCharacter(
+  character: unknown,
+): character is GeneratedDirectionalCharacter {
+  return (
+    isMultiClipDirectionalCharacter(character) ||
+    isLegacyDirectionalCharacter(character)
+  );
+}
+
+function frameSizeFromDirectional(
+  sheet: GeneratedDirectionalSheet,
+): { frameCount: number; width: number; height: number } {
+  const meta = sheet.metadata ?? {};
+  const frameCount = Math.max(1, Number(meta.frame_count) || 1);
+  const frameW =
+    Number(meta.frame_w) ||
+    (Number(meta.width) > 0 ? Number(meta.width) / frameCount : 0) ||
+    64;
+  const frameH = Number(meta.frame_h) || Number(meta.height) || 64;
+  return {
+    frameCount,
+    width: frameW,
+    height: frameH,
+  };
+}
+
+function pushDirectionalSheet(
+  sheets: EntitySpriteSheet[],
+  clip: string,
+  facing: string,
+  entry: GeneratedDirectionalSheet,
+): void {
+  const clipName = String(clip)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  const facingName = String(facing)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  if (!clipName || !facingName || !entry.url?.trim()) return;
+  const { frameCount, width, height } = frameSizeFromDirectional(entry);
+  sheets.push({
+    name: `${clipName}_${facingName}`,
+    url: entry.url.trim(),
+    frame_count: frameCount,
+    width,
+    height,
+  });
+}
+
+/**
+ * Expand multi-clip `animations` into horizontal-strip `spriteSheets`
+ * named `{clip}_{facing}` (e.g. `walk_front`, `idle_right`).
+ */
+export function multiClipDirectionalToSpriteSheets(
+  character: GeneratedDirectionalCharacter,
+): EntitySpriteSheet[] {
+  const sheets: EntitySpriteSheet[] = [];
+  const anims = character.animations ?? {};
+  for (const [clip, byFacing] of Object.entries(anims)) {
+    if (!byFacing || typeof byFacing !== "object") continue;
+    for (const facing of FACING_KEYS) {
+      const entry = byFacing[facing];
+      if (isSheetEntry(entry)) pushDirectionalSheet(sheets, clip, facing, entry);
+    }
+  }
+  return sheets;
+}
+
+/**
+ * Expand legacy single-clip pack (top-level front/back/right) into strips
+ * named `{animation}_{facing}` (default clip `walk`).
+ */
+export function legacyDirectionalToSpriteSheets(
+  character: GeneratedDirectionalCharacter,
+): EntitySpriteSheet[] {
+  const moveName = String(character.animation ?? "walk")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_") || "walk";
+  // Normalize "walking" stays "walking" so names match generator output;
+  // Actor accepts both walk_* and walking_*.
+  const sheets: EntitySpriteSheet[] = [];
+  for (const facing of FACING_KEYS) {
+    const entry = character[facing];
+    if (isSheetEntry(entry)) {
+      pushDirectionalSheet(sheets, moveName, facing, entry);
+    }
+  }
+  return sheets;
+}
+
+/** @deprecated Use multiClipDirectionalToSpriteSheets / toSpriteSheets. */
+export function directionalToSpriteSheets(
+  character: GeneratedDirectionalCharacter,
+): EntitySpriteSheet[] {
+  if (isMultiClipDirectionalCharacter(character)) {
+    return multiClipDirectionalToSpriteSheets(character);
+  }
+  return legacyDirectionalToSpriteSheets(character);
+}
+
+/** Normalize any supported character JSON into engine spriteSheets. */
+export function toSpriteSheets(
+  character: AnyGeneratedCharacter,
+): EntitySpriteSheet[] {
+  if (isMultiClipDirectionalCharacter(character)) {
+    return multiClipDirectionalToSpriteSheets(character);
+  }
+  if (isLegacyDirectionalCharacter(character)) {
+    return legacyDirectionalToSpriteSheets(character);
+  }
+  return Array.isArray((character as GeneratedCharacter).spriteSheets)
+    ? (character as GeneratedCharacter).spriteSheets
+    : [];
 }
 
 type PanelContent = GameMapData["panel"];
@@ -346,20 +582,45 @@ export function toMapData(
 /**
  * Build an archetype component bag from a generated character handle.
  *
- * Use the result with `game.defineArchetype`. Merge extra defaults (speed,
- * label, tooltip, etc.) via the second argument.
+ * Supports legacy `{ spriteSheets }` and directional packs
+ * (`front` / `back` / `right` / `left`).
  *
  * @example
- * import { charFarmer, toArchetype } from "../data";
- * game.defineArchetype("player", toArchetype(charFarmer, { speed: 190 }));
+ * import { charPlayer, toArchetype } from "../data";
+ * game.defineArchetype("player", toArchetype(charPlayer, { speed: 190 }));
  * const playerId = game.spawnAtFeet("player", 500, 820);
  */
 export function toArchetype(
-  character: GeneratedCharacter,
+  character: AnyGeneratedCharacter,
   extra: ComponentBag = {},
 ): ComponentBag {
+  const label =
+    (typeof character.label === "string" && character.label.trim()) ||
+    "character";
+  const sheets = toSpriteSheets(character);
+  let defaultFacing = "front";
+  let defaultAnimation: string | undefined;
+  if (isDirectionalCharacter(character)) {
+    if (typeof character.defaultFacing === "string") {
+      defaultFacing = character.defaultFacing.toLowerCase();
+    }
+    if (typeof character.defaultAnimation === "string") {
+      defaultAnimation = `${character.defaultAnimation.toLowerCase()}_${defaultFacing}`;
+    } else if (character.animation) {
+      defaultAnimation = `${String(character.animation).toLowerCase()}_${defaultFacing}`;
+    } else if (sheets.some((s) => s.name.startsWith("idle_"))) {
+      defaultAnimation = `idle_${defaultFacing}`;
+    } else if (sheets.some((s) => s.name.startsWith("walk_"))) {
+      defaultAnimation = `walk_${defaultFacing}`;
+    } else if (sheets[0]?.name) {
+      defaultAnimation = sheets[0].name;
+    }
+  }
   return {
-    spriteSheets: character.spriteSheets,
+    label,
+    spriteSheets: sheets,
+    ...(defaultAnimation ? { activeAnimation: defaultAnimation } : {}),
+    facingDir: defaultFacing,
     ...extra,
   };
 }
@@ -367,17 +628,9 @@ export function toArchetype(
 /**
  * Build the `sprite` payload for a bootstrap `player` config from a generated
  * character handle.
- *
- * @example
- * import { charFarmer, toPlayerSprite } from "../data";
- * const game = createGame({
- *   canvasId: "game",
- *   map: toMapData(mapFarm),
- *   player: { x: 500, y: 820, anchor: "feet", sprite: toPlayerSprite(charFarmer) },
- * });
  */
-export function toPlayerSprite(character: GeneratedCharacter): {
+export function toPlayerSprite(character: AnyGeneratedCharacter): {
   spriteSheets: EntitySpriteSheet[];
 } {
-  return { spriteSheets: character.spriteSheets };
+  return { spriteSheets: toSpriteSheets(character) };
 }

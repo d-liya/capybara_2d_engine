@@ -15,6 +15,24 @@ function resolveTooltipBody(target: HoverTarget): string {
   return "";
 }
 
+/**
+ * `normalizedToCanvasPoint` returns CSS pixels relative to the canvas origin
+ * (not the viewport). Convert into coordinates relative to the HUD root so
+ * absolute-positioned widgets line up with the painted world.
+ */
+function canvasLocalToHudLocal(
+  canvasLocal: { x: number; y: number },
+  canvas: HTMLCanvasElement,
+  hudRoot: HTMLElement,
+): { x: number; y: number } {
+  const canvasRect = canvas.getBoundingClientRect();
+  const hudRect = hudRoot.getBoundingClientRect();
+  return {
+    x: canvasLocal.x + canvasRect.left - hudRect.left,
+    y: canvasLocal.y + canvasRect.top - hudRect.top,
+  };
+}
+
 function anchorForTarget(
   target: HoverTarget,
   game: {
@@ -23,22 +41,27 @@ function anchorForTarget(
       y: number,
     ) => { x: number; y: number };
   },
+  canvas: HTMLCanvasElement,
+  hudRoot: HTMLElement,
 ): { x: number; y: number } | null {
   if (typeof game.normalizedToCanvasPoint !== "function") return null;
 
   const bounds = target.bounds;
+  let canvasLocal: { x: number; y: number } | null = null;
   if (bounds) {
-    return game.normalizedToCanvasPoint(
+    canvasLocal = game.normalizedToCanvasPoint(
       (Number(bounds.x1) + Number(bounds.x2)) / 2,
       Number(bounds.y1),
     );
+  } else if (Number.isFinite(target.x) && Number.isFinite(target.y)) {
+    canvasLocal = game.normalizedToCanvasPoint(
+      Number(target.x),
+      Number(target.y),
+    );
   }
 
-  if (Number.isFinite(target.x) && Number.isFinite(target.y)) {
-    return game.normalizedToCanvasPoint(Number(target.x), Number(target.y));
-  }
-
-  return null;
+  if (!canvasLocal) return null;
+  return canvasLocalToHudLocal(canvasLocal, canvas, hudRoot);
 }
 
 export function createTooltipWidget(): Widget {
@@ -50,6 +73,7 @@ export function createTooltipWidget(): Widget {
   const renderTarget = (
     target: HoverTarget | null,
     hudRoot: HTMLElement,
+    canvas: HTMLCanvasElement,
     game: {
       normalizedToCanvasPoint?: (
         x: number,
@@ -78,7 +102,8 @@ export function createTooltipWidget(): Widget {
     bodyEl.hidden = !body;
 
     const hudRect = hudRoot.getBoundingClientRect();
-    const anchor = anchorForTarget(target, game);
+    const anchor = anchorForTarget(target, game, canvas, hudRoot);
+    // clientX/clientY are already viewport coords — only those need hud offset.
     const fallbackX =
       target.clientX !== undefined
         ? target.clientX - hudRect.left
@@ -87,8 +112,8 @@ export function createTooltipWidget(): Widget {
       target.clientY !== undefined
         ? target.clientY - hudRect.top
         : hudRect.height / 2;
-    const anchorX = anchor ? anchor.x - hudRect.left : fallbackX;
-    const anchorY = anchor ? anchor.y - hudRect.top : fallbackY;
+    const anchorX = anchor ? anchor.x : fallbackX;
+    const anchorY = anchor ? anchor.y : fallbackY;
 
     // Make sure dimensions are current before clamping.
     const width = root.offsetWidth || 220;
@@ -150,7 +175,7 @@ export function createTooltipWidget(): Widget {
       root.append(cardEl);
       return root;
     },
-    update: ({ game, hudRoot }) => {
+    update: ({ game, hudRoot, canvas }) => {
       const target =
         typeof game.getCurrentHoverTarget === "function"
           ? game.getCurrentHoverTarget()
@@ -158,6 +183,7 @@ export function createTooltipWidget(): Widget {
       renderTarget(
         target,
         hudRoot,
+        canvas,
         game as {
           normalizedToCanvasPoint?: (
             x: number,

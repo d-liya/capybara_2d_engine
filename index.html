@@ -36,14 +36,18 @@
       href="https://www.capybara.build/apple-touch-icon.png"
     />
     <link rel="manifest" href="https://www.capybara.build/site.webmanifest" />
-    <link rel="stylesheet" href="dist/styles.css" />
   </head>
   <body>
     <div id="game-shell">
       <canvas id="game"></canvas>
       <div id="hud-root"></div>
     </div>
-    <script type="module" src="dist/main.js"></script>
+    <script>
+      // Shown on the production loading gate title card.
+      window.game_title = "Muggle World";
+      document.title = window.game_title;
+    </script>
+    <script type="module" src="/src/main.ts"></script>
     <script src="https://assets.capybara.build/js/game-api-client.js"></script>
     <style>
       /* Add overrides here */
