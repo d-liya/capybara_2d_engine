@@ -942,9 +942,9 @@ export interface GameAPI {
    * whose `name` contains `walk` or `run`). When the entity arrives, hits a
    * blocker, or you call `clearEntityDestination`, it switches back to idle
    * (first sheet whose `name` contains `default_animation` or `idle`). Ensure
-   * the entity archetype includes those sheets — check exact names in
-   * `src/data/assets.md`. You do not need to call `setEntityAnimation` yourself
-   * for basic destination movement.
+   * the entity archetype includes those sheets — check exact names in the
+   * character JSON under `src/data/`. You do not need to call
+   * `setEntityAnimation` yourself for basic destination movement.
    */
   setEntityDestination(
     id: EntityId,

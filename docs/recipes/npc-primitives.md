@@ -19,7 +19,7 @@ src/widgets/          DOM HUD/widgets such as NPC bubbles and tooltips
 
 ## Archetypes
 
-Use generated character handles and animation names from `src/data/assets.md`.
+Use generated character handles and animation names from `src/data/` generated JSON.
 
 Keep render/body defaults in archetypes. It is also fine to include small static metadata such as a stable `npcId`, `label`, and `tooltip` if that helps spawn/setup code avoid duplicating strings. Do **not** put long prompt strings, line transcripts, cooldown flags, patrol route state, or dialogue state in the archetype; those belong in NPC modules/resources/systems.
 
@@ -120,7 +120,7 @@ When a new game slice introduces friendly or neutral NPCs, do not leave them as 
 
 1. Spawn the NPC with `spawnAtFeet(...)` and register it with `registerNpc(...)` so it has stable named state.
 2. Mount `createNpcBubbleWidget` and use existing `barkNpc(...)`, or provide an equivalent bark subtitle/toast/dialogue resource so barks are readable.
-3. If `src/data/assets.md` shows a walk/run/move animation for that character, give it a short patrol route through open walkable space using `game.setEntityDestination(...)` or `moveNpcToPoint(...)`.
+3. If `src/data/` generated JSON shows a walk/run/move animation for that character, give it a short patrol route through open walkable space using `game.setEntityDestination(...)` or `moveNpcToPoint(...)`.
 4. If the character has only idle/default animation, keep it stationary; do not make it slide around.
 5. In a proximity system, face the NPC toward the player and trigger an authored bark before the player interacts.
 6. Gate the bark with a one-time flag and/or cooldown so it cannot repeat every frame or spam audio.
@@ -162,7 +162,7 @@ const proximity = getNpcPlayerProximity(game, "guide", { nearRadius: 120 });
 
 `moveNpcToPoint(...)` and `moveNpcToLocation(...)` are normal gameplay helpers. They can be used by scripts, schedules, cutscenes, or LLM tools.
 
-Before adding patrol movement, confirm the generated character exposes a walk/run/move-style animation in `src/data/assets.md`. If not, keep the NPC stationary and use facing/proximity barks instead.
+Before adding patrol movement, confirm the generated character exposes a walk/run/move-style animation in `src/data/` generated JSON. If not, keep the NPC stationary and use facing/proximity barks instead.
 
 ```ts
 import { moveNpcToLocation } from "../npc-primitives";

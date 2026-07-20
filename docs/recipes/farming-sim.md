@@ -9,13 +9,13 @@ Use this for day/season/crop/gold loops.
 
 ## Read first
 
-- `src/data/assets.md`
+- `src/data/` generated JSON
 - `docs/CAPYBARA_ENGINE.md`
 - `docs/recipes/map-placement.md`
 - `docs/recipes/inventory-tools.md`
 - `docs/recipes/save-load.md` only if persistence/autosave is requested
 
-`src/data/assets.md` wins for actual generated prop names, crop lifecycle item names, widget factories, and placement ids.
+`src/data/` prop/map JSON wins for actual generated prop names, crop lifecycle item names, and placement ids. Widget factory names come from `src/widgets/` exports.
 
 ## Live reference (this repo)
 
@@ -123,7 +123,7 @@ Use task-facing state numbers even if prop item names differ per generated game:
 - State 4: mid-growth
 - State 5: mature/harvestable crop
 
-Map these states to actual generated item names from `src/data/assets.md`:
+Map these states to actual generated item names from `src/data/` generated JSON:
 
 ```ts
 const cropImageByState: Partial<Record<CropState, string>> = {
@@ -135,7 +135,7 @@ const cropImageByState: Partial<Record<CropState, string>> = {
 };
 ```
 
-If `assets.md` lists different prop group/item names, use those exact names.
+If generated JSON in `src/data/` lists different prop group/item names, use those exact names.
 
 Typical tool transitions:
 
@@ -238,7 +238,7 @@ Do not save entity ids. Reconnect saved crop records to fresh overlay entities b
 
 The scene should only:
 
-1. Create game with `toMapData(<map handle>)`, using the generated map handle from `assets.md`.
+1. Create game with `toMapData(<map handle>)`, using the generated map handle from generated JSON in `src/data/`.
 2. Register default resources.
 3. Register archetypes, systems, inputs.
 4. Spawn player/NPC/crop overlays.

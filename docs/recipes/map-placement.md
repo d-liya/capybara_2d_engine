@@ -1,6 +1,6 @@
 ---
 name: map-placement
-description: Spawn and interact using generated map placement targets instead of hardcoded coordinates. Use when placing entities or reading placement zones from assets.md.
+description: Spawn and interact using generated map placement targets instead of hardcoded coordinates. Use when placing entities or reading placement zones from generated JSON in `src/data/`.
 ---
 
 # Recipe: Map Placement Targets
@@ -9,11 +9,11 @@ Use generated map placement data instead of hardcoded coordinates when possible.
 
 ## Source of truth
 
-Read `src/data/assets.md` for placement IDs, contents, boxes, grid metadata, labels, and gameplay intent.
+Read lean `map_*.json` `placement` entries (ids, contents, boxes, grid metadata) or use `game.getPlacementTargets()` at runtime.
 
-If `src/scenes/SCENES.md` or an older recipe mentions different asset/placement handles, `src/data/assets.md` wins for generated facts.
+If `src/scenes/SCENES.md` or an older recipe mentions different asset/placement handles, the map JSON / runtime targets win.
 
-Use `game.getPlacementTargets()` at runtime. Do not read map JSON just to discover placement names.
+Prefer `game.getPlacementTargets()` while coding gameplay; open lean map JSON when you need offline placement facts.
 
 ## Box coordinate convention
 
@@ -40,7 +40,7 @@ For one prop per placement target:
 
 ```ts
 const targets = game.getPlacementTargets();
-const cropTargets = targets.filter((target) => target.contents === "<prop_group>"); // contents value comes from assets.md
+const cropTargets = targets.filter((target) => target.contents === "<prop_group>"); // contents value comes from generated JSON in `src/data/`
 
 for (const target of cropTargets) {
   game.placeProp("cropOverlay", target, {
@@ -54,7 +54,7 @@ For a target with a point or single box, `game.placeProp(archetype, target, prop
 
 ## Grid target pattern
 
-Some placement targets describe one large zone plus grid metadata. At runtime each target exposes `gridDimensions: number[]` as **`[cols, rows]`** (e.g. `[4, 3]` = 4 columns × 3 rows). `assets.md` renders the same fact as `cols x rows` (e.g. `4 x 3`). `game.placeProp(...)` places one prop for the target; it does **not** automatically create one entity per grid cell.
+Some placement targets describe one large zone plus grid metadata. At runtime each target exposes `gridDimensions: number[]` as **`[cols, rows]`** (e.g. `[4, 3]` = 4 columns × 3 rows). Lean map JSON stores the same array on the placement entry. `game.placeProp(...)` places one prop for the target; it does **not** automatically create one entity per grid cell.
 
 For crop tiles, manually subdivide the target box and store the cell bounds in a resource.
 
@@ -121,7 +121,7 @@ export function expandPlacementGrid(
 }
 ```
 
-`getPlacementTargets()` is the source of truth for `gridDimensions` and `bounds`. If `assets.md` shows a grid for a target but the runtime `gridDimensions` is missing, pass explicit `fallbackCols` / `fallbackRows`; do not open generated JSON unless `assets.md` lacks the grid facts.
+`getPlacementTargets()` is the source of truth for `gridDimensions` and `bounds`. If lean map JSON shows a grid for a target but the runtime `gridDimensions` is missing, pass explicit `fallbackCols` / `fallbackRows`.
 
 ## Proximity checks (keyboard / tool range)
 

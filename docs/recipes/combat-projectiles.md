@@ -11,7 +11,7 @@ Use this for action RPG attacks, shooters, bullet/projectile mechanics, simple e
 
 - `docs/CAPYBARA_ENGINE.md`
 - `docs/recipes/shooter-game-design.md` for shooter/action-combat convention checklist
-- `src/data/assets.md` for actual character, enemy, weapon, projectile, prop, HUD, and audio handles
+- `src/data/` generated JSON for actual character, enemy, weapon, projectile, prop, HUD, and audio handles
 - `docs/recipes/world-pointer-input.md` if attacks aim at the pointer or use click/touch targeting
 - `docs/recipes/enemy-ai-waves.md` if enemies move, chase, attack, or spawn in waves
 - `docs/recipes/save-load.md` only if combat progress must persist
@@ -78,7 +78,7 @@ For many projects, projectile data can also live directly on projectile entity c
 
 ## Archetypes
 
-Use actual asset names from `src/data/assets.md`. Import `GameAPI` from `../Game` where needed.
+Use actual asset names from `src/data/` generated JSON. Import `GameAPI` from `../Game` where needed.
 
 ```ts
 function registerCombatArchetypes(
@@ -108,7 +108,7 @@ function registerCombatArchetypes(
 }
 ```
 
-If the asset registry has no projectile/enemy art, use the nearest available generated prop/static image or a simple labelled marker archetype. Do not invent handles that are not in `assets.md`.
+If the asset registry has no projectile/enemy art, use the nearest available generated prop/static image or a simple labelled marker archetype. Do not invent handles that are not in generated JSON under `src/data/`.
 
 ## Input pattern
 

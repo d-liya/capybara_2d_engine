@@ -11,7 +11,7 @@ Gameplay features should be implemented through:
 - `src/systems/`
 - `src/inputs/`
 - `src/widgets/`
-- `src/data/assets.md`
+- `src/data/` (generated JSON + `index.ts` exports)
 
 Only inspect or modify core if the public `GameAPI` cannot express the feature or there is a confirmed runtime bug.
 

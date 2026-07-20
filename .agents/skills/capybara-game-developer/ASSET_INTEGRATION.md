@@ -2,29 +2,36 @@
 
 **Required after every asset-generation tool call.** Generating assets does not finish the task — the agent must register and wire them into the engine before stopping (unless the user asked for generation only).
 
-Wire generated assets into gameplay. Read this **after** assets exist in `src/data/` / `src/data/assets.md`, and **before** treating generation as complete.
+Wire generated assets into gameplay. Read this **after** assets exist as JSON under `src/data/`, and **before** treating generation as complete.
 
 For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep GameAPI contracts, see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md).
 
 ## Source of truth
 
-1. **`src/data/assets.md`** — map/character/prop/audio/widget/placement names and handles for _this_ game. Never invent names from recipes or placeholders.
-2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `toArchetype`). Stable across regenerations.
+1. **`src/data/` generated JSON** — map/character/prop/audio handles for _this_ game (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; exports from `index.ts` / `props.ts`). Never invent names from recipes or placeholders.
+2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `mergeMapSprites`, `toArchetype`). Stable across regenerations.
 3. **`src/Game.ts`** — public gameplay API (`createGame`, `loadMap`, overlays, audio helpers, spawning).
 
-Do not open generated JSON just to find names or URLs. Do not hand-edit generated JSON unless explicitly asked.
+Prefer lean `map_*.json` (and `spriteIndex`) over opening `map_*.sprites.json` unless you need collision polygons. Do not hand-edit generated JSON unless explicitly asked.
 
-Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` below are **placeholders**. Copy real names from `assets.md`.
+Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` below are **placeholders**. Copy real names from generated JSON / `index.ts` exports.
 
 ## Registration checklist
 
 When new generated files land, register them before using them in a scene:
 
 1. **Maps / characters** — import `map_*.json` / `char_*.json` in [`src/data/index.ts`](../../../src/data/index.ts), export the handles, and include them in `allDataFiles`.
+   - **Map v2 sprites sidecar**: keep lean layout in `map_<id>.json` (`url`, `walkableBoxes`, `placement`, `overwrites`, optional `spriteIndex`). Put full `sprites[]` (cut-outs + `collision_polygons`) in `map_<id>.sprites.json`. Merge at registration:
+     ```ts
+     import mapFarmBase from "./map_farm.json";
+     import mapFarmSprites from "./map_farm.sprites.json";
+     export const mapFarm = mergeMapSprites(mapFarmBase, mapFarmSprites);
+     ```
+     Scenes still call `toMapData(mapFarm)`. Do not open the sprites sidecar just to find labels — use `spriteIndex` / `placement` on the lean map file.
 2. **Prop groups** — add each `prop_*.json` to `allPropFiles` in [`src/data/props.ts`](../../../src/data/props.ts).
 3. **Music / portraits / shared art** — add `{ name, url }` entries to [`src/data/common.json`](../../../src/data/common.json).
-4. **HUD art** — when a HUD is generated, a boilerplate `Hud...` widget scaffold is usually written under `src/widgets/`. Confirm factory names and layout notes in `assets.md`; adapt the scaffold (do not treat it as finished gameplay UI).
-5. **Manifests** — confirm handles and placement ids in `src/data/assets.md`. When a scene owns the map, update [`src/scenes/SCENES.md`](../../../src/scenes/SCENES.md).
+4. **HUD art** — when a HUD is generated, a boilerplate `Hud...` widget scaffold is usually written under `src/widgets/`. Confirm factory names from the scaffold export; adapt it (do not treat it as finished gameplay UI).
+5. **Scene status** — when a scene owns the map, update [`src/scenes/SCENES.md`](../../../src/scenes/SCENES.md) with the wired handles and placement usage.
 6. **Preload** — in `src/main.ts`, keep `preloadDataAssets(allDataFiles)` and `preloadAllAudio()`.
 
 ## Which API? (decision tree)
@@ -80,7 +87,7 @@ game.defineArchetype(
   }),
 );
 
-const spawn = game.getPlacementTargets().find((t) => t.id === "<spawn-id-from-assets.md>");
+const spawn = game.getPlacementTargets().find((t) => t.id === "<spawn-id-from-map-json>");
 const playerId = game.spawnAtFeet(
   "player",
   /* feet x,y from spawn box — see docs/recipes/spawning.md */,
@@ -176,7 +183,7 @@ Optional per-state physics: `blocksMovement: true` plus `collider`/`colliders` (
 
 ## Map walkability / collision (generated JSON)
 
-All of this lives in the generated `map_*.json` (`walkableBoxes`, colliders, masks). Prefer editing those boxes over gameplay hacks.
+All of this lives in the generated map files (`walkableBoxes` / placement in lean `map_*.json`; sprite colliders in `map_*.sprites.json`). Prefer editing those boxes over gameplay hacks.
 
 | Symptom                                        | Fix                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -245,7 +252,7 @@ Generated `Hud...` files are **temporary visual scaffolds**, not the engine cont
 
 ### Wiring generated HUD scaffolds
 
-1. Read the HUD contract and factory export name in `src/data/assets.md`.
+1. Read the HUD scaffold factory export under `src/widgets/`.
 2. Register a game-owned `ui` resource (`createUiState(panels, overlays)`).
 3. Mount with `useWidget(factory, { ui: { type: "panel" \| "overlay", id } })`.
 4. Toggle visibility with `game.patchUi(...)` — never `display: none` / `api.state.isOpen` on the root.
@@ -253,7 +260,7 @@ Generated `Hud...` files are **temporary visual scaffolds**, not the engine cont
 
 ```ts
 import { createUiState } from "../Game";
-import { createHudWidget } from "../widgets/HudExample"; // real name from assets.md
+import { createHudWidget } from "../widgets/HudExample"; // real name from generated JSON in `src/data/`
 
 game.registerResource(
   "ui",
@@ -310,7 +317,7 @@ After wiring a scene, update `src/scenes/SCENES.md` (active file, map/extensions
 
 - [PROMPT_GUIDE.md](PROMPT_GUIDE.md) — generate maps, overlays, characters, music, HUD art
 - [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md) — scene orchestration, GameAPI, pathfinding, VFX
-- [`src/data/assets.md`](../../../src/data/assets.md) — this game’s handles and placement ids
+- [`src/data/`](../../../src/data/) — generated JSON handles (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`)
 - [`src/scenes/SCENES.md`](../../../src/scenes/SCENES.md) — scene composition status
 - [`src/widgets/AGENTS.md`](../../../src/widgets/AGENTS.md) — widget hooks, z-index, text animation
 - [`docs/recipes/hud-widget.md`](../../../docs/recipes/hud-widget.md) — adapting generated HUD scaffolds

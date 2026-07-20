@@ -11,7 +11,7 @@ Use this when placing players, NPCs, crop overlays, pickups, or markers. Read `d
 
 All entity `x` / `y` values — in `spawn`, `patch`, `game.get`, and saved state — are **top-left** of the draw box in normalized map space (`0–1000` per panel).
 
-Generated placement boxes in `src/data/assets.md` are always `[y1, x1, y2, x2]`, not `[x1, y1, x2, y2]`. Convert before storing runtime hit-test bounds:
+Generated placement boxes in `src/data/` generated JSON are always `[y1, x1, y2, x2]`, not `[x1, y1, x2, y2]`. Convert before storing runtime hit-test bounds:
 
 ```ts
 function boxToBounds(box: readonly [number, number, number, number]) {
@@ -23,7 +23,7 @@ const bounds = boxToBounds([692, 235, 802, 290]);
 // bounds is { x1: 235, y1: 692, x2: 290, y2: 802, ... }
 ```
 
-Never write `const bounds = { x1: box[0], y1: box[1], ... }` for an `assets.md` placement box. That transposes the world position.
+Never write `const bounds = { x1: box[0], y1: box[1], ... }` for an generated JSON in `src/data/` placement box. That transposes the world position.
 
 ### Placement targets at runtime
 

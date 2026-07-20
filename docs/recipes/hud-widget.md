@@ -10,7 +10,7 @@ Use this when wiring or adapting generated HUD scaffolds.
 ## Read first
 
 - `src/widgets/AGENTS.md` — widget rules, hooks, text animation, input handling, and anatomy
-- Widget contracts in `src/data/assets.md`
+- Generated `Hud...` scaffolds under `src/widgets/` for factory export names and layout hotspots
 
 ## Recipe-specific notes
 

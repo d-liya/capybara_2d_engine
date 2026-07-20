@@ -15,13 +15,13 @@ Treat the repo as four layers:
    - auth/session
    - save/load
    - save/load
-3. **Generated facts** — `src/data/assets.md` and `src/scenes/SCENES.md`
+3. **Generated assets** — `src/data/` JSON (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`) plus `src/scenes/SCENES.md`
    - current map handles, map VFX/spritesheets, characters, animations, props, widgets, audio, placement targets
    - active/recommended scene composition
 4. **Gameplay modules** — `src/types`, `src/archetypes`, `src/systems`, `src/inputs`, `src/widgets`, `src/scenes`
    - game-specific behavior built on the facades above
 
-Avoid inspecting `src/core/` for normal gameplay work. Do not inspect generated JSON just to find names or URLs. Avoid SDK internals except `src/sdk/index.ts`.
+Avoid inspecting `src/core/` for normal gameplay work. Prefer lean map JSON over sprites sidecars unless you need polygons. Avoid SDK internals except `src/sdk/index.ts`.
 
 Keep game UI clean. Do not render developer/debug errors, stack traces, raw exception messages, or failed SDK response payloads into HUD/dialogue widgets. Log technical details to the browser console with `console.error(...)` / `console.warn(...)`; if the player needs feedback, show only neutral gameplay text such as "Something went wrong" or "Try again".
 
@@ -32,7 +32,11 @@ This section is the engine-side reference map once the task is clearly gameplay-
 For a gameplay feature, start with:
 
 ```txt
-src/data/assets.md
+src/data/index.ts              # exported handles
+src/data/map_*.json            # lean map layout / placement
+src/data/char_*.json           # characters / animations
+src/data/prop_*.json           # prop groups / items
+src/data/common.json           # shared art / audio names
 src/scenes/SCENES.md
 ```
 
@@ -59,11 +63,12 @@ Use `src/Game.ts` as reference only when you need exact TypeScript signatures.
 
 If generated/current-context docs conflict:
 
-1. `src/data/assets.md` wins for asset handles, character handles, animation names, prop groups/items, widget factory exports, audio names, and placement target facts.
+1. Generated JSON / exports in `src/data/` win for asset handles, character handles, animation names, prop groups/items, audio names, and placement target facts.
 2. `src/scenes/SCENES.md` wins for the currently active/recommended scene structure.
-3. After implementation, update `src/scenes/SCENES.md` to match reality.
+3. Widget factory names come from exports under `src/widgets/`.
+4. After implementation, update `src/scenes/SCENES.md` to match reality.
 
-Do not use stale example handles from recipes or scene manifests when `assets.md` lists different generated names.
+Do not use stale example handles from recipes or scene manifests when `src/data/` lists different generated names.
 
 ## Public gameplay extension points
 
@@ -229,7 +234,7 @@ For registering generated HUD scaffolds vs non-HUD widgets, see [ASSET_INTEGRATI
 Widgets are DOM/HUD plugins mounted with:
 
 ```ts
-game.useWidget(createHudWidget); // exact factory name comes from assets.md
+game.useWidget(createHudWidget); // exact factory name from src/widgets/ export
 ```
 
 Generated `Hud...` widgets are scaffolds produced alongside HUD art, not complete gameplay UI. They usually map generated HUD artwork to DOM overlays, hotspots, and approximate display positions. Preserve that visual layout, but replace placeholder labels/handlers with resource reads and event/input dispatch. Not every widget needs generated HUD art (bubbles, tooltips, markers, tints).
@@ -266,7 +271,7 @@ Represent bullets, spells, arrows, and thrown objects as normal entities with co
 
 ### Enemy behavior
 
-Use systems for simple patrol/chase/attack loops. Before moving an enemy/NPC, check `src/data/assets.md` for walk/run/move animations. If only idle/default animation exists, prefer stationary interaction, facing, ranged attacks, or proximity triggers.
+Use systems for simple patrol/chase/attack loops. Before moving an enemy/NPC, check `src/data/` generated JSON for walk/run/move animations. If only idle/default animation exists, prefer stationary interaction, facing, ranged attacks, or proximity triggers.
 
 Friendly/neutral NPCs should usually get a first-pass liveliness baseline instead of standing silently: a short authored patrol route when movement animation exists, facing toward the player when approached, and a simple one-time or cooldown-gated proximity bark before the player presses interact. Keep barks readable through `NpcBubbleWidget`, a bark subtitle, toast, or dialogue widget.
 
@@ -282,11 +287,11 @@ Use widgets for pointer listeners and store gameplay-relevant aim/selection stat
 
 ### Map spritesheet VFX
 
-Generated map data may include map-level spritesheets for environmental animation or triggered effects. Check `src/data/assets.md` first, then use the `Map spritesheets / VFX` section below for exact public API behavior.
+Generated map data may include map-level spritesheets for environmental animation or triggered effects. Check `src/data/` generated JSON first, then use the `Map spritesheets / VFX` section below for exact public API behavior.
 
 ## Stable GameAPI patterns
 
-> Identifiers like `mapMain`, `charPlayer`, `charNpc`, `"<prop_group>"`, `"<item>"`, `createHudWidget`, and `"<music_name>"` in these examples are **placeholders**. Real map/character/prop/widget/animation/audio names are game-specific — copy them from `src/data/assets.md`. The only names safe to copy verbatim are the stable API symbols (`createGame`, `toMapData`, `getPropItemUrl`, `spawnAtFeet`, etc.).
+> Identifiers like `mapMain`, `charPlayer`, `charNpc`, `"<prop_group>"`, `"<item>"`, `createHudWidget`, and `"<music_name>"` in these examples are **placeholders**. Real map/character/prop/widget/animation/audio names are game-specific — copy them from `src/data/` generated JSON. The only names safe to copy verbatim are the stable API symbols (`createGame`, `toMapData`, `getPropItemUrl`, `spawnAtFeet`, etc.).
 
 Import the stable API symbols from the facade, and generated handles + adapters from `src/data`:
 
@@ -307,17 +312,34 @@ import { mapMain, charPlayer, toMapData, toArchetype } from "../data";
 
 ### Map data shape (`toMapData`)
 
-Generated map JSON is **flat**. Map-level generated fields such as `masks`, `walkableBoxes`, `spriteSheets`, `placement`, and `mapOverlays` belong next to `url` in the generated `src/data/map_*.json` file:
+Generated map JSON is **flat**. Prefer a **lean index + sprites sidecar** so agents can read layout without polygon noise:
+
+| File | Contents |
+| ---- | -------- |
+| `map_<id>.json` | `name`, `url`, `walkableBoxes`, `placement`, `mapOverlays`, `overwrites`, optional `spriteIndex` / legacy `masks` / `spriteSheets` |
+| `map_<id>.sprites.json` | `{ "sprites": [ ... ] }` — cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
+
+Register with `mergeMapSprites`, then pass the merged handle to `toMapData`:
+
+```ts
+import mapMainBase from "./map_main.json";
+import mapMainSprites from "./map_main.sprites.json";
+export const mapMain = mergeMapSprites(mapMainBase, mapMainSprites);
+```
+
+Lean `map_*.json` shape:
 
 ```jsonc
 {
   "name": "...",
   "url": "...",
-  "masks": [...],
   "walkableBoxes": [...],
-  "spriteSheets": [...],
   "placement": [...],
-  "mapOverlays": [...]
+  "mapOverlays": [...],
+  "overwrites": [...],
+  "spriteIndex": [
+    { "label": "oak_tree", "category": "walkable_area", "pixel_bbox": { "x": 0, "y": 0, "w": 64, "h": 96 } }
+  ]
 }
 ```
 
@@ -428,7 +450,7 @@ Physical collision is optional per overlay state:
 
 Optional render placement can be set with `renderLayer: "background" | "ground" | "occluder" | "prop"` on the overlay or individual state. Default is `"occluder"`.
 
-Animations/facing (animation names come from `assets.md`):
+Animations/facing (animation names come from character JSON in `src/data/`):
 
 ```ts
 game.setEntityAnimation(playerId, "<character>_walk");
@@ -468,7 +490,7 @@ Navigation emits:
 - `navigation:arrived`
 - `navigation:failed`
 
-While an entity is following a destination, the runtime switches to a walk/run spritesheet and updates facing from movement direction. When the entity arrives, is blocked, or `clearEntityDestination` is called, it switches back to the idle/default spritesheet. This is automatic when the entity's `spriteSheets` use conventional names (`walk`/`run` for movement, `default_animation`/`idle` for stopping). Check exact names in `src/data/assets.md`; you do not need to call `setEntityAnimation` for basic destination movement.
+While an entity is following a destination, the runtime switches to a walk/run spritesheet and updates facing from movement direction. When the entity arrives, is blocked, or `clearEntityDestination` is called, it switches back to the idle/default spritesheet. This is automatic when the entity's `spriteSheets` use conventional names (`walk`/`run` for movement, `default_animation`/`idle` for stopping). Check exact names in `src/data/` generated JSON; you do not need to call `setEntityAnimation` for basic destination movement.
 
 Defaults are intentionally simple: static map obstacles only, no crowd avoidance, no entity/entity pushing. Use `cellSize` to tune accuracy/performance; smaller values are more accurate but slower. If the target point is inside a collider, the runtime snaps to a nearby walkable cell by default.
 
@@ -525,7 +547,7 @@ game.triggerMapEffect("door");
 game.triggerNearestMapEffect("door", player.x, player.y);
 ```
 
-Use `triggerNearestMapEffect(...)` for player interactions when multiple effects share the same tag. Do not spawn duplicate entity animations for map-authored effects unless the requested effect is not present in `assets.md`.
+Use `triggerNearestMapEffect(...)` for player interactions when multiple effects share the same tag. Do not spawn duplicate entity animations for map-authored effects unless the requested effect is not present in generated JSON under `src/data/`.
 
 ### Render ordering
 
@@ -569,7 +591,7 @@ For registering audio in `common.json` and the loading-gate bootstrap pattern, s
 Use this split by default:
 
 - **NPC barks/dialogue** -> default to scripted/resource-driven lines.
-- **Background music / ambient music beds** -> use provided audio assets from `src/data/assets.md` with `getAudio(...)`, `stopAudio(...)`, and low volume.
+- **Background music / ambient music beds** -> use provided audio assets from `src/data/` generated JSON with `getAudio(...)`, `stopAudio(...)`, and low volume.
 - **Non-vocal frequent SFX** -> footsteps, UI bleeps, impacts, pickups, weapon sounds, alerts, and short non-verbal stingers should usually be procedural WebAudio by default. Do not invent or import new SFX files unless the task explicitly provides them.
 
 For looping music, use `getAudio(name)`, but **never** call `play()` from passive scene startup. Browsers require a real user gesture. Use **both** paths below — production gate alone is not enough in local/dev:
@@ -660,7 +682,7 @@ Do not rely on CSS classes for canvas entities.
 
 ## Character rules
 
-Use `src/data/assets.md` animation names as the source of truth.
+Use `src/data/` character JSON animation names as the source of truth.
 
 - Prefer `game.setEntityDestination(...)` for obstacle-aware NPC movement.
 - If an NPC has no walk/run/move-style animation, avoid wandering by default unless the game explicitly accepts sliding/idle-only movement.

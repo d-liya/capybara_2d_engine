@@ -10,7 +10,7 @@ Use this for simple enemy behavior, patrol/chase/attack loops, spawn waves, surv
 ## Read first
 
 - `docs/CAPYBARA_ENGINE.md`
-- `src/data/assets.md` for actual enemy/NPC character handles, animation names, prop assets, placement targets, and audio
+- `src/data/` generated JSON for actual enemy/NPC character handles, animation names, prop assets, placement targets, and audio
 - `docs/recipes/combat-projectiles.md` if enemies or the player deal projectile/ranged damage
 - `docs/recipes/world-pointer-input.md` only if enemy targeting or commands use pointer input
 
@@ -18,7 +18,7 @@ Do not inspect `src/core/` for normal enemy logic. Use resources, systems, entit
 
 ## Animation and movement rules
 
-Before moving an enemy/NPC, check its available animations in `src/data/assets.md`.
+Before moving an enemy/NPC, check its available animations in `src/data/` generated JSON.
 
 - If it has a walk/run/move-style animation, a simple patrol/chase system is reasonable.
 - If it only has idle/default animation, keep it stationary and use facing, dialogue, ranged attacks, or proximity triggers instead.
@@ -70,7 +70,7 @@ Enemy components can include:
 
 ## Archetypes
 
-Use actual handles from `src/data/assets.md`. Import `GameAPI` and `EntitySpriteSheet` from `../Game` where needed.
+Use actual handles from `src/data/` generated JSON. Import `GameAPI` and `EntitySpriteSheet` from `../Game` where needed.
 
 ```ts
 function registerAnimatedEnemy(

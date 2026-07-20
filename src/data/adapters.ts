@@ -9,6 +9,9 @@ import { NORM } from "../utils/common";
  * - Generated map JSON is **flat** (`{ name, url, masks, spriteSheets, ... }`
  *   or the v2 shape `{ url, walkableBoxes, sprites }`), but `createGame({ map })`
  *   expects the nested `{ panel: { ... } }` shape.
+ * - Map v2 `sprites[]` (cut-outs + collision polygons) live in a sidecar
+ *   `map_*.sprites.json` so agents can read lean `map_*.json`. Merge with
+ *   `mergeMapSprites` before `toMapData`.
  * - Generated character JSON exposes `spriteSheets`, but archetypes/player
  *   config want those sheets nested under a component/sprite key.
  *
@@ -335,6 +338,22 @@ export interface GeneratedMapOverwrite {
   pixel_bbox: GeneratedPixelBBox;
 }
 
+/**
+ * Slim sprite summary for agent-readable `map_*.json` (no polygons).
+ * Full geometry stays in `map_*.sprites.json`.
+ */
+export interface GeneratedMapSpriteIndexEntry {
+  label: string;
+  category?: string;
+  pixel_bbox?: GeneratedPixelBBox;
+  spriteUrl?: string;
+}
+
+/** Sidecar file shape: `map_<id>.sprites.json`. */
+export interface GeneratedMapSpritesFile {
+  sprites?: GeneratedMapSprite[];
+}
+
 /** Flat generated map handle, e.g. the default export of `map_*.json`. */
 export interface GeneratedMap {
   name?: string;
@@ -346,10 +365,16 @@ export interface GeneratedMap {
   placement?: PanelContent["placement"];
   mapOverlays?: PanelContent["mapOverlays"];
   /**
-   * Map v2 cut-out sprites (boundary + walkable_area). Converted into masks
-   * with pixel_bbox + polygon colliders by `toMapData`.
+   * Map v2 cut-out sprites (boundary + walkable_area). Prefer loading these
+   * from `map_*.sprites.json` via `mergeMapSprites` so `map_*.json` stays lean.
+   * Converted into masks with pixel_bbox + polygon colliders by `toMapData`.
    */
   sprites?: GeneratedMapSprite[];
+  /**
+   * Optional slim sprite list for agents reading `map_*.json` without opening
+   * the sidecar. Runtime still needs full `sprites` (via merge).
+   */
+  spriteIndex?: GeneratedMapSpriteIndexEntry[];
   /** Visual/collision overwrites (spritesheet VFX or remove patches). */
   overwrites?: GeneratedMapOverwrite[];
 }
@@ -530,6 +555,49 @@ function normalizeOverwrites(
   return out;
 }
 
+function spritesToIndex(
+  sprites: GeneratedMapSprite[],
+): GeneratedMapSpriteIndexEntry[] {
+  return sprites.map((sprite) => ({
+    label: sprite.label,
+    ...(sprite.category ? { category: sprite.category } : {}),
+    ...(sprite.pixel_bbox ? { pixel_bbox: sprite.pixel_bbox } : {}),
+    ...(sprite.spriteUrl ? { spriteUrl: sprite.spriteUrl } : {}),
+  }));
+}
+
+/**
+ * Merge lean `map_*.json` with heavy `map_*.sprites.json`.
+ *
+ * Prefer this at registration time in `src/data/index.ts` so scenes keep using
+ * a single handle with `toMapData(mapFarm)`. Sidecar `sprites` replace any
+ * inline `sprites` on the base. If the base has no `spriteIndex`, one is
+ * derived from the merged sprites (runtime convenience only — write
+ * `spriteIndex` into `map_*.json` if agents should see it on disk).
+ *
+ * @example
+ * import mapFarmBase from "./map_farm.json";
+ * import mapFarmSprites from "./map_farm.sprites.json";
+ * export const mapFarm = mergeMapSprites(mapFarmBase, mapFarmSprites);
+ */
+export function mergeMapSprites(
+  map: GeneratedMap,
+  spritesFile?: GeneratedMapSpritesFile | GeneratedMapSprite[] | null,
+): GeneratedMap {
+  const sprites = Array.isArray(spritesFile)
+    ? spritesFile
+    : spritesFile?.sprites;
+  if (!sprites?.length) return map;
+
+  return {
+    ...map,
+    sprites,
+    spriteIndex: map.spriteIndex?.length
+      ? map.spriteIndex
+      : spritesToIndex(sprites),
+  };
+}
+
 /**
  * Wrap a flat generated map JSON handle into the engine's `{ panel }` `MapData`.
  *
@@ -538,6 +606,7 @@ function normalizeOverwrites(
  * - **Map v2**: `url` background + `walkableBoxes[{bbox}]` + `sprites[]` with
  *   `pixel_bbox` placement (map size from loaded background), cut-outs,
  *   `collision_polygons`, and `overwrites` (spritesheet / remove).
+ *   Prefer `sprites` from `mergeMapSprites(map_*.json, map_*.sprites.json)`.
  *
  * @example
  * import { mapFarm, toMapData } from "../data";

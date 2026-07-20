@@ -34,7 +34,7 @@ If the capybara-mcp tools are **not** available in the assistant's tool list:
 
 **Generating assets is not done until they are wired into the game.** After every successful asset-generation tool call:
 
-1. Read `src/data/assets.md` for the new handles, placement ids, overlays, audio names, and HUD/widget exports.
+1. Read the new generated JSON in `src/data/` (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`) and any HUD scaffolds under `src/widgets/` for handles, placement ids, overlays, audio names, and factory exports.
 2. Follow [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md) — register files (`index.ts` / `props.ts` / `common.json`), preload, and connect maps, characters, props, overlays, HUD scaffolds, and music into `createGame` / the active scene / `main.ts`.
 3. Do not stop at “assets were generated” or leave new JSON unused on disk. Wiring is part of the same task unless the user explicitly asks for generation only.
 
@@ -57,7 +57,7 @@ This applies to `box_2d`, colliders, walkable masks, placement boxes, overlay dr
 1. **Asset prompts** — follow perspective, composition, and style rules before generating maps, characters, props, audio, or HUD art.
 2. **Call the asset tool** — one generate call at a time; put related assets in a single batch (expect ~3–4+ minutes).
 3. **Wire immediately** — register and integrate per [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md) (required after step 2).
-4. **Gameplay code** — use the public facade (`src/Game.ts`), generated manifests (`src/data/assets.md`, `src/scenes/SCENES.md`), and gameplay modules. Do not modify `src/core/` unless fixing a platform issue.
+4. **Gameplay code** — use the public facade (`src/Game.ts`), generated JSON in `src/data/`, `src/scenes/SCENES.md`, and gameplay modules. Do not modify `src/core/` unless fixing a platform issue.
 5. **Cloud features** — import `sdk` from `src/sdk/index.ts` for save/load, auth, and multiplayer; do not open SDK internals by default.
 6. **Verify before handing off** — always run `npm run typecheck` first. Only after it passes, respond to the user and ask if they see anything in the browser.
 

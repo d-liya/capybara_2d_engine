@@ -1,6 +1,7 @@
 export {
   toArchetype,
   toMapData,
+  mergeMapSprites,
   toPlayerSprite,
   toSpriteSheets,
   directionalToSpriteSheets,
@@ -19,6 +20,8 @@ export {
   type GeneratedMap,
   type GeneratedMapOverwrite,
   type GeneratedMapSprite,
+  type GeneratedMapSpriteIndexEntry,
+  type GeneratedMapSpritesFile,
   type GeneratedPixelBBox,
   type GeneratedSpriteSheet,
   type GeneratedWalkableBox,
@@ -32,4 +35,15 @@ export {
   type PropItem,
 } from "./props";
 
+/**
+ * Register generated maps like:
+ *
+ *   import mapFarmBase from "./map_farm.json";
+ *   import mapFarmSprites from "./map_farm.sprites.json";
+ *   export const mapFarm = mergeMapSprites(mapFarmBase, mapFarmSprites);
+ *
+ * Keep full `sprites[]` (polygons) in `map_*.sprites.json`. Lean layout
+ * (`url`, walkableBoxes, placement, overwrites, optional spriteIndex) stays
+ * in `map_*.json` for agents. Put the merged handle in `allDataFiles`.
+ */
 export const allDataFiles: unknown[] = [];

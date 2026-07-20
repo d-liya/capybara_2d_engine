@@ -67,14 +67,14 @@ Use `game.getResource<RpgState>("rpg")` when reading it.
 
 ## Item definitions
 
-Keep item definitions in gameplay code/types unless they are generated assets. Use `src/data/assets.md` only for actual art handles.
+Keep item definitions in gameplay code/types unless they are generated assets. Use `src/data/` generated JSON only for actual art handles.
 
 ```ts
 export const ITEM_DEFS = {
   apple: {
     label: "Apple",
     kind: "consumable",
-    // Optional icon fields should use propGroup/itemName values copied from src/data/assets.md.
+    // Optional icon fields should use propGroup/itemName values copied from src/data/ generated JSON.
   },
   bronzeKey: {
     label: "Bronze Key",
@@ -83,7 +83,7 @@ export const ITEM_DEFS = {
 } as const;
 ```
 
-Only add prop groups/item names that exist in `src/data/assets.md`. If the exact requested item art does not exist, substitute the nearest listed prop and document the substitution in the plan.
+Only add prop groups/item names that exist in `src/data/` generated JSON. If the exact requested item art does not exist, substitute the nearest listed prop and document the substitution in the plan.
 
 ## Pickups and chests
 

@@ -11,7 +11,7 @@ Use this for click/touch targeting, aiming, shooting, spell placement, drag-sele
 
 - `docs/CAPYBARA_ENGINE.md`
 - `src/widgets/AGENTS.md` for widget hook details
-- `src/data/assets.md` for actual crosshair, cursor, marker, HUD, or tool assets
+- `src/data/` generated JSON for actual crosshair, cursor, marker, HUD, or tool assets
 - `docs/recipes/combat-projectiles.md` if pointer input fires projectiles or attacks
 - `docs/recipes/map-placement.md` if clicks interact with generated placement zones
 

@@ -5,7 +5,7 @@ They render in a DOM overlay above the game canvas and can be styled with Tailwi
 
 Generated `Hud...` files in this folder are **temporary visual scaffolds** from asset generation. They are not part of the engine contract — your game chooses panel/overlay ids and passes bindings at mount time.
 
-Before opening a generated widget, read its contract in `src/data/assets.md`.
+Before opening a generated widget, skim the factory export and comments in the `Hud...` scaffold under `src/widgets/`.
 
 ---
 

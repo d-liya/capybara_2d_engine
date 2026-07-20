@@ -9,7 +9,7 @@ Use this for hotbars where clicking a generated HUD slot selects a tool and atta
 
 ## Assets
 
-Use the actual tool prop group/item names from `src/data/assets.md`. Example/current tool handles may look like:
+Use the actual tool prop group/item names from `src/data/` generated JSON. Example/current tool handles may look like:
 
 ```ts
 getPropItemUrl("prop_tool_icons", "iron_hoe");

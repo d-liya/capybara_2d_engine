@@ -92,7 +92,7 @@ Audio sells RPG presence even when visuals are simple.
 - UI sounds for open/close/select/error/collect/objective update.
 - Music can layer or switch by state: exploration, danger, combat, resolution.
 
-Use generated audio handles from `src/data/assets.md`; do not invent asset names. Use procedural WebAudio for non-verbal UI/gameplay SFX.
+Use generated audio handles from `src/data/` generated JSON; do not invent asset names. Use procedural WebAudio for non-verbal UI/gameplay SFX.
 
 ## UI conventions
 

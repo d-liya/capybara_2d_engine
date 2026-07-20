@@ -32,13 +32,13 @@ npm run build
 - **`src/systems/`** — Per-frame gameplay logic (e.g., footstep audio, AI waves, combat). Systems receive `(dt, game)` and run each frame.
 - **`src/archetypes/`** — Reusable entity defaults (body/render prefabs).
 - **`src/widgets/`** — DOM HUD plugins mounted via `game.useWidget()`.
-- **`src/data/`** — Generated JSON content and TypeScript handles. `assets.md` is the agent-facing manifest.
+- **`src/data/`** — Generated JSON content and TypeScript handles (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`, exports in `index.ts`).
 - **`src/sdk/`** — Capybara SDK facade for save/load, auth, multiplayer. Import from `src/sdk/index.ts`.
 
 ### Data Flow
 
 1. **Generated assets** live in `src/data/` as JSON files with TypeScript exports
-2. **Adapters** in `src/data/adapters.ts` convert flat JSON to engine shapes: `toMapData()`, `toArchetype()`, `toPlayerSprite()`
+2. **Adapters** in `src/data/adapters.ts` convert flat JSON to engine shapes: `toMapData()`, `mergeMapSprites()`, `toArchetype()`, `toPlayerSprite()`. Map v2 cut-out sprites live in `map_*.sprites.json` and are merged before `toMapData`.
 3. **Scenes** import generated handles and adapters, call `createGame()`, register archetypes/systems/widgets, spawn entities
 4. **Systems** run per-frame logic via the GameAPI facade
 
@@ -48,7 +48,7 @@ npm run build
 
 This project uses **documentation-driven development**. When working with generated assets or engine patterns:
 
-1. **`src/data/assets.md`** — Source of truth for generated maps, characters, props, widgets, audio, animation names, placement targets
+1. **`src/data/` JSON** — Source of truth for generated maps, characters, props, audio, animation names, and placement (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; handles exported from `index.ts` / `props.ts`). Prefer lean `map_*.json` over `map_*.sprites.json` unless you need polygons.
 2. **`src/scenes/SCENES.md`** — Scene composition facts (resources, archetypes, systems, inputs, widgets)
 3. **`docs/recipes/`** — Optional implementation patterns (combat, inventory, NPCs, etc.)
 4. **DO NOT** reverse-engineer `src/core/` or SDK internals — build from the docs and facades
@@ -68,8 +68,8 @@ This project uses **documentation-driven development**. When working with genera
 When generating new assets (maps, characters, props, audio):
 
 1. **Generation alone is incomplete** — assets must be wired into the game
-2. After generation, update `src/data/assets.md` with new handles and facts
-3. Import handles in scenes using `src/data/` adapters
+2. Register new JSON in `src/data/index.ts` / `props.ts` / `common.json` and export handles
+3. Import those handles in scenes using `src/data/` adapters
 4. For common assets (HUD, reference art, music, SFX), add to `src/data/common.json` as `{ name, url }`
 
 ### Player Entity Pattern
