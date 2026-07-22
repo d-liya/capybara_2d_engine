@@ -194,4 +194,6 @@ Use simple shape checks in gameplay systems. The public facade does not provide 
 
 ## Mobile/touch
 
-Pointer events work for mouse and touch-capable browsers. For mobile action buttons, use widgets that call `api.game.dispatchInputAction("attack", { phase: "down" })` or emit gameplay events. Keep the same gameplay systems consuming the intent so keyboard, mouse, and touch share behavior.
+Pointer events work for mouse and touch-capable browsers. For mobile action buttons, use the default touch HUD (`createGame({ touchControls: { actions: [...] } })`) or widgets that call `api.game.dispatchInputAction("attack", { phase: "down", source: "touch" })` / emit gameplay events. Keep the same gameplay systems consuming the intent so keyboard, mouse, and touch share behavior.
+
+Movement uses the shared D-pad → `setMovementInput` path (same as WASD). Full checklist: `docs/recipes/mobile-touch-controls.md`.

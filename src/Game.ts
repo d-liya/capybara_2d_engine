@@ -1,6 +1,7 @@
 import GameMap from "./core/GameMap";
 import GameRuntime from "./core/GameRuntime";
 import { createTooltipWidget } from "./widgets/TooltipWidget";
+import { createTouchControlsWidget } from "./widgets/TouchControlsWidget";
 import {
   createStaticWorldContextFromGameMapData,
   NPC_WORLD_CONTEXT_RESOURCE,
@@ -18,15 +19,24 @@ export {
 } from "./types/UiState";
 export {
   getAudio,
+  getAudioEntry,
   getAudioUrl,
   listAudioNames,
   playAudio,
+  playDialogue,
   preloadAudio,
+  registerAudioAssets,
   stopAudio,
+  stopAudioChannel,
+  unlockAudio,
+  type AudioChannel,
+  type AudioPlayOptions,
 } from "./core/audio";
 export {
+  getCommonAsset,
   getCommonAssetUrl as getAssetUrl,
   type CommonAssetEntry,
+  type CommonAssetRole,
 } from "./data/common";
 export {
   getPropData,
@@ -37,7 +47,93 @@ export {
 
 export type * from "./Game.types";
 
-import type { GameAPI, GameConfig } from "./Game.types";
+import {
+  getAudioEntry,
+  playAudio as corePlayAudio,
+  registerAudioAssets,
+  stopAudio as coreStopAudio,
+  stopAudioChannel as coreStopAudioChannel,
+  unlockAudio as coreUnlockAudio,
+  type AudioChannel,
+} from "./core/audio";
+import type { CommonAssetEntry, CommonAssetRole } from "./data/common";
+import type {
+  AudioPlaybackHandle,
+  AudioPlayOptions,
+  GameAPI,
+  GameConfig,
+  GeneratedAssetCatalog,
+  GeneratedAudioAsset,
+  GeneratedDialogueEntry,
+} from "./Game.types";
+
+const dialogueById = new Map<string, GeneratedDialogueEntry>();
+
+function normalizeCommonRole(
+  entry: GeneratedAudioAsset,
+): CommonAssetRole | undefined {
+  const raw = entry.kind ?? entry.role;
+  if (raw === "bgm" || raw === "sfx" || raw === "voice") return raw;
+  if (raw === "dialogue" || raw === "tts") return "dialogue";
+  return undefined;
+}
+
+function generatedAudioToCommon(entry: GeneratedAudioAsset): CommonAssetEntry {
+  const merged = entry as GeneratedAudioAsset & CommonAssetEntry;
+  const name =
+    (typeof merged.name === "string" && merged.name.trim()) ||
+    (typeof merged.id === "string" && merged.id.trim()) ||
+    "audio";
+  return {
+    name,
+    label:
+      typeof merged.label === "string"
+        ? merged.label
+        : typeof merged.name === "string"
+          ? merged.name
+          : undefined,
+    url: merged.url,
+    assetId: merged.id ?? merged.assetId,
+    kind: merged.kind,
+    role: normalizeCommonRole(entry) ?? merged.role,
+    transcript:
+      typeof merged.transcript === "string" ? merged.transcript : undefined,
+    durationMs:
+      typeof merged.durationMs === "number" ? merged.durationMs : undefined,
+  };
+}
+
+function toFacadeChannel(channel?: string): AudioChannel | undefined {
+  if (
+    channel === "bgm" ||
+    channel === "sfx" ||
+    channel === "voice" ||
+    channel === "audio"
+  ) {
+    return channel;
+  }
+  return undefined;
+}
+
+function registerGeneratedAudioCatalog(catalog: GeneratedAssetCatalog): void {
+  const entries = (catalog.audio ?? []).map(generatedAudioToCommon);
+  registerAudioAssets(entries);
+  dialogueById.clear();
+  for (const line of catalog.dialogue ?? []) {
+    if (line?.id) dialogueById.set(line.id, line);
+  }
+  for (const entry of entries) {
+    if (entry.role !== "dialogue" || !entry.transcript) continue;
+    const id = entry.assetId ?? entry.name;
+    if (!dialogueById.has(id)) {
+      dialogueById.set(id, {
+        id,
+        text: entry.transcript,
+        audioId: entry.name,
+      });
+    }
+  }
+}
 
 /**
  * Create one game runtime and return the public primitive API.
@@ -73,17 +169,76 @@ export function createGame(config: GameConfig): GameAPI {
   const staticWorldContext = createStaticWorldContextFromGameMapData(
     config.map,
   );
-  const runtime = new GameRuntime(
-    config.canvasId,
-    map,
-    config.player,
-    config.cameraEdgePadding,
-  );
+  const runtime = new GameRuntime(config.canvasId, map, config.player, {
+    cameraEdgePadding: config.cameraEdgePadding,
+    maxViewportScale: config.maxViewportScale,
+    followZoom: config.followZoom,
+  });
 
   // Default widgets mounted here
   runtime.registerWidget(createTooltipWidget);
+  if (config.touchControls !== false) {
+    const touchOptions =
+      config.touchControls && typeof config.touchControls === "object"
+        ? config.touchControls
+        : {};
+    runtime.registerWidget(createTouchControlsWidget, {
+      ...touchOptions,
+    });
+  }
 
   const api: GameAPI = {
+    registerAudioCatalog: (catalog) => {
+      registerGeneratedAudioCatalog(catalog);
+    },
+    playAudio: (name, options = {}) => {
+      const element = corePlayAudio(name, {
+        loop: options.loop,
+        volume: options.volume,
+        channel: toFacadeChannel(options.channel),
+        restart: options.restart,
+      });
+      if (!element) return null;
+      const entry = getAudioEntry(name);
+      const channel = toFacadeChannel(options.channel) ??
+        (entry?.role === "bgm"
+          ? "bgm"
+          : entry?.role === "voice" || entry?.role === "dialogue"
+            ? "voice"
+            : entry?.role === "sfx"
+              ? "sfx"
+              : "audio");
+      const handle: AudioPlaybackHandle = {
+        name,
+        channel,
+        element,
+        stop: () => {
+          element.pause();
+          element.currentTime = 0;
+        },
+      };
+      return handle;
+    },
+    stopAudio: (name) => {
+      coreStopAudio(name);
+    },
+    stopAudioChannel: (channel) => {
+      coreStopAudioChannel(toFacadeChannel(channel) ?? "audio");
+    },
+    unlockAudio: () => coreUnlockAudio(),
+    getDialogue: (id) => {
+      const fromCatalog = dialogueById.get(id);
+      if (fromCatalog) return fromCatalog;
+      const entry = getAudioEntry(id);
+      if (entry?.transcript) {
+        return {
+          id: entry.assetId ?? entry.name,
+          text: entry.transcript,
+          audioId: entry.name,
+        };
+      }
+      return undefined;
+    },
     loadMap: (mapData, options = {}) => {
       runtime.loadMap(new GameMap(mapData), options);
       const nextStaticWorldContext =
@@ -128,6 +283,7 @@ export function createGame(config: GameConfig): GameAPI {
       runtime.getHoverTargetAt(clientX, clientY),
     getCurrentHoverTarget: () => runtime.getCurrentHoverTarget(),
     getPlacementTargets: () => runtime.getPlacementTargets(),
+    getCharacterPlacements: () => runtime.getCharacterPlacements(),
     getMapOverlays: () => runtime.getMapOverlays(),
     getMapOverlayState: (id) => runtime.getMapOverlayState(id),
     setMapOverlayState: (id, state) => runtime.setMapOverlayState(id, state),
@@ -172,6 +328,12 @@ export function createGame(config: GameConfig): GameAPI {
     onInputAction: (action, handler) => runtime.onInputAction(action, handler),
     dispatchInputAction: (action, payload = {}) => {
       runtime.dispatchInputAction(action, payload);
+    },
+    setMovementInput: (patch) => {
+      runtime.setMovementInput(patch);
+    },
+    clearMovementInput: () => {
+      runtime.clearMovementInput();
     },
     triggerMapEffect: (tag) => runtime.triggerMapEffect(tag),
     triggerNearestMapEffect: (tag, atX, atY) =>

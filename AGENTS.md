@@ -72,11 +72,26 @@ When generating new assets (maps, characters, props, audio):
 3. Import those handles in scenes using `src/data/` adapters
 4. For common assets (HUD, reference art, music, SFX), add to `src/data/common.json` as `{ name, url }`
 
+**Map edit UI sync (Capybara builder → this repo):** erase / state / VFX / grid patches arrive already compiled into `map_*.json` as unified `mapOverlays` (`kind`: `erase` | `state` | `vfx` | `grid`). Placed characters may appear as `characterPlacements` on the map JSON and in `src/data/assets.md`.
+
+- Do **not** paste overlay image URLs or recreate patches by hand.
+- Wire gameplay only: `game.setMapOverlayState(id, state)`, `game.triggerMapEffect(...)` for gameplay VFX, and `spawnAtFeet` / `toArchetype` for `characterPlacements`.
+- See `.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md`.
+
 ### Player Entity Pattern
 
 - Player is an entity, not a constructor argument
 - Spawn player archetype in the scene, then call `game.setControlledEntity(playerId)`
 - This keeps RPG and tower-defense style scenes unified
+
+### Mobile-first (required)
+
+Treat phone browsers as a first-class target whenever you add gameplay:
+
+1. **Never ship keyboard-only intent.** Bind discrete actions with `bindInputAction`, handle them with `onInputAction`, and expose the same names on touch via `createGame({ touchControls: { actions: [...] } })` or `dispatchInputAction`.
+2. **Movement is shared.** WASD and the default touch D-pad both drive `setMovementInput` / the controlled entity. Do not invent a separate touch movement system.
+3. **Pad the camera for HUD chrome.** Use `cameraEdgePadding` (and optional `followZoom` / `maxViewportScale`) so edge controls do not cover walkable corners. Default touch controls sit in the bottom corners (`zIndex` 100–299).
+4. **High-res maps.** The canvas uses a DPR-aware backing store; prefer `image-rendering: auto` for photographic maps. See `docs/recipes/mobile-touch-controls.md`.
 
 ### Scene Creation Pattern
 
@@ -87,6 +102,7 @@ Scenes should:
 - Also unlock looping BGM on first `keydown`/`pointerdown` — in local/dev `onContinue` is a no-op
 - Register resources, archetypes, systems, inputs, widgets in scene setup
 - Start SDK/save-load as async tasks that update resources when complete
+- Configure touch action buttons to match keyboard bindings (or pass `touchControls: false` only for non-interactive tools)
 
 Example:
 
@@ -103,12 +119,22 @@ export function createMainScene({
     canvasId: "game",
     map: toMapData(mapMain),
     cameraEdgePadding: 120,
+    touchControls: {
+      actions: [{ action: "interact", label: "E" }],
+    },
+  });
+
+  game.bindInputAction("interact", ["KeyE"]);
+  game.onInputAction("interact", ({ phase }) => {
+    if (phase !== "down") return;
+    game.emit("player:interact");
   });
 
   // Register resources, archetypes, systems, inputs, widgets
   game.defineArchetype("player", toArchetype(charPlayer, { speed: 190 }));
   const playerId = game.spawnAtFeet("player", 500, 820);
   game.setControlledEntity(playerId);
+
 
   // Browser-gated audio: production gate + first-input fallback (required in local/dev)
   let musicStarted = false;
@@ -236,6 +262,7 @@ When implementing specific gameplay features, consult `docs/recipes/`:
 - `npc-dialogue.md` — Scripted dialogue and dialogue widgets
 - `hud-widget.md` — HUD widget creation patterns
 - `world-pointer-input.md` — Pointer/click input handling
+- `mobile-touch-controls.md` — Touch D-pad + action buttons (keyboard parity)
 - `save-load.md` — Save/load persistence patterns
 - `map-placement.md` — Prop placement with generated placement boxes
 - `season-atmosphere.md` — Seasonal effects
@@ -285,6 +312,7 @@ game.onInputAction("interact", () => {
 game.dispatchInputAction("interact");
 ```
 
+Touch D-pad movement uses `game.setMovementInput` / `clearMovementInput` (same path as WASD). Configure default on-screen buttons with `createGame({ touchControls: { actions: [...] } })`. See `docs/recipes/mobile-touch-controls.md`.
 ## Notes
 
 Do not cast type to unknow to bypass typescript error

@@ -11,6 +11,91 @@
 export type EntityId = string;
 export type ComponentBag = Record<string, unknown>;
 
+/** Current generated-data contract understood by this engine. */
+export const GENERATED_ASSET_CONTRACT_VERSION = 1 as const;
+export type GeneratedAssetContractVersion =
+  typeof GENERATED_ASSET_CONTRACT_VERSION;
+
+export type AudioAssetKind = "bgm" | "sfx" | "voice";
+
+/** One generated audio asset. Unknown extra generator metadata is preserved. */
+export interface GeneratedAudioAsset {
+  id: string;
+  name?: string;
+  label?: string;
+  url: string;
+  kind?: AudioAssetKind;
+  /** Legacy generator alias for `kind`; `tts`/`dialogue` normalize to `voice`. */
+  role?: AudioAssetKind | "tts" | "dialogue";
+  loop?: boolean;
+  volume?: number;
+  channel?: string;
+  durationMs?: number;
+  transcript?: string;
+  characterId?: string;
+  [key: string]: unknown;
+}
+
+export interface GeneratedDialogueEntry {
+  id: string;
+  text: string;
+  audioId?: string;
+  characterId?: string;
+  speaker?: string;
+  [key: string]: unknown;
+}
+
+/** Versioned catalog shape written by generated asset tooling. */
+export interface GeneratedAssetCatalog {
+  version: GeneratedAssetContractVersion;
+  audio?: GeneratedAudioAsset[];
+  dialogue?: GeneratedDialogueEntry[];
+}
+
+export interface AudioPlayOptions {
+  loop?: boolean;
+  volume?: number;
+  channel?: string;
+  /** Stop existing playback in the selected channel before starting. */
+  exclusive?: boolean;
+  /** Restart a reused looping clip from the beginning. Default `true`. */
+  restart?: boolean;
+}
+
+export interface AudioPlaybackHandle {
+  readonly name: string;
+  readonly channel: string;
+  readonly element: HTMLAudioElement;
+  stop(): void;
+}
+
+/** Character position authored by the map editor; loading a map never spawns it. */
+export interface GeneratedCharacterPlacement {
+  assetId: string;
+  layerId: string;
+  label: string;
+  box_2d: Box2D;
+  width?: number;
+  height?: number;
+  thumbnailUrl?: string;
+}
+
+/** Spawn-ready feet anchor derived from a generated character placement. */
+export interface CharacterPlacementSpawnPlan
+  extends GeneratedCharacterPlacement {
+  feetX: number;
+  feetY: number;
+}
+
+export interface CharacterPlacementSpawnSpec {
+  archetype: string;
+  props?: ComponentBag;
+}
+
+export type CharacterPlacementResolver = (
+  placement: CharacterPlacementSpawnPlan,
+) => string | CharacterPlacementSpawnSpec | null | undefined;
+
 export interface PathPoint {
   /** Feet/ground world X in normalized map space. */
   x: number;
@@ -130,6 +215,8 @@ export interface MapOverlayTarget {
   renderY: number;
   blocksMovement: boolean;
   renderLayer: "background" | "ground" | "occluder" | "prop";
+  gridDimensions?: [number, number];
+  cellBboxes?: number[][];
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -277,20 +364,6 @@ export interface GameMapMaskEntry {
   type?: string;
 }
 
-/** Map overwrite entry (spritesheet VFX or remove patch). */
-export interface GameMapOverwriteEntry {
-  id: string;
-  label: string;
-  type: "spritesheet" | "remove";
-  /** spritesheet: loops (`background`) or triggered (`gameplay`). */
-  mode?: "background" | "gameplay";
-  url: string;
-  frame_count?: number;
-  pixel_bbox: GameMapPixelBBox;
-  /** Optional pre-resolved normalized bounds; usually filled at map-image load. */
-  box_2d?: Box2D;
-}
-
 /** Public Game facade type. Same pattern as PathPoint. */
 export interface GameMapPanelContent {
   url: string;
@@ -320,27 +393,32 @@ export interface GameMapPanelContent {
     id: string;
     anchorLabel?: string;
     gamePlay?: string;
+    /** Unified kind from edit-UI compiler. Omit for legacy state overlays. */
+    kind?: "erase" | "state" | "vfx" | "grid";
+    layout?: "single" | "multi_inplace" | "detached_stages";
     linkedObstacleLabel?: string;
     currentMapStateLabel?: string;
+    currentState?: string;
     states: Array<{
       name: string;
       label?: string;
       description?: string;
       url: string;
       box_2d: number[];
+      frameCount?: number;
+      frame_count?: number;
+      mode?: "background" | "gameplay";
+      clearsCollision?: boolean;
       collider?: Array<{ box_2d: number[]; label?: string }>;
       colliders?: Array<{ box_2d: number[]; label?: string }>;
       blocksMovement?: boolean;
       renderLayer?: "background" | "ground" | "occluder" | "prop";
     }>;
+    gridDimensions?: [number, number];
+    cellBboxes?: number[][];
     renderLayer?: "background" | "ground" | "occluder" | "prop";
     blocksMovement?: boolean;
   }>;
-  /**
-   * Map overwrites: spritesheet VFX (`background`/`gameplay`) or `remove`
-   * patches that cover an area and clear overlapping sprite collision.
-   */
-  overwrites?: GameMapOverwriteEntry[];
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -363,6 +441,9 @@ export interface GameMapPanelData {
  */
 export interface GameMapData extends GameMapPanelData {
   name?: string;
+  generatedAssetContractVersion?: GeneratedAssetContractVersion;
+  /** Authored placements are data only; game code explicitly decides what to spawn. */
+  characterPlacements?: GeneratedCharacterPlacement[];
   panel: GameMapPanelContent & {
     masks: GameMapMaskEntry[];
   };
@@ -457,6 +538,32 @@ export interface EntityShadowConfig {
   useEntityWidth?: boolean;
 }
 
+/** Directional movement flags shared by keyboard WASD and touch D-pad. */
+export interface MovementInput {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+/** Partial patch for `setMovementInput` — omitted keys are left unchanged. */
+export type MovementInputPatch = Partial<MovementInput>;
+
+export interface TouchControlAction {
+  /** Same action name used with `bindInputAction` / `onInputAction`. */
+  action: string;
+  /** Short label shown on the on-screen button. */
+  label: string;
+}
+
+export interface TouchControlsConfig {
+  /**
+   * Right-side action buttons. Prefer the same names you bind for keyboard
+   * (e.g. `interact`, `attack`) so one `onInputAction` handler serves both.
+   */
+  actions?: TouchControlAction[];
+}
+
 export interface GameConfig {
   canvasId: string;
   /**
@@ -467,6 +574,23 @@ export interface GameConfig {
    * stopping at the edge, this helps when we have hud elements at the edges.
    */
   cameraEdgePadding?: number;
+  /**
+   * Upper bound for CSS canvas scaling. Default `1` avoids magnifying
+   * generated ~1k–2.5k map art on large screens. Pass a higher value to allow
+   * upscaling, or `Infinity` to uncapped contain/cover fit.
+   */
+  maxViewportScale?: number;
+  /**
+   * Extra camera zoom on touch-primary devices so the player is not dwarfed by
+   * a full panel. Desktop stays at zoom `1`. Default `1.45`.
+   */
+  followZoom?: number;
+  /**
+   * Default touch D-pad + action buttons. Mounted automatically on
+   * touch-primary devices. Pass `false` to disable, or `{ actions: [...] }` to
+   * configure right-side buttons that call `dispatchInputAction`.
+   */
+  touchControls?: false | TouchControlsConfig;
   /**
    * Map data consumed by the facade.
    *
@@ -524,6 +648,27 @@ export interface GameConfig {
  * game.spawnCentered("crate", 560, 700);
  */
 export interface GameAPI {
+  /** Register/replace generated audio and dialogue entries. */
+  registerAudioCatalog(catalog: GeneratedAssetCatalog): void;
+
+  /** Play a generated/common audio name. Playback blocked by autoplay policy is queued. */
+  playAudio(
+    name: string,
+    options?: AudioPlayOptions,
+  ): AudioPlaybackHandle | null;
+
+  /** Stop every active instance for a name. */
+  stopAudio(name: string): void;
+
+  /** Stop all active audio in a logical mixer channel. */
+  stopAudioChannel(channel: string): void;
+
+  /** Retry gesture-blocked playback. Safe to call from pointer/key handlers. */
+  unlockAudio(): Promise<void>;
+
+  /** Return dialogue metadata from the currently registered generated catalog. */
+  getDialogue(id: string): GeneratedDialogueEntry | undefined;
+
   /**
    * Replace the current map with a separate non-stitched map.
    *
@@ -685,6 +830,11 @@ export interface GameAPI {
    * Return map-authored placement regions such as crop beds or interact points.
    */
   getPlacementTargets(): MapPlacementTarget[];
+
+  /**
+   * Return character placements authored on the map (data only — not spawned).
+   */
+  getCharacterPlacements(): GeneratedCharacterPlacement[];
 
   /**
    * Return stateful map overlays such as doors, safes, gates, or baked props.
@@ -883,6 +1033,22 @@ export interface GameAPI {
    * game.dispatchInputAction("interact", { phase: "down" });
    */
   dispatchInputAction(action: string, payload?: Record<string, unknown>): void;
+
+  /**
+   * Patch directional movement for the controlled entity (same path as WASD).
+   * Used by the touch D-pad. Activating any direction clears navigation on the
+   * controlled entity so pathfinding does not fight manual control.
+   *
+   * @example
+   * game.setMovementInput({ up: true });
+   * game.setMovementInput({ up: false, left: true });
+   */
+  setMovementInput(patch: MovementInputPatch): void;
+
+  /**
+   * Clear all directional movement flags (pointerup / blur / leave).
+   */
+  clearMovementInput(): void;
 
   /**
    * Trigger map gameplay spritesheet effects by label/mask tag.

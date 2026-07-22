@@ -64,9 +64,11 @@ If `ui` is omitted, the widget stays mounted and visible (useful for layout prev
 | `ui` (via mount options) | Visibility from `ui.panels` / `ui.overlays` |
 | `isVisible(api)` | Dynamic HUDs (tooltip, touch controls, atmosphere) |
 | `isInteractive(api)` | Pointer hits when visible |
-| `blocksWorldInput(api)` | Blocks WASD while **visible** |
+| `blocksWorldInput(api)` | Blocks WASD / D-pad while **visible** |
 
 The manager sets `hidden` and `pointer-events` after each `update`.
+
+Default touch controls live in `src/widgets/TouchControlsWidget.ts` (mounted by `createGame` unless `touchControls: false`). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Z-index layering
 

@@ -55,6 +55,7 @@ docs/recipes/combat-projectiles.md # combat, bullets, damage, cooldowns
 docs/recipes/enemy-ai-waves.md     # simple enemy behavior and wave spawning
 docs/recipes/rpg-quests-inventory.md # quests, inventory, pickups, equipment
 docs/recipes/world-pointer-input.md # click/touch aiming and world targeting
+docs/recipes/mobile-touch-controls.md # touch D-pad + action buttons (keyboard parity)
 ```
 
 Use `src/Game.ts` as reference only when you need exact TypeScript signatures.
@@ -225,7 +226,20 @@ game.onInputAction("interact", ({ phase }) => {
 });
 ```
 
-HUD widgets should dispatch the same input actions as keyboard/pointer controls.
+**Mobile-first:** never ship keyboard-only gameplay. Configure the default touch HUD with matching action names:
+
+```ts
+const game = createGame({
+  canvasId: "game",
+  map: toMapData(mapMain),
+  cameraEdgePadding: 120,
+  touchControls: {
+    actions: [{ action: "interact", label: "E" }],
+  },
+});
+```
+
+HUD widgets should dispatch the same input actions as keyboard/pointer controls (`dispatchInputAction`). Movement uses `setMovementInput` / `clearMovementInput` (WASD and the default D-pad share this path). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Widgets
 
@@ -237,6 +251,7 @@ Widgets are DOM/HUD plugins mounted with:
 game.useWidget(createHudWidget); // exact factory name from src/widgets/ export
 ```
 
+`createGame` mounts `TouchControlsWidget` by default (opt out with `touchControls: false`). It appears only on touch-primary devices.
 Generated `Hud...` widgets are scaffolds produced alongside HUD art, not complete gameplay UI. They usually map generated HUD artwork to DOM overlays, hotspots, and approximate display positions. Preserve that visual layout, but replace placeholder labels/handlers with resource reads and event/input dispatch. Not every widget needs generated HUD art (bubbles, tooltips, markers, tints).
 
 Widgets display resource state and dispatch intent. They should not own long-lived gameplay state. Gameplay-facing text feedback should go through a HUD/widget layer so players do not miss it. Use dialogue, bark subtitle, toast, prompt, objective, or result-message widgets for text such as NPC barks, quest updates, locked-door reasons, inventory-full messages, tutorial prompts, and action outcomes instead of relying only on console logs or tiny world-only labels. Every widget should reveal newly shown or changed player-facing text with a typing/typewriter effect; keep reveal progress in widget-local ephemeral state unless coordinating text across widgets requires a resource.
@@ -316,7 +331,7 @@ Generated map JSON is **flat**. Prefer a **lean index + sprites sidecar** so age
 
 | File | Contents |
 | ---- | -------- |
-| `map_<id>.json` | `name`, `url`, `walkableBoxes`, `placement`, `mapOverlays`, `overwrites`, optional `spriteIndex` / legacy `masks` / `spriteSheets` |
+| `map_<id>.json` | `name`, `url`, `walkableBoxes`, `placement`, `mapOverlays`, optional `spriteIndex` / legacy `masks` / `spriteSheets` |
 | `map_<id>.sprites.json` | `{ "sprites": [ ... ] }` — cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
 
 Register with `mergeMapSprites`, then pass the merged handle to `toMapData`:
@@ -336,7 +351,6 @@ Lean `map_*.json` shape:
   "walkableBoxes": [...],
   "placement": [...],
   "mapOverlays": [...],
-  "overwrites": [...],
   "spriteIndex": [
     { "label": "oak_tree", "category": "walkable_area", "pixel_bbox": { "x": 0, "y": 0, "w": 64, "h": 96 } }
   ]
@@ -369,6 +383,12 @@ const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120,
+  // Optional phone FOV / scale tuning:
+  // followZoom: 1.45,
+  // maxViewportScale: 1,
+  touchControls: {
+    actions: [{ action: "interact", label: "E" }],
+  },
 });
 ```
 

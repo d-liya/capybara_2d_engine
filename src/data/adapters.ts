@@ -1,4 +1,5 @@
 import type { ComponentBag, EntitySpriteSheet, GameMapData } from "../Game";
+import { GENERATED_ASSET_CONTRACT_VERSION } from "../Game.types";
 import { NORM } from "../utils/common";
 
 /**
@@ -319,22 +320,15 @@ export interface GeneratedWalkableBox {
 /**
  * Map v2 overwrite — visual (and sometimes collision) patch on the base map.
  *
- * - `spritesheet`: animated overlay; `mode` is `background` (loops) or
- *   `gameplay` (triggered via `game.triggerMapEffect`).
- * - `remove`: static image patch; overlapping map sprites lose collision
- *   (and their cut-out visual) because the obstacle is gone.
+ * Migrated into unified `mapOverlays` (`kind`: erase / vfx) by `toMapData`.
  */
 export interface GeneratedMapOverwrite {
   id?: string;
   label?: string;
   type: "spritesheet" | "remove";
-  /** spritesheet only: `background` | `gameplay`. Defaults to `background`. */
   mode?: "background" | "gameplay";
-  /** Image or spritesheet URL. */
   url: string;
-  /** spritesheet frame count. Defaults to 1. */
   frame_count?: number;
-  /** Placement crop on the map background (pixel coords). */
   pixel_bbox: GeneratedPixelBBox;
 }
 
@@ -354,8 +348,20 @@ export interface GeneratedMapSpritesFile {
   sprites?: GeneratedMapSprite[];
 }
 
+/** Character placement authored in the Capybara map editor. */
+export interface GeneratedCharacterPlacement {
+  assetId: string;
+  layerId: string;
+  label: string;
+  box_2d: [number, number, number, number] | number[];
+  width?: number;
+  height?: number;
+  thumbnailUrl?: string;
+}
+
 /** Flat generated map handle, e.g. the default export of `map_*.json`. */
 export interface GeneratedMap {
+  schemaVersion?: number;
   name?: string;
   url: string;
   /** Legacy mask-based obstacles. */
@@ -364,6 +370,7 @@ export interface GeneratedMap {
   walkableBoxes?: GeneratedWalkableBox[];
   placement?: PanelContent["placement"];
   mapOverlays?: PanelContent["mapOverlays"];
+  characterPlacements?: GeneratedCharacterPlacement[];
   /**
    * Map v2 cut-out sprites (boundary + walkable_area). Prefer loading these
    * from `map_*.sprites.json` via `mergeMapSprites` so `map_*.json` stays lean.
@@ -375,7 +382,7 @@ export interface GeneratedMap {
    * the sidecar. Runtime still needs full `sprites` (via merge).
    */
   spriteIndex?: GeneratedMapSpriteIndexEntry[];
-  /** Visual/collision overwrites (spritesheet VFX or remove patches). */
+  /** Legacy v2 visual patches — converted to `mapOverlays` in `toMapData`. */
   overwrites?: GeneratedMapOverwrite[];
 }
 
@@ -506,14 +513,67 @@ function spritesToMasks(
   return masks;
 }
 
-function normalizeOverwrites(
+function normalizeMapOverlayKind(
+  raw: unknown,
+): "erase" | "state" | "vfx" | "grid" | undefined {
+  if (typeof raw !== "string") return undefined;
+  const kind = raw.trim().toLowerCase();
+  if (
+    kind === "erase" ||
+    kind === "state" ||
+    kind === "vfx" ||
+    kind === "grid"
+  ) {
+    return kind;
+  }
+  return undefined;
+}
+
+function normalizeCellBboxes(raw: unknown): number[][] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: number[][] = [];
+  for (const cell of raw) {
+    if (!isFiniteBox(cell)) continue;
+    out.push([
+      Number(cell[0]),
+      Number(cell[1]),
+      Number(cell[2]),
+      Number(cell[3]),
+    ]);
+  }
+  return out.length ? out : undefined;
+}
+
+function mergeOverlaySources(
+  ...lists: Array<PanelContent["mapOverlays"] | undefined>
+): PanelContent["mapOverlays"] {
+  const byId = new Map<
+    string,
+    NonNullable<PanelContent["mapOverlays"]>[number]
+  >();
+  for (const list of lists) {
+    if (!list?.length) continue;
+    for (const overlay of list) {
+      if (!overlay?.id) continue;
+      byId.set(overlay.id, overlay);
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Convert legacy `overwrites[]` (pixel_bbox) into unified mapOverlays.
+ * Uses panel pixel dimensions when provided (defaults 1000×1000).
+ */
+function legacyOverwritesToMapOverlays(
   overwrites: GeneratedMapOverwrite[] | undefined,
-): NonNullable<PanelContent["overwrites"]> {
+  mapWidth: number,
+  mapHeight: number,
+): NonNullable<PanelContent["mapOverlays"]> {
   if (!overwrites?.length) return [];
-  const out: NonNullable<PanelContent["overwrites"]> = [];
+  const out: NonNullable<PanelContent["mapOverlays"]> = [];
 
   for (const [index, raw] of overwrites.entries()) {
-    const type = raw.type === "remove" ? "remove" : "spritesheet";
     const url = typeof raw.url === "string" ? raw.url.trim() : "";
     const pixel = raw.pixel_bbox;
     if (
@@ -527,29 +587,202 @@ function normalizeOverwrites(
       continue;
     }
 
-    const mode =
-      raw.mode === "gameplay" || raw.mode === "background"
-        ? raw.mode
-        : "background";
     const label =
       (typeof raw.label === "string" && raw.label.trim()) ||
       (typeof raw.id === "string" && raw.id.trim()) ||
       `overwrite_${index}`;
-
-    out.push({
-      id: typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : label,
-      label,
-      type,
-      mode,
-      url,
-      frame_count: Math.max(1, Number(raw.frame_count) || 1),
-      pixel_bbox: {
+    const id =
+      typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : label;
+    const box_2d = pixelBBoxToBox2d(
+      {
         x: Number(pixel.x),
         y: Number(pixel.y),
         w: Number(pixel.w),
         h: Number(pixel.h),
       },
+      mapWidth,
+      mapHeight,
+    );
+
+    if (raw.type === "remove") {
+      out.push({
+        id,
+        anchorLabel: label,
+        kind: "erase",
+        currentMapStateLabel: "default",
+        currentState: "default",
+        states: [{ name: "default", url, box_2d }],
+      });
+      continue;
+    }
+
+    const mode =
+      raw.mode === "gameplay" || raw.mode === "background"
+        ? raw.mode
+        : "background";
+    const frameCount = Math.max(1, Number(raw.frame_count) || 1);
+    out.push({
+      id,
+      anchorLabel: label,
+      kind: "vfx",
+      currentMapStateLabel: "default",
+      currentState: "default",
+      states: [
+        {
+          name: "default",
+          url,
+          box_2d,
+          frameCount,
+          mode,
+        },
+      ],
     });
+  }
+
+  return out;
+}
+
+function resolveGeneratedSchemaVersion(
+  map: GeneratedMap,
+): typeof GENERATED_ASSET_CONTRACT_VERSION | undefined {
+  const version = map.schemaVersion;
+  if (version == null) return undefined;
+  if (version === GENERATED_ASSET_CONTRACT_VERSION) {
+    return GENERATED_ASSET_CONTRACT_VERSION;
+  }
+  console.warn(
+    `[adapters] Unsupported map schemaVersion ${String(version)}; expected ${GENERATED_ASSET_CONTRACT_VERSION}`,
+  );
+  return undefined;
+}
+
+/**
+ * Normalize unified mapOverlays (edit-UI / generator). Accepts optional `kind`
+ * and state fields (`frameCount`, `mode`, `clearsCollision`, `currentState`).
+ */
+function normalizeMapOverlays(
+  overlays: PanelContent["mapOverlays"] | undefined,
+): NonNullable<PanelContent["mapOverlays"]> {
+  if (!overlays?.length) return [];
+  const out: NonNullable<PanelContent["mapOverlays"]> = [];
+
+  for (const [index, raw] of overlays.entries()) {
+    if (!raw || typeof raw !== "object") continue;
+    const id =
+      typeof raw.id === "string" && raw.id.trim()
+        ? raw.id.trim()
+        : `overlay_${index}`;
+    const statesRaw = Array.isArray(raw.states) ? raw.states : [];
+    const states = statesRaw
+      .map((state, stateIndex) => {
+        if (!state || typeof state !== "object") return null;
+        const url = typeof state.url === "string" ? state.url.trim() : "";
+        if (!url || !isFiniteBox(state.box_2d)) return null;
+        const name =
+          typeof state.name === "string" && state.name.trim()
+            ? state.name.trim()
+            : `state_${stateIndex}`;
+        const frameCount =
+          typeof (state as { frameCount?: unknown }).frameCount === "number"
+            ? Number((state as { frameCount: number }).frameCount)
+            : typeof (state as { frame_count?: unknown }).frame_count ===
+                "number"
+              ? Number((state as { frame_count: number }).frame_count)
+              : undefined;
+        const mode = (state as { mode?: unknown }).mode;
+        return {
+          name,
+          label:
+            typeof state.label === "string" ? state.label : undefined,
+          description:
+            typeof state.description === "string"
+              ? state.description
+              : undefined,
+          url,
+          box_2d: [
+            Number(state.box_2d[0]),
+            Number(state.box_2d[1]),
+            Number(state.box_2d[2]),
+            Number(state.box_2d[3]),
+          ] as number[],
+          ...(frameCount != null
+            ? { frameCount: Math.max(1, frameCount) }
+            : {}),
+          ...(mode === "gameplay" || mode === "background"
+            ? { mode }
+            : {}),
+          ...((state as { clearsCollision?: unknown }).clearsCollision ===
+          true
+            ? { clearsCollision: true }
+            : (state as { clearsCollision?: unknown }).clearsCollision ===
+                false
+              ? { clearsCollision: false }
+              : {}),
+          collider: state.collider,
+          colliders: state.colliders,
+          blocksMovement: state.blocksMovement,
+          renderLayer: state.renderLayer,
+        };
+      })
+      .filter((state): state is NonNullable<typeof state> => state != null);
+
+    if (!states.length) continue;
+
+    const kind = normalizeMapOverlayKind(
+      (raw as { kind?: unknown }).kind,
+    );
+    const current =
+      (typeof (raw as { currentState?: unknown }).currentState === "string" &&
+        (raw as { currentState: string }).currentState.trim()) ||
+      (typeof raw.currentMapStateLabel === "string" &&
+        raw.currentMapStateLabel.trim()) ||
+      states[0]!.name;
+
+    const layoutRaw = (raw as { layout?: unknown }).layout;
+    const layout =
+      layoutRaw === "single" ||
+      layoutRaw === "multi_inplace" ||
+      layoutRaw === "detached_stages"
+        ? layoutRaw
+        : undefined;
+
+    out.push({
+      id,
+      anchorLabel:
+        typeof raw.anchorLabel === "string" ? raw.anchorLabel : undefined,
+      gamePlay: typeof raw.gamePlay === "string" ? raw.gamePlay : undefined,
+      linkedObstacleLabel:
+        typeof raw.linkedObstacleLabel === "string"
+          ? raw.linkedObstacleLabel
+          : undefined,
+      ...(kind ? { kind } : {}),
+      ...(layout ? { layout } : {}),
+      currentMapStateLabel: current,
+      currentState: current,
+      states,
+      renderLayer: raw.renderLayer,
+      blocksMovement: raw.blocksMovement,
+      ...((raw as { gridDimensions?: unknown }).gridDimensions &&
+      Array.isArray((raw as { gridDimensions: unknown[] }).gridDimensions) &&
+      (raw as { gridDimensions: unknown[] }).gridDimensions.length === 2
+        ? {
+            gridDimensions: [
+              Number(
+                (raw as { gridDimensions: number[] }).gridDimensions[0],
+              ),
+              Number(
+                (raw as { gridDimensions: number[] }).gridDimensions[1],
+              ),
+            ] as [number, number],
+          }
+        : {}),
+      ...((): Record<string, unknown> => {
+        const cellBboxes = normalizeCellBboxes(
+          (raw as { cellBboxes?: unknown }).cellBboxes,
+        );
+        return cellBboxes ? { cellBboxes } : {};
+      })(),
+    } as NonNullable<PanelContent["mapOverlays"]>[number]);
   }
 
   return out;
@@ -605,8 +838,8 @@ export function mergeMapSprites(
  * - **Legacy** maps: `masks`, `spriteSheets`, `walkableBoxes[{box_2d}]`, …
  * - **Map v2**: `url` background + `walkableBoxes[{bbox}]` + `sprites[]` with
  *   `pixel_bbox` placement (map size from loaded background), cut-outs,
- *   `collision_polygons`, and `overwrites` (spritesheet / remove).
- *   Prefer `sprites` from `mergeMapSprites(map_*.json, map_*.sprites.json)`.
+ *   `collision_polygons`, and unified `mapOverlays` (`kind`: erase / state /
+ *   vfx / grid). Prefer `sprites` from `mergeMapSprites(map_*.json, map_*.sprites.json)`.
  *
  * @example
  * import { mapFarm, toMapData } from "../data";
@@ -629,16 +862,31 @@ export function toMapData(
     }
   }
 
+  const mapOverlays = normalizeMapOverlays(
+    mergeOverlaySources(
+      legacyOverwritesToMapOverlays(
+        map.overwrites,
+        options.panelPixelWidth ?? NORM,
+        options.panelPixelHeight ?? NORM,
+      ),
+      map.mapOverlays,
+    ),
+  );
+  const generatedAssetContractVersion = resolveGeneratedSchemaVersion(map);
+
   return {
     name: map.name,
+    ...(generatedAssetContractVersion
+      ? { generatedAssetContractVersion }
+      : {}),
+    characterPlacements: map.characterPlacements ?? [],
     panel: {
       url: map.url,
       masks,
       spriteSheets: map.spriteSheets ?? [],
       walkableBoxes: normalizeWalkableBoxes(map.walkableBoxes),
       placement: map.placement ?? [],
-      mapOverlays: map.mapOverlays ?? [],
-      overwrites: normalizeOverwrites(map.overwrites),
+      mapOverlays,
     },
     extensions: options.extensions,
     // Only set when the caller overrides — otherwise GameMap uses the loaded

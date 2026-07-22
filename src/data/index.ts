@@ -14,11 +14,11 @@ export {
   type AnyGeneratedCharacter,
   type CharacterFacing,
   type GeneratedCharacter,
+  type GeneratedCharacterPlacement,
   type GeneratedCollisionPoint,
   type GeneratedDirectionalCharacter,
   type GeneratedDirectionalSheet,
   type GeneratedMap,
-  type GeneratedMapOverwrite,
   type GeneratedMapSprite,
   type GeneratedMapSpriteIndexEntry,
   type GeneratedMapSpritesFile,
@@ -27,7 +27,12 @@ export {
   type GeneratedWalkableBox,
   type ToMapDataOptions,
 } from "./adapters";
-export { getCommonAssetUrl, type CommonAssetEntry } from "./common";
+export {
+  getCommonAsset,
+  getCommonAssetUrl,
+  type CommonAssetEntry,
+  type CommonAssetRole,
+} from "./common";
 export {
   getPropData,
   getPropItemUrl,
@@ -43,7 +48,7 @@ export {
  *   export const mapFarm = mergeMapSprites(mapFarmBase, mapFarmSprites);
  *
  * Keep full `sprites[]` (polygons) in `map_*.sprites.json`. Lean layout
- * (`url`, walkableBoxes, placement, overwrites, optional spriteIndex) stays
+ * (`url`, walkableBoxes, placement, mapOverlays, optional spriteIndex) stays
  * in `map_*.json` for agents. Put the merged handle in `allDataFiles`.
  */
 export const allDataFiles: unknown[] = [];

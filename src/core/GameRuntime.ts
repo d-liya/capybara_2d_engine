@@ -194,8 +194,17 @@ export default class GameRuntime {
     canvasId: string,
     map: GameMap,
     player?: PlayerSpawnConfig,
-    cameraEdgePadding = 0,
+    options: {
+      cameraEdgePadding?: number;
+      maxViewportScale?: number;
+      followZoom?: number;
+    } = {},
   ) {
+    const cameraEdgePadding = options.cameraEdgePadding ?? 0;
+    const followZoom =
+      Number.isFinite(options.followZoom) && (options.followZoom as number) > 0
+        ? (options.followZoom as number)
+        : CAMERA_FOLLOW_ZOOM;
     this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d");
     this.cameraController = new CameraViewportController(this.canvas, {
@@ -203,8 +212,9 @@ export default class GameRuntime {
       panelPixelHeight: map.panelPixelHeight,
       worldPixelWidth: map.worldPixelWidth,
       worldPixelHeight: map.worldPixelHeight,
-      followZoom: CAMERA_FOLLOW_ZOOM,
+      followZoom,
       edgePadding: cameraEdgePadding,
+      maxViewportScale: options.maxViewportScale,
     });
     this.camera = this.cameraController.camera;
     this.viewport = this.cameraController.viewport;
@@ -650,7 +660,10 @@ export default class GameRuntime {
       return null;
     }
 
-    const scale = this.viewport.cssScale || rect.width / this.canvas.width || 1;
+    const scale =
+      this.viewport.cssScale ||
+      rect.width / this.cameraController.panelPixelWidth ||
+      1;
     const canvasX = (clientX - rect.left) / scale;
     const canvasY = (clientY - rect.top) / scale;
     const worldPixelX = (canvasX - this.camera.x) / this.camera.zoom;
@@ -699,6 +712,10 @@ export default class GameRuntime {
 
   getPlacementTargets(): MapPlacementTarget[] {
     return this.map.getPlacementTargets();
+  }
+
+  getCharacterPlacements() {
+    return this.map.getCharacterPlacements();
   }
 
   getMapOverlays(): MapOverlayTarget[] {
@@ -817,6 +834,29 @@ export default class GameRuntime {
 
   handleInputAction(action: string, phase: InputActionPhase): void {
     this.dispatchInputAction(action, { phase, source: "keyboard" });
+  }
+
+  setMovementInput(patch: Partial<MovementInput>): void {
+    if (typeof patch.up === "boolean") this.keys.up = patch.up;
+    if (typeof patch.down === "boolean") this.keys.down = patch.down;
+    if (typeof patch.left === "boolean") this.keys.left = patch.left;
+    if (typeof patch.right === "boolean") this.keys.right = patch.right;
+
+    if (
+      this.keys.up ||
+      this.keys.down ||
+      this.keys.left ||
+      this.keys.right
+    ) {
+      this._clearControlledEntityNavigation();
+    }
+  }
+
+  clearMovementInput(): void {
+    this.keys.up = false;
+    this.keys.down = false;
+    this.keys.left = false;
+    this.keys.right = false;
   }
 
   handlePointerMove(clientX: number, clientY: number): void {
@@ -1045,19 +1085,22 @@ export default class GameRuntime {
     }
     this._updateCamera();
 
+    const dpr = this.viewport.devicePixelRatio || 1;
+
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     ctx.save();
+    // DPR scales the backing store; gameplay/camera math stays in logical panel px.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // Keep gameplay/camera math as floats, but snap the final render transform
-    // to canvas pixels so connected panels and props don't shimmer or expose
+    // to device pixels so connected panels and props don't shimmer or expose
     // subpixel seams while the camera follows the player.
-    ctx.translate(
-      snapCanvasValue(this.camera.x),
-      snapCanvasValue(this.camera.y),
-    );
+    const snapX = Math.round(this.camera.x * dpr) / dpr;
+    const snapY = Math.round(this.camera.y * dpr) / dpr;
+    ctx.translate(snapX, snapY);
     ctx.scale(this.camera.zoom, this.camera.zoom);
 
     if (!this.hideMapBackground) {
@@ -1094,7 +1137,12 @@ export default class GameRuntime {
 
     ctx.restore();
 
-    if (this.debug || this.hideMapBackground) this._drawDebugHUD(ctx);
+    if (this.debug || this.hideMapBackground) {
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this._drawDebugHUD(ctx);
+      ctx.restore();
+    }
 
     requestAnimationFrame((nextNow) => this._loop(nextNow));
   }
@@ -1129,6 +1177,12 @@ export default class GameRuntime {
     this.input.setup();
   }
 
+  private _clearControlledEntityNavigation(): void {
+    if (!this._controlledEntityId) return;
+    if (!this._entityNavigation.has(this._controlledEntityId)) return;
+    this.clearEntityDestination(this._controlledEntityId);
+  }
+
   private _updatePlayer(input: MovementInput, dt: number): void {
     if (!this._controlledEntityId) {
       return;
@@ -1137,6 +1191,10 @@ export default class GameRuntime {
     const player = this._entityActors.get(this._controlledEntityId);
     if (!player) {
       return;
+    }
+
+    if (input.up || input.down || input.left || input.right) {
+      this._clearControlledEntityNavigation();
     }
 
     player.update(input, this.map, dt);

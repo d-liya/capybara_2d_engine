@@ -1,10 +1,15 @@
 import "../styles.css";
 import { preloadAllAudio } from "./core/audio";
-import { createLoadingGate, preloadDataAssets } from "./utils/common";
+import {
+  createLoadingGate,
+  preloadDataAssets,
+  setupOrientationReload,
+} from "./utils/common";
 import { allDataFiles } from "./data";
 import { createMainScene } from "./scenes/mainScene";
 
 async function bootstrap() {
+  setupOrientationReload();
   preloadDataAssets(allDataFiles);
   void preloadAllAudio();
 

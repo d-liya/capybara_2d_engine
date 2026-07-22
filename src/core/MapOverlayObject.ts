@@ -17,6 +17,13 @@ export type MapOverlayRenderLayer =
   | "occluder"
   | "prop";
 
+export type MapOverlayKind = "erase" | "state" | "vfx" | "grid";
+
+export type MapOverlayLayout =
+  | "single"
+  | "multi_inplace"
+  | "detached_stages";
+
 export interface MapOverlayColliderEntry {
   box_2d: number[];
   label?: string;
@@ -28,6 +35,10 @@ export interface MapOverlayStateEntry {
   description?: string;
   url: string;
   box_2d: number[];
+  frameCount?: number;
+  frame_count?: number;
+  mode?: "background" | "gameplay";
+  clearsCollision?: boolean;
   collider?: MapOverlayColliderEntry[];
   colliders?: MapOverlayColliderEntry[];
   blocksMovement?: boolean;
@@ -38,10 +49,16 @@ export interface MapOverlayEntry {
   id: string;
   anchorLabel?: string;
   gamePlay?: string;
+  /** Unified kind — omit / "state" for legacy structural overlays. */
+  kind?: MapOverlayKind;
+  layout?: MapOverlayLayout;
   /** Mask label/name whose obstacle visual this overlay replaces. */
   linkedObstacleLabel?: string;
   currentMapStateLabel?: string;
+  currentState?: string;
   states: MapOverlayStateEntry[];
+  gridDimensions?: [number, number];
+  cellBboxes?: number[][];
   /** Default for states that omit renderLayer. */
   renderLayer?: MapOverlayRenderLayer;
   /** Default for states that omit blocksMovement. */
@@ -59,6 +76,8 @@ export interface MapOverlayTarget {
   renderY: number;
   blocksMovement: boolean;
   renderLayer: MapOverlayRenderLayer;
+  gridDimensions?: [number, number];
+  cellBboxes?: number[][];
 }
 
 function toSortableLayer(layer: MapOverlayRenderLayer): RenderLayer {
@@ -87,7 +106,11 @@ export default class MapOverlayObject {
 
   private readonly _defaultRenderLayer: MapOverlayRenderLayer;
   private readonly _defaultBlocksMovement?: boolean;
+  private readonly _gridDimensions?: [number, number];
+  private readonly _cellBboxes?: number[][];
   private readonly _normOffset?: { x: number; y: number };
+  /** When set, linked parent inheritance locks Y-sort to the parent. */
+  private readonly _linkedRenderY?: number;
   private _bounds: Rect;
   private _box2d: number[];
   private _colliders: Rect[];
@@ -96,18 +119,61 @@ export default class MapOverlayObject {
   private _image: HTMLImageElement | null;
   private _imageUrl: string;
 
-  constructor(data: MapOverlayEntry, normOffset?: { x: number; y: number }) {
+  constructor(
+    data: MapOverlayEntry,
+    normOffset?: { x: number; y: number },
+    options: { linkedRenderY?: number } = {},
+  ) {
     this.id = data.id;
     this.anchorLabel = data.anchorLabel;
     this.gamePlay = data.gamePlay;
-    this.states = data.states ?? [];
+    this.states = (data.states ?? []).map((state, index) => {
+      const cell =
+        data.kind === "grid" &&
+        Array.isArray(data.cellBboxes?.[index]) &&
+        data.cellBboxes![index].length >= 4
+          ? data.cellBboxes![index]
+          : null;
+      return cell ? { ...state, box_2d: [...cell] } : state;
+    });
     this._defaultRenderLayer = isValidLayer(data.renderLayer)
       ? data.renderLayer
       : "occluder";
     this._defaultBlocksMovement = data.blocksMovement;
+    if (
+      Array.isArray(data.gridDimensions) &&
+      data.gridDimensions.length === 2
+    ) {
+      this._gridDimensions = [
+        Number(data.gridDimensions[0]),
+        Number(data.gridDimensions[1]),
+      ];
+    }
+    if (Array.isArray(data.cellBboxes)) {
+      const cells: number[][] = [];
+      for (const cell of data.cellBboxes) {
+        if (!Array.isArray(cell) || cell.length < 4) continue;
+        cells.push([
+          Number(cell[0]),
+          Number(cell[1]),
+          Number(cell[2]),
+          Number(cell[3]),
+        ]);
+      }
+      if (cells.length) this._cellBboxes = cells;
+    }
     this._normOffset = normOffset;
+    this._linkedRenderY =
+      typeof options.linkedRenderY === "number" &&
+      Number.isFinite(options.linkedRenderY)
+        ? options.linkedRenderY
+        : undefined;
 
-    const initialName = data.currentMapStateLabel ?? this.states[0]?.name ?? "";
+    const initialName =
+      data.currentMapStateLabel ??
+      data.currentState ??
+      this.states[0]?.name ??
+      "";
     const initialState =
       this.states.find((state) => state.name === initialName) ?? this.states[0];
 
@@ -166,6 +232,8 @@ export default class MapOverlayObject {
       renderY: this.renderY,
       blocksMovement: this._blocksMovement,
       renderLayer: this._stateRenderLayer,
+      ...(this._gridDimensions ? { gridDimensions: this._gridDimensions } : {}),
+      ...(this._cellBboxes?.length ? { cellBboxes: this._cellBboxes } : {}),
     };
   }
 
@@ -307,9 +375,10 @@ export default class MapOverlayObject {
     }
 
     this.renderY =
-      this._colliders.length > 0
+      this._linkedRenderY ??
+      (this._colliders.length > 0
         ? this._colliders[this._colliders.length - 1].y2
-        : this._bounds.y2;
+        : this._bounds.y2);
     this._stateRenderLayer = isValidLayer(state.renderLayer)
       ? state.renderLayer
       : this._defaultRenderLayer;

@@ -24,7 +24,8 @@ body {
 }
 canvas {
   display: block;
-  image-rendering: pixelated;
+  /* High-res map art: smooth resampling. Pixel-art games can override to `pixelated`. */
+  image-rendering: auto;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;

@@ -21,7 +21,7 @@ Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` bel
 When new generated files land, register them before using them in a scene:
 
 1. **Maps / characters** — import `map_*.json` / `char_*.json` in [`src/data/index.ts`](../../../src/data/index.ts), export the handles, and include them in `allDataFiles`.
-   - **Map v2 sprites sidecar**: keep lean layout in `map_<id>.json` (`url`, `walkableBoxes`, `placement`, `overwrites`, optional `spriteIndex`). Put full `sprites[]` (cut-outs + `collision_polygons`) in `map_<id>.sprites.json`. Merge at registration:
+   - **Map v2 sprites sidecar**: keep lean layout in `map_<id>.json` (`url`, `walkableBoxes`, `placement`, `mapOverlays`, optional `spriteIndex` / `characterPlacements`). Put full `sprites[]` (cut-outs + `collision_polygons`) in `map_<id>.sprites.json`. Merge at registration:
      ```ts
      import mapFarmBase from "./map_farm.json";
      import mapFarmSprites from "./map_farm.sprites.json";
@@ -73,6 +73,9 @@ const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120,
+  touchControls: {
+    actions: [{ action: "interact", label: "E" }],
+  },
 });
 
 game.defineArchetype(
@@ -110,6 +113,7 @@ const game = createGame({
     extensions: [{ direction: "east", panel: toMapData(mapEast) }],
   }),
   cameraEdgePadding: 120,
+  // Optional: followZoom / maxViewportScale for phone FOV and upscale cap
 });
 ```
 
@@ -165,7 +169,15 @@ Keep an explicit lifecycle: each NPC/clue/pickup is either `mapLocal` (rebuild),
 
 ## Recipe: map overlays (baked state changes)
 
-`mapOverlays` live in generated `map_*.json` next to `masks`, `walkableBoxes`, `spriteSheets`, and `placement`. Use them for doors, safes, gates, barricades, and other map-baked structures.
+Prefer **unified `mapOverlays`** on flat `map_*.json` (next to `walkableBoxes`, `placement`, optional `spriteIndex`). Each entry has a `kind`:
+
+| `kind` | Meaning | Runtime |
+|---|---|---|
+| `state` / `grid` | Multi-state structural patch (door, chest, crop stages) | `setMapOverlayState(id, state)` |
+| `erase` | Static remove patch + clear overlapping sprite collision | Already applied at load |
+| `vfx` | Spritesheet loop or trigger (`states[0].mode`: `background` \| `gameplay`) | Autoplay, or `triggerMapEffect` |
+
+When the Capybara builder edit UI syncs into this repo, those overlays (and optional `characterPlacements`) are already written — **do not re-author patch URLs**. Wire interactions only.
 
 Runtime switches state — **do not** spawn a duplicate prop for the same door/gate:
 
@@ -180,6 +192,8 @@ game.on("mapOverlay:changed", ({ id, state }) => {
 ```
 
 Optional per-state physics: `blocksMovement: true` plus `collider`/`colliders` (or the state’s full `box_2d`) blocks movement/pathfinding. Open states use `blocksMovement: false` or omit it. Successful changes clear pathfinding cache and emit `mapOverlay:changed`.
+
+For placed characters listed in `characterPlacements` / `assets.md`, spawn with `spawnAtFeet` / `toArchetype` using the given `box_2d` (ymin,xmin,ymax,xmax 0–1000).
 
 ## Map walkability / collision (generated JSON)
 
@@ -277,7 +291,7 @@ game.patchUi({
 });
 ```
 
-If `ui` is omitted at mount, the widget stays always visible (preview only). Modals/title screens use `type: "overlay"` and may `blocksWorldInput`. Persistent edge chrome should motivate `cameraEdgePadding` on `createGame`.
+If `ui` is omitted at mount, the widget stays always visible (preview only). Modals/title screens use `type: "overlay"` and may `blocksWorldInput`. Persistent edge chrome should motivate `cameraEdgePadding` on `createGame` (and matching `touchControls.actions` for mobile). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Widgets that are not HUDs
 
@@ -308,7 +322,7 @@ After wiring a scene, update `src/scenes/SCENES.md` (active file, map/extensions
 
 | Term                      | What it is                                                | API                                |
 | ------------------------- | --------------------------------------------------------- | ---------------------------------- |
-| **`mapOverlays`**         | Map-baked stateful visuals/colliders in map JSON          | `setMapOverlayState`               |
+| **`mapOverlays`**         | Unified map-baked patches (`kind`: erase/state/vfx/grid)  | `setMapOverlayState` / map effects |
 | **HUD `ui.overlays`**     | DOM modal/full-screen UI visibility                       | `patchUi({ overlays: ... })`       |
 | **Season “prop overlay”** | Atmosphere/tint layers in season recipes                  | season systems — not `mapOverlays` |
 | **Spawned prop**          | Entity from `placeProp` / spawn with swappable `imageUrl` | `getPropItemUrl` + `patch`         |

@@ -148,7 +148,7 @@ export default class MapObject {
   private _obstacleInBackground: boolean;
   private _suppressStaticVisuals: boolean;
   private _suppressObstacleVisual: boolean;
-  /** Cleared by map `remove` overwrites that cover this sprite. */
+  /** Cleared by `kind: "erase"` mapOverlays that cover this sprite. */
   private _collisionDisabled: boolean;
   private _visualSuppressed: boolean;
   private _backgroundImage: HTMLImageElement | null;
@@ -286,13 +286,18 @@ export default class MapObject {
   }
 
   /**
-   * Applied by map `remove` overwrites: hide the cut-out and stop blocking
+   * Applied by `kind: "erase"` mapOverlays: hide the cut-out and stop blocking
    * movement because the obstacle was patched out of the map.
    */
-  applyRemoveOverwrite(): void {
+  applyEraseOverwrite(): void {
     this._collisionDisabled = true;
     this._visualSuppressed = true;
     this._colliders = [];
+  }
+
+  /** @deprecated Use `applyEraseOverwrite`. */
+  applyRemoveOverwrite(): void {
+    this.applyEraseOverwrite();
   }
 
   private _applyVisualBox2d(box2d: number[]): void {

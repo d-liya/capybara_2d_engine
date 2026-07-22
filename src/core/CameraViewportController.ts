@@ -10,6 +10,8 @@ export interface Viewport {
   offsetX: number;
   offsetY: number;
   cssScale: number;
+  /** Backing-store scale (`min(devicePixelRatio, 2)`). Gameplay math stays in logical panel pixels. */
+  devicePixelRatio: number;
 }
 
 interface CameraControllerOptions {
@@ -109,6 +111,7 @@ export default class CameraViewportController {
       offsetX: 0,
       offsetY: 0,
       cssScale: 1,
+      devicePixelRatio: 1,
     };
 
     this.canvas.width = panelPixelWidth;
@@ -151,14 +154,21 @@ export default class CameraViewportController {
     const offsetX = shouldFollow ? (pw - visibleW) * 0.5 : 0;
     const offsetY = shouldFollow ? (ph - visibleH) * 0.5 : 0;
 
+    const dpr = Math.min(
+      Math.max(1, window.devicePixelRatio || 1),
+      2,
+    );
+
     this.viewport.width = visibleW;
     this.viewport.height = visibleH;
     this.viewport.offsetX = offsetX;
     this.viewport.offsetY = offsetY;
     this.viewport.cssScale = scale;
+    this.viewport.devicePixelRatio = dpr;
 
-    this.canvas.width = pw;
-    this.canvas.height = ph;
+    // Logical panel size drives gameplay; buffer is DPR-scaled for Retina.
+    this.canvas.width = Math.max(1, Math.floor(pw * dpr));
+    this.canvas.height = Math.max(1, Math.floor(ph * dpr));
     this.canvas.style.width = `${Math.floor(pw * scale)}px`;
     this.canvas.style.height = `${Math.floor(ph * scale)}px`;
 
