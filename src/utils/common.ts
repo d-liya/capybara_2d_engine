@@ -1,5 +1,12 @@
 // All game logic runs in a 0-1000 normalised coordinate space.
 // The canvas can be any pixel size — conversion happens only at draw time.
+//
+// Important: X and Y are NOT square pixels on landscape panels.
+// 1000 norm-X → panelPixelWidth, 1000 norm-Y → panelPixelHeight (defaults
+// 2508×1672). A sprite that is 76×114 *pixels* must use norm size
+//   width  = 76  / panelPixelWidth  * 1000
+//   height = 114 / panelPixelHeight * 1000
+// — not width/height = 76/114 in norm space (that draws ~1:1 on screen).
 export const NORM = 1000;
 
 /** Default pixel size of one map panel (matches GameMap / camera). */

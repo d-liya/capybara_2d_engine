@@ -23,12 +23,33 @@ import {
 } from "../data";
 import { runScreenFade } from "../utils/screenFade";
 
-const CHARACTER_SIZE = {
-  width: 76 * 1.3,
-  height: 114 * 1.3,
-};
+/** Fallback when a placement has no usable box size (normalized map space). */
+const CHARACTER_ART_WIDTH_PX = 76;
+const CHARACTER_ART_HEIGHT_PX = 114;
+const CHARACTER_SCALE = 1.3;
+/** Historical default panel size from the engine (`utils/common.ts`). */
+const DEFAULT_PANEL_PIXEL_WIDTH = 2508;
+const DEFAULT_PANEL_PIXEL_HEIGHT = 1672;
+const DEFAULT_PANEL_ASPECT =
+  DEFAULT_PANEL_PIXEL_WIDTH / DEFAULT_PANEL_PIXEL_HEIGHT;
+
+const PLAYER_RADIUS = 34;
+const NPC_RADIUS = 24;
 
 const INTERACT_RADIUS = 140;
+
+/** Sprite pixel aspect (source art). Norm width/height are NOT square on landscape maps. */
+const CHARACTER_PIXEL_ASPECT =
+  CHARACTER_ART_WIDTH_PX / CHARACTER_ART_HEIGHT_PX;
+
+function defaultCharacterSize(panelAspect: number): {
+  width: number;
+  height: number;
+} {
+  const height = CHARACTER_ART_HEIGHT_PX * CHARACTER_SCALE;
+  const aspectNorm = CHARACTER_PIXEL_ASPECT / Math.max(panelAspect, 1e-6);
+  return { width: height * aspectNorm, height };
+}
 
 /** Placement row as emitted by Maps compile (may exceed engine PlacementTarget). */
 type AuthoredPlacement = {
@@ -131,6 +152,94 @@ function feetFromBox(box: readonly number[]): { x: number; y: number } {
   return { x: (x1 + x2) / 2, y: y2 };
 }
 
+/**
+ * Engine panel pixels: 1000 norm-X → panelPixelWidth, 1000 norm-Y → panelPixelHeight.
+ * On landscape maps those differ, so norm aspect ≠ on-screen aspect.
+ */
+function panelPixelAspect(game: GameAPI): number {
+  try {
+    const origin = game.normalizedToCanvasPoint(0, 0);
+    const xAxis = game.normalizedToCanvasPoint(1000, 0);
+    const yAxis = game.normalizedToCanvasPoint(0, 1000);
+    const w = Math.abs(xAxis.x - origin.x);
+    const h = Math.abs(yAxis.y - origin.y);
+    if (w > 1e-6 && h > 1e-6) return w / h;
+  } catch {
+    // Fall through to default.
+  }
+  return DEFAULT_PANEL_ASPECT;
+}
+
+/**
+ * Map stills (what the editor sizes with object-contain) are tight crops around
+ * ~76×114. Animation sheets often include padding and read near-square — using
+ * those frame sizes makes engine sprites too wide relative to the map UI.
+ */
+function spritePixelAspect(
+  _character: AnyGeneratedCharacter | undefined,
+): number {
+  return CHARACTER_PIXEL_ASPECT;
+}
+
+/**
+ * Map UI uses object-contain inside the placement box (CSS pixels).
+ * Convert that into norm width/height that preserve the sprite's pixel aspect
+ * on the engine's non-square panel axes.
+ */
+function sizeFromPlacement(
+  placement: GeneratedCharacterPlacement,
+  game: GameAPI,
+  character: AnyGeneratedCharacter | undefined,
+): { width: number; height: number } {
+  const panelAspect = panelPixelAspect(game);
+  const fallback = defaultCharacterSize(panelAspect);
+
+  const box = placement.box_2d;
+  const fromBoxW =
+    Array.isArray(box) && box.length >= 4
+      ? Math.max(0, box[3]! - box[1]!)
+      : 0;
+  const fromBoxH =
+    Array.isArray(box) && box.length >= 4
+      ? Math.max(0, box[2]! - box[0]!)
+      : 0;
+  const boxW =
+    typeof placement.width === "number" &&
+    Number.isFinite(placement.width) &&
+    placement.width > 0
+      ? placement.width
+      : fromBoxW;
+  const boxH =
+    typeof placement.height === "number" &&
+    Number.isFinite(placement.height) &&
+    placement.height > 0
+      ? placement.height
+      : fromBoxH;
+  if (boxW <= 0 || boxH <= 0) {
+    return fallback;
+  }
+
+  // On-screen aspect = (normW / normH) * panelAspect. Solve for norm aspect.
+  const aspectNorm =
+    spritePixelAspect(character) / Math.max(panelAspect, 1e-6);
+  const heightLimited = { width: boxH * aspectNorm, height: boxH };
+  if (heightLimited.width <= boxW + 1e-6) {
+    return heightLimited;
+  }
+  return { width: boxW, height: boxW / aspectNorm };
+}
+
+function radiusForSize(
+  size: { height: number },
+  role: "player" | "npc",
+  panelAspect: number,
+): number {
+  const base = role === "player" ? PLAYER_RADIUS : NPC_RADIUS;
+  const ref = defaultCharacterSize(panelAspect);
+  const scaled = (base * size.height) / ref.height;
+  return Math.max(8, Number.isFinite(scaled) ? scaled : base);
+}
+
 function distanceToBounds(
   x: number,
   y: number,
@@ -219,6 +328,8 @@ function spawnMapCharacters(
     const box = placement.box_2d;
     if (!Array.isArray(box) || box.length < 4) continue;
     const feet = feetFromBox(box);
+    const panelAspect = panelPixelAspect(game);
+    const size = sizeFromPlacement(placement, game, charEntry?.character);
     const role =
       placement.role === "player" || placement.role === "npc"
         ? placement.role
@@ -232,6 +343,9 @@ function spawnMapCharacters(
         label: placement.label,
         mapLocal: true,
         kind: role === "player" ? "player" : "npc",
+        width: size.width,
+        height: size.height,
+        radius: radiusForSize(size, role, panelAspect),
       });
     } catch (err) {
       console.warn(
@@ -608,10 +722,11 @@ export function bootstrapWorldFromAssets(
     );
     const def = toArchetype(entry.character, {
       kind: isPlayerLike ? "player" : "npc",
-      radius: isPlayerLike ? 34 : 24,
+      radius: isPlayerLike ? PLAYER_RADIUS : NPC_RADIUS,
       speed: isPlayerLike ? 95 : 20,
       frameDurationMs: 125,
-      ...CHARACTER_SIZE,
+      // Default only — spawn overrides with map-editor placement size.
+      ...defaultCharacterSize(panelPixelAspect(game)),
     });
     game.defineArchetype(primary, def);
     definedArchetypes.add(primary);
