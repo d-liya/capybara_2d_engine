@@ -38,7 +38,7 @@ npm run build
 ### Data Flow
 
 1. **Generated assets** live in `src/data/` as JSON files with TypeScript exports
-2. **Adapters** in `src/data/adapters.ts` convert flat JSON to engine shapes: `toMapData()`, `mergeMapSprites()`, `toArchetype()`, `toPlayerSprite()`. Map v2 cut-out sprites live in `map_*.sprites.json` and are merged before `toMapData`.
+2. **Adapters** in `src/data/adapters.ts` convert flat JSON to engine shapes: `toMapData()`, `mergeMapSidecars()` / `mergeMapSprites()`, `toArchetype()`, `toPlayerSprite()`. Map v2 cut-out sprites live in `map_*.sprites.json` and placements in `map_*.placements.json`; both are merged before `toMapData`.
 3. **Scenes** import generated handles and adapters, call `createGame()`, register archetypes/systems/widgets, spawn entities
 4. **Systems** run per-frame logic via the GameAPI facade
 
@@ -48,7 +48,7 @@ npm run build
 
 This project uses **documentation-driven development**. When working with generated assets or engine patterns:
 
-1. **`src/data/` JSON** — Source of truth for generated maps, characters, props, audio, animation names, and placement (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; handles exported from `index.ts` / `props.ts`). Prefer lean `map_*.json` over `map_*.sprites.json` unless you need polygons.
+1. **`src/data/` JSON** — Source of truth for generated maps, characters, props, audio, animation names, and placement (`map_*.json`, `map_*.sprites.json`, `map_*.placements.json`, `char_*.json`, `prop_*.json`, `common.json`; handles exported from `index.ts` / `props.ts`). Prefer lean `map_*.json`; open sprite/placement sidecars when you need polygons or placement lists.
 2. **`src/scenes/SCENES.md`** — Scene composition facts (resources, archetypes, systems, inputs, widgets)
 3. **`docs/recipes/`** — Optional implementation patterns (combat, inventory, NPCs, etc.)
 4. **DO NOT** reverse-engineer `src/core/` or SDK internals — build from the docs and facades
@@ -72,10 +72,11 @@ When generating new assets (maps, characters, props, audio):
 3. Import those handles in scenes using `src/data/` adapters
 4. For common assets (HUD, reference art, music, SFX), add to `src/data/common.json` as `{ name, url }`
 
-**Map edit UI sync (Capybara builder → this repo):** erase / state / VFX / grid patches arrive already compiled into `map_*.json` as unified `mapOverlays` (`kind`: `erase` | `state` | `vfx` | `grid`). Placed characters may appear as `characterPlacements` on the map JSON and in `src/data/assets.md`.
+**Map edit UI sync (Capybara builder → this repo):** erase / state / VFX / grid patches arrive already compiled into `map_*.json` as unified `mapOverlays` (`kind`: `erase` | `state` | `vfx` | `grid`). Placed characters/HUDs appear in `map_*.placements.json` (`characterPlacements` / `hudPlacements`) and in `src/data/assets.md`.
 
 - Do **not** paste overlay image URLs or recreate patches by hand.
 - Wire gameplay only: `game.setMapOverlayState(id, state)`, `game.triggerMapEffect(...)` for gameplay VFX, and `spawnAtFeet` / `toArchetype` for `characterPlacements`.
+- Replace-mode VFX (`placementMode: "replace"`) may include a paired erase underlay with `clearsCollision: false` — that hides baked pixels under the sheet **without** clearing the collider. The engine also suppresses linked mask static art via `linkedObstacleLabel`.
 - See `.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md`.
 
 ### Player Entity Pattern

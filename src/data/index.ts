@@ -1,6 +1,7 @@
 export {
   toArchetype,
   toMapData,
+  mergeMapSidecars,
   mergeMapSprites,
   toPlayerSprite,
   toSpriteSheets,
@@ -18,7 +19,9 @@ export {
   type GeneratedCollisionPoint,
   type GeneratedDirectionalCharacter,
   type GeneratedDirectionalSheet,
+  type GeneratedHudPlacement,
   type GeneratedMap,
+  type GeneratedMapPlacementsFile,
   type GeneratedMapSprite,
   type GeneratedMapSpriteIndexEntry,
   type GeneratedMapSpritesFile,
@@ -45,10 +48,15 @@ export {
  *
  *   import mapFarmBase from "./map_farm.json";
  *   import mapFarmSprites from "./map_farm.sprites.json";
- *   export const mapFarm = mergeMapSprites(mapFarmBase, mapFarmSprites);
+ *   import mapFarmPlacements from "./map_farm.placements.json";
+ *   export const mapFarm = mergeMapSidecars(mapFarmBase, {
+ *     sprites: mapFarmSprites,
+ *     placements: mapFarmPlacements,
+ *   });
  *
- * Keep full `sprites[]` (polygons) in `map_*.sprites.json`. Lean layout
- * (`url`, walkableBoxes, placement, mapOverlays, optional spriteIndex) stays
- * in `map_*.json` for agents. Put the merged handle in `allDataFiles`.
+ * Keep full `sprites[]` (polygons) in `map_*.sprites.json` and
+ * placement / characterPlacements / hudPlacements in `map_*.placements.json`.
+ * Lean layout (`url`, walkableBoxes, mapOverlays) stays in `map_*.json`.
+ * Put the merged handle in `allDataFiles`.
  */
 export const allDataFiles: unknown[] = [];

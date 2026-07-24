@@ -1,5 +1,13 @@
 import { createGame, type GameAPI, type GameMapData } from "../Game";
 import { toMapData } from "../data";
+import { createGeneratedWorld } from "./generatedWorld";
+
+export {
+  bootstrapWorldFromAssets,
+  type BootstrapCharacterEntry,
+  type BootstrapMapEntry,
+  type BootstrapWorldOptions,
+} from "./bootstrapWorldFromAssets";
 
 /**
  * Minimal blank panel so `createGame` can boot without a generated map.
@@ -25,18 +33,22 @@ const STARTER_MAP: GameMapData = toMapData({
 });
 
 /**
- * Demo scene: directional character (`char.json` multi-clip pack).
- * 4-way facing is native on Actor — no extra systems.
- * WASD / arrows to move. Side uses `walk_right` flipped for left.
+ * Main scene entry. Prefers auto-generated world wiring when
+ * `./generatedWorld` exports maps; otherwise boots the blank SVG floor.
+ *
+ * Sync from capybara_game regenerates `generatedWorld.ts` — do not hand-edit it.
  */
-export function createMainScene(_options?: {
+export function createMainScene(options?: {
   onAudioReady?: (start: () => void) => void;
 }): GameAPI {
-  const game = createGame({
+  const fromAssets = createGeneratedWorld({
+    onAudioReady: options?.onAudioReady,
+  });
+  if (fromAssets) return fromAssets;
+
+  return createGame({
     canvasId: "game",
     map: STARTER_MAP,
     cameraEdgePadding: 120,
   });
-
-  return game;
 }

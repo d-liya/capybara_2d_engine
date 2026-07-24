@@ -54,6 +54,11 @@ export interface MapOverlayEntry {
   layout?: MapOverlayLayout;
   /** Mask label/name whose obstacle visual this overlay replaces. */
   linkedObstacleLabel?: string;
+  /**
+   * replace: suppress linked mask static art (keep collider) + optional erase underlay.
+   * overlay: draw sheet on top of existing map pixels.
+   */
+  placementMode?: "replace" | "overlay" | string;
   currentMapStateLabel?: string;
   currentState?: string;
   states: MapOverlayStateEntry[];

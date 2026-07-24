@@ -9,10 +9,10 @@ For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep
 ## Source of truth
 
 1. **`src/data/` generated JSON** — map/character/prop/audio handles for _this_ game (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; exports from `index.ts` / `props.ts`). Never invent names from recipes or placeholders.
-2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `mergeMapSprites`, `toArchetype`). Stable across regenerations.
+2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `mergeMapSidecars`, `mergeMapSprites`, `toArchetype`). Stable across regenerations.
 3. **`src/Game.ts`** — public gameplay API (`createGame`, `loadMap`, overlays, audio helpers, spawning).
 
-Prefer lean `map_*.json` (and `spriteIndex`) over opening `map_*.sprites.json` unless you need collision polygons. Do not hand-edit generated JSON unless explicitly asked.
+Prefer lean `map_*.json` for layout/overlays. Open `map_*.sprites.json` for collision polygons and `map_*.placements.json` for placement lists. Do not hand-edit generated JSON unless explicitly asked.
 
 Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` below are **placeholders**. Copy real names from generated JSON / `index.ts` exports.
 
@@ -21,13 +21,17 @@ Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` bel
 When new generated files land, register them before using them in a scene:
 
 1. **Maps / characters** — import `map_*.json` / `char_*.json` in [`src/data/index.ts`](../../../src/data/index.ts), export the handles, and include them in `allDataFiles`.
-   - **Map v2 sprites sidecar**: keep lean layout in `map_<id>.json` (`url`, `walkableBoxes`, `placement`, `mapOverlays`, optional `spriteIndex` / `characterPlacements`). Put full `sprites[]` (cut-outs + `collision_polygons`) in `map_<id>.sprites.json`. Merge at registration:
+   - **Map v2 sidecars**: keep lean layout in `map_<id>.json` (`url`, `walkableBoxes`, `mapOverlays`). Put full `sprites[]` in `map_<id>.sprites.json` and `placement` / `characterPlacements` / `hudPlacements` in `map_<id>.placements.json`. Merge at registration:
      ```ts
      import mapFarmBase from "./map_farm.json";
      import mapFarmSprites from "./map_farm.sprites.json";
-     export const mapFarm = mergeMapSprites(mapFarmBase, mapFarmSprites);
+     import mapFarmPlacements from "./map_farm.placements.json";
+     export const mapFarm = mergeMapSidecars(mapFarmBase, {
+       sprites: mapFarmSprites,
+       placements: mapFarmPlacements,
+     });
      ```
-     Scenes still call `toMapData(mapFarm)`. Do not open the sprites sidecar just to find labels — use `spriteIndex` / `placement` on the lean map file.
+     Scenes still call `toMapData(mapFarm)`. Open the sidecars (or use the merged handle) when you need sprite geometry or placement lists.
 2. **Prop groups** — add each `prop_*.json` to `allPropFiles` in [`src/data/props.ts`](../../../src/data/props.ts).
 3. **Music / portraits / shared art** — add `{ name, url }` entries to [`src/data/common.json`](../../../src/data/common.json).
 4. **HUD art** — when a HUD is generated, a boilerplate `Hud...` widget scaffold is usually written under `src/widgets/`. Confirm factory names from the scaffold export; adapt it (do not treat it as finished gameplay UI).
@@ -169,7 +173,7 @@ Keep an explicit lifecycle: each NPC/clue/pickup is either `mapLocal` (rebuild),
 
 ## Recipe: map overlays (baked state changes)
 
-Prefer **unified `mapOverlays`** on flat `map_*.json` (next to `walkableBoxes`, `placement`, optional `spriteIndex`). Each entry has a `kind`:
+Prefer **unified `mapOverlays`** on flat `map_*.json` (next to `walkableBoxes`). Each entry has a `kind`:
 
 | `kind` | Meaning | Runtime |
 |---|---|---|
@@ -177,7 +181,7 @@ Prefer **unified `mapOverlays`** on flat `map_*.json` (next to `walkableBoxes`, 
 | `erase` | Static remove patch + clear overlapping sprite collision | Already applied at load |
 | `vfx` | Spritesheet loop or trigger (`states[0].mode`: `background` \| `gameplay`) | Autoplay, or `triggerMapEffect` |
 
-When the Capybara builder edit UI syncs into this repo, those overlays (and optional `characterPlacements`) are already written — **do not re-author patch URLs**. Wire interactions only.
+When the Capybara builder edit UI syncs into this repo, those overlays are already on the lean map and placements are in `map_*.placements.json` — **do not re-author patch URLs**. Wire interactions only.
 
 Runtime switches state — **do not** spawn a duplicate prop for the same door/gate:
 
@@ -193,11 +197,11 @@ game.on("mapOverlay:changed", ({ id, state }) => {
 
 Optional per-state physics: `blocksMovement: true` plus `collider`/`colliders` (or the state’s full `box_2d`) blocks movement/pathfinding. Open states use `blocksMovement: false` or omit it. Successful changes clear pathfinding cache and emit `mapOverlay:changed`.
 
-For placed characters listed in `characterPlacements` / `assets.md`, spawn with `spawnAtFeet` / `toArchetype` using the given `box_2d` (ymin,xmin,ymax,xmax 0–1000).
+For placed characters listed in `map_*.placements.json` (`characterPlacements`) / `assets.md`, spawn with `spawnAtFeet` / `toArchetype` using the given `box_2d` (ymin,xmin,ymax,xmax 0–1000).
 
 ## Map walkability / collision (generated JSON)
 
-All of this lives in the generated map files (`walkableBoxes` / placement in lean `map_*.json`; sprite colliders in `map_*.sprites.json`). Prefer editing those boxes over gameplay hacks.
+All of this lives in the generated map files (`walkableBoxes` / overlays in lean `map_*.json`; placement lists in `map_*.placements.json`; sprite colliders in `map_*.sprites.json`). Prefer editing those boxes over gameplay hacks.
 
 | Symptom                                        | Fix                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------ |

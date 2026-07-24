@@ -43,6 +43,13 @@ export interface MapPlacementTarget {
   box_2d: number[];
   bounds: HoverBounds;
   renderY: number;
+  enterable?: boolean;
+  destinationMapId?: string;
+  interactionType?: string;
+  functionalRole?: string;
+  templateId?: string;
+  stages?: string[];
+  gamePlay?: string;
 }
 
 export interface MapOverlayTarget {

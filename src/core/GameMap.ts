@@ -74,6 +74,14 @@ interface PlacementEntry {
   grid_dimensions?: number[];
   bounding_box?: number[];
   box_2d: Box2D;
+  enterable?: boolean;
+  destinationMapId?: string;
+  destinationMapAssetId?: string;
+  interactionType?: string;
+  functionalRole?: string;
+  templateId?: string;
+  stages?: string[];
+  gamePlay?: string;
 }
 
 export interface CharacterPlacementEntry {
@@ -84,6 +92,7 @@ export interface CharacterPlacementEntry {
   width?: number;
   height?: number;
   thumbnailUrl?: string;
+  role?: "player" | "npc";
 }
 
 /** Static visual patch from a `kind: "erase"` mapOverlay. */
@@ -357,6 +366,14 @@ export default class GameMap {
         const mode = sheet.placementMode ?? "replace";
         if (mode === "replace") replaceLinkedMaskKeys.add(key);
       }
+      // Edit-UI VFX overlays with placementMode replace (paired erase keeps collider).
+      for (const overlay of mapOverlayData) {
+        if ((overlay.kind ?? "state") !== "vfx") continue;
+        const mode = overlay.placementMode ?? "overlay";
+        if (mode !== "replace") continue;
+        const key = overlay.linkedObstacleLabel?.trim();
+        if (key) replaceLinkedMaskKeys.add(key);
+      }
 
       // Background image panel — natural size drives pixel_bbox placement.
       const bgPanel: BackgroundPanel = { image: null, normX, normY };
@@ -547,6 +564,27 @@ export default class GameMap {
           box_2d,
           bounds,
           renderY: bounds.y2,
+          ...(placement.enterable === true ? { enterable: true } : {}),
+          ...(typeof placement.destinationMapId === "string" &&
+          placement.destinationMapId.trim()
+            ? { destinationMapId: placement.destinationMapId.trim() }
+            : typeof placement.destinationMapAssetId === "string" &&
+                placement.destinationMapAssetId.trim()
+              ? { destinationMapId: placement.destinationMapAssetId.trim() }
+              : {}),
+          ...(typeof placement.interactionType === "string"
+            ? { interactionType: placement.interactionType }
+            : {}),
+          ...(typeof placement.functionalRole === "string"
+            ? { functionalRole: placement.functionalRole }
+            : {}),
+          ...(typeof placement.templateId === "string"
+            ? { templateId: placement.templateId }
+            : {}),
+          ...(Array.isArray(placement.stages) ? { stages: placement.stages } : {}),
+          ...(typeof placement.gamePlay === "string"
+            ? { gamePlay: placement.gamePlay }
+            : {}),
         });
       }
 
@@ -1015,6 +1053,38 @@ export default class GameMap {
       if (sprite.type === "background") continue;
       if (!sprite.matchesTag(normalized)) continue;
       const distanceSq = sprite.distanceSqTo(atX, atY);
+      if (distanceSq < nearestDistanceSq) {
+        nearestDistanceSq = distanceSq;
+        nearest = sprite;
+      }
+    }
+
+    if (!nearest) return false;
+    nearest.play(now, true);
+    return true;
+  }
+
+  /**
+   * Play the nearest gameplay (non-background) map VFX, regardless of tag.
+   * When `maxDistance` is set, only effects within that world-norm radius play.
+   */
+  playNearestGameplayEffect(
+    atX: number,
+    atY: number,
+    now = performance.now(),
+    maxDistance?: number,
+  ): boolean {
+    let nearest: MapEffectObject | null = null;
+    let nearestDistanceSq = Number.POSITIVE_INFINITY;
+    const maxDistanceSq =
+      typeof maxDistance === "number" && Number.isFinite(maxDistance)
+        ? maxDistance * maxDistance
+        : Number.POSITIVE_INFINITY;
+
+    for (const sprite of this._mapSprites) {
+      if (sprite.type === "background") continue;
+      const distanceSq = sprite.distanceSqTo(atX, atY);
+      if (distanceSq > maxDistanceSq) continue;
       if (distanceSq < nearestDistanceSq) {
         nearestDistanceSq = distanceSq;
         nearest = sprite;

@@ -336,8 +336,10 @@ export function createGame(config: GameConfig): GameAPI {
       runtime.clearMovementInput();
     },
     triggerMapEffect: (tag) => runtime.triggerMapEffect(tag),
-    triggerNearestMapEffect: (tag, atX, atY) =>
-      runtime.triggerNearestMapEffect(tag, atX, atY),
+  triggerNearestMapEffect: (tag, atX, atY) =>
+    runtime.triggerNearestMapEffect(tag, atX, atY),
+  triggerNearestGameplayEffect: (atX, atY, maxDistance) =>
+    runtime.triggerNearestGameplayEffect(atX, atY, maxDistance),
     findPath: (from, to, options = {}) => runtime.findPath(from, to, options),
     isFeetPositionBlocked: (feetX, feetY, options = {}) =>
       runtime.isFeetPositionBlocked(feetX, feetY, options),

@@ -889,6 +889,19 @@ export default class GameRuntime {
     return this.map.playNearestGameplayEffectByTag(tag, atX, atY);
   }
 
+  triggerNearestGameplayEffect(
+    atX: number,
+    atY: number,
+    maxDistance?: number,
+  ): boolean {
+    return this.map.playNearestGameplayEffect(
+      atX,
+      atY,
+      performance.now(),
+      maxDistance,
+    );
+  }
+
   findPath(
     from: PathPoint,
     to: PathPoint,

@@ -327,19 +327,24 @@ import { mapMain, charPlayer, toMapData, toArchetype } from "../data";
 
 ### Map data shape (`toMapData`)
 
-Generated map JSON is **flat**. Prefer a **lean index + sprites sidecar** so agents can read layout without polygon noise:
+Generated map JSON is **flat**. Prefer a **lean map + sidecars** so agents can read layout without polygon/placement noise:
 
 | File | Contents |
 | ---- | -------- |
-| `map_<id>.json` | `name`, `url`, `walkableBoxes`, `placement`, `mapOverlays`, optional `spriteIndex` / legacy `masks` / `spriteSheets` |
+| `map_<id>.json` | `name`, `url`, `walkableBoxes`, `mapOverlays`, optional legacy `masks` / `spriteSheets` |
 | `map_<id>.sprites.json` | `{ "sprites": [ ... ] }` — cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
+| `map_<id>.placements.json` | `{ "placement", "characterPlacements", "hudPlacements" }` |
 
-Register with `mergeMapSprites`, then pass the merged handle to `toMapData`:
+Register with `mergeMapSidecars`, then pass the merged handle to `toMapData`:
 
 ```ts
 import mapMainBase from "./map_main.json";
 import mapMainSprites from "./map_main.sprites.json";
-export const mapMain = mergeMapSprites(mapMainBase, mapMainSprites);
+import mapMainPlacements from "./map_main.placements.json";
+export const mapMain = mergeMapSidecars(mapMainBase, {
+  sprites: mapMainSprites,
+  placements: mapMainPlacements,
+});
 ```
 
 Lean `map_*.json` shape:
@@ -349,11 +354,7 @@ Lean `map_*.json` shape:
   "name": "...",
   "url": "...",
   "walkableBoxes": [...],
-  "placement": [...],
-  "mapOverlays": [...],
-  "spriteIndex": [
-    { "label": "oak_tree", "category": "walkable_area", "pixel_bbox": { "x": 0, "y": 0, "w": 64, "h": 96 } }
-  ]
+  "mapOverlays": [...]
 }
 ```
 
@@ -552,13 +553,15 @@ game.patch(enemyId, {
 
 ### Map spritesheets / VFX
 
-Generated map spritesheets are rendered as map effects from either `panel.spriteSheets` / `panel.spritesheets` entries or inline mask `spriteSheetUrl` fields.
+Generated map spritesheets are rendered as map effects from either `panel.spriteSheets` / `panel.spritesheets` entries or unified `mapOverlays` with `kind: "vfx"`.
 
 - Standalone map spritesheets do **not** need `linkedColliderLabel` or a linked obstacle to render.
 - If `type` / `spriteSheetType` is omitted, map spritesheets default to `background` and autoplay in a loop.
 - Use `type: "gameplay"` for one-shot triggered effects, then call `game.triggerMapEffect(...)` or `game.triggerNearestMapEffect(...)`.
-- `linkedColliderLabel` explicitly controls Y-sort anchoring / static obstacle replacement behavior.
+- `linkedColliderLabel` / VFX `linkedObstacleLabel` explicitly controls Y-sort anchoring / static obstacle replacement behavior.
 - Without `linkedColliderLabel`, the renderer infers a Y-sort anchor from an overlapping/containing map mask when possible, so effects like torches on a wall draw with that wall instead of behind it.
+- **`placementMode: "replace"`** (on `spriteSheets` or `kind: "vfx"` overlays): hide the linked mask’s static background/obstacle images, keep colliders, then play the sheet. Edit-UI replace animations also ship a paired `kind: "erase"` underlay with `clearsCollision: false` so baked map pixels are covered without wiping collision.
+- **`placementMode: "overlay"`** (default for VFX overlays): draw the sheet on top; static art stays.
 
 Background/autoplay VFX loop automatically. Gameplay/triggered effects should be activated through the public facade:
 

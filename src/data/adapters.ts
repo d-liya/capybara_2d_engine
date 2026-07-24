@@ -10,9 +10,9 @@ import { NORM } from "../utils/common";
  * - Generated map JSON is **flat** (`{ name, url, masks, spriteSheets, ... }`
  *   or the v2 shape `{ url, walkableBoxes, sprites }`), but `createGame({ map })`
  *   expects the nested `{ panel: { ... } }` shape.
- * - Map v2 `sprites[]` (cut-outs + collision polygons) live in a sidecar
- *   `map_*.sprites.json` so agents can read lean `map_*.json`. Merge with
- *   `mergeMapSprites` before `toMapData`.
+ * - Map v2 `sprites[]` (cut-outs + collision polygons) live in
+ *   `map_*.sprites.json`; placement / character / HUD placements live in
+ *   `map_*.placements.json`. Merge with `mergeMapSidecars` before `toMapData`.
  * - Generated character JSON exposes `spriteSheets`, but archetypes/player
  *   config want those sheets nested under a component/sprite key.
  *
@@ -333,8 +333,9 @@ export interface GeneratedMapOverwrite {
 }
 
 /**
- * Slim sprite summary for agent-readable `map_*.json` (no polygons).
- * Full geometry stays in `map_*.sprites.json`.
+ * Slim sprite summary kept for backwards-compat type imports.
+ * Prefer opening `map_*.sprites.json` (or the merged handle) instead.
+ * @deprecated Not written into lean map JSON anymore.
  */
 export interface GeneratedMapSpriteIndexEntry {
   label: string;
@@ -357,6 +358,27 @@ export interface GeneratedCharacterPlacement {
   width?: number;
   height?: number;
   thumbnailUrl?: string;
+  /** Controlled player vs standing NPC (from Maps UI). */
+  role?: "player" | "npc";
+}
+
+/** Screen-space HUD placement on a map (viewport-normalized 0–1000). */
+export interface GeneratedHudPlacement {
+  placementId: string;
+  assetId: string;
+  label: string;
+  box_2d: [number, number, number, number] | number[];
+  width?: number;
+  height?: number;
+  zIndex?: number;
+  url?: string;
+}
+
+/** Sidecar file shape: `map_<id>.placements.json`. */
+export interface GeneratedMapPlacementsFile {
+  placement?: PanelContent["placement"];
+  characterPlacements?: GeneratedCharacterPlacement[];
+  hudPlacements?: GeneratedHudPlacement[];
 }
 
 /** Flat generated map handle, e.g. the default export of `map_*.json`. */
@@ -364,6 +386,9 @@ export interface GeneratedMap {
   schemaVersion?: number;
   name?: string;
   url: string;
+  assetId?: string;
+  /** Player character asset id from Maps UI / initial pack. */
+  playerCharacterId?: string;
   /** Legacy mask-based obstacles. */
   masks?: PanelContent["masks"];
   spriteSheets?: PanelContent["spriteSheets"];
@@ -371,15 +396,15 @@ export interface GeneratedMap {
   placement?: PanelContent["placement"];
   mapOverlays?: PanelContent["mapOverlays"];
   characterPlacements?: GeneratedCharacterPlacement[];
+  hudPlacements?: GeneratedHudPlacement[];
   /**
    * Map v2 cut-out sprites (boundary + walkable_area). Prefer loading these
-   * from `map_*.sprites.json` via `mergeMapSprites` so `map_*.json` stays lean.
+   * from `map_*.sprites.json` via `mergeMapSidecars` so `map_*.json` stays lean.
    * Converted into masks with pixel_bbox + polygon colliders by `toMapData`.
    */
   sprites?: GeneratedMapSprite[];
   /**
-   * Optional slim sprite list for agents reading `map_*.json` without opening
-   * the sidecar. Runtime still needs full `sprites` (via merge).
+   * @deprecated Not emitted on lean maps. Open `map_*.sprites.json` instead.
    */
   spriteIndex?: GeneratedMapSpriteIndexEntry[];
   /** Legacy v2 visual patches — converted to `mapOverlays` in `toMapData`. */
@@ -755,6 +780,13 @@ function normalizeMapOverlays(
         typeof raw.linkedObstacleLabel === "string"
           ? raw.linkedObstacleLabel
           : undefined,
+      ...(((): Record<string, unknown> => {
+        const mode = (raw as { placementMode?: unknown }).placementMode;
+        if (mode === "replace" || mode === "overlay") {
+          return { placementMode: mode };
+        }
+        return {};
+      })()),
       ...(kind ? { kind } : {}),
       ...(layout ? { layout } : {}),
       currentMapStateLabel: current,
@@ -788,25 +820,61 @@ function normalizeMapOverlays(
   return out;
 }
 
-function spritesToIndex(
-  sprites: GeneratedMapSprite[],
-): GeneratedMapSpriteIndexEntry[] {
-  return sprites.map((sprite) => ({
-    label: sprite.label,
-    ...(sprite.category ? { category: sprite.category } : {}),
-    ...(sprite.pixel_bbox ? { pixel_bbox: sprite.pixel_bbox } : {}),
-    ...(sprite.spriteUrl ? { spriteUrl: sprite.spriteUrl } : {}),
-  }));
+/**
+ * Merge lean `map_*.json` with optional sprite and placement sidecars.
+ *
+ * Prefer this at registration time in `src/data/index.ts` so scenes keep using
+ * a single handle with `toMapData(mapFarm)`. Sidecar fields replace any inline
+ * values on the base when present.
+ *
+ * @example
+ * import mapFarmBase from "./map_farm.json";
+ * import mapFarmSprites from "./map_farm.sprites.json";
+ * import mapFarmPlacements from "./map_farm.placements.json";
+ * export const mapFarm = mergeMapSidecars(mapFarmBase, {
+ *   sprites: mapFarmSprites,
+ *   placements: mapFarmPlacements,
+ * });
+ */
+export function mergeMapSidecars(
+  map: GeneratedMap,
+  sidecars?: {
+    sprites?: GeneratedMapSpritesFile | GeneratedMapSprite[] | null;
+    placements?: GeneratedMapPlacementsFile | null;
+  } | null,
+): GeneratedMap {
+  let next: GeneratedMap = { ...map };
+
+  const sprites = Array.isArray(sidecars?.sprites)
+    ? sidecars.sprites
+    : sidecars?.sprites?.sprites;
+  if (sprites?.length) {
+    next = { ...next, sprites };
+  }
+
+  const placements = sidecars?.placements;
+  if (placements) {
+    next = {
+      ...next,
+      ...(placements.placement?.length
+        ? { placement: placements.placement }
+        : {}),
+      ...(placements.characterPlacements?.length
+        ? { characterPlacements: placements.characterPlacements }
+        : {}),
+      ...(placements.hudPlacements?.length
+        ? { hudPlacements: placements.hudPlacements }
+        : {}),
+    };
+  }
+
+  return next;
 }
 
 /**
  * Merge lean `map_*.json` with heavy `map_*.sprites.json`.
  *
- * Prefer this at registration time in `src/data/index.ts` so scenes keep using
- * a single handle with `toMapData(mapFarm)`. Sidecar `sprites` replace any
- * inline `sprites` on the base. If the base has no `spriteIndex`, one is
- * derived from the merged sprites (runtime convenience only — write
- * `spriteIndex` into `map_*.json` if agents should see it on disk).
+ * Prefer `mergeMapSidecars` when a placements sidecar may also be present.
  *
  * @example
  * import mapFarmBase from "./map_farm.json";
@@ -817,18 +885,7 @@ export function mergeMapSprites(
   map: GeneratedMap,
   spritesFile?: GeneratedMapSpritesFile | GeneratedMapSprite[] | null,
 ): GeneratedMap {
-  const sprites = Array.isArray(spritesFile)
-    ? spritesFile
-    : spritesFile?.sprites;
-  if (!sprites?.length) return map;
-
-  return {
-    ...map,
-    sprites,
-    spriteIndex: map.spriteIndex?.length
-      ? map.spriteIndex
-      : spritesToIndex(sprites),
-  };
+  return mergeMapSidecars(map, { sprites: spritesFile });
 }
 
 /**
@@ -839,7 +896,8 @@ export function mergeMapSprites(
  * - **Map v2**: `url` background + `walkableBoxes[{bbox}]` + `sprites[]` with
  *   `pixel_bbox` placement (map size from loaded background), cut-outs,
  *   `collision_polygons`, and unified `mapOverlays` (`kind`: erase / state /
- *   vfx / grid). Prefer `sprites` from `mergeMapSprites(map_*.json, map_*.sprites.json)`.
+ *   vfx / grid). Prefer `sprites` from
+ *   `mergeMapSidecars(map_*.json, { sprites, placements })`.
  *
  * @example
  * import { mapFarm, toMapData } from "../data";

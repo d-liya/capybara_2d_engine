@@ -78,6 +78,8 @@ export interface GeneratedCharacterPlacement {
   width?: number;
   height?: number;
   thumbnailUrl?: string;
+  /** Controlled player vs standing NPC (from Maps UI). */
+  role?: "player" | "npc";
 }
 
 /** Spawn-ready feet anchor derived from a generated character placement. */
@@ -201,6 +203,13 @@ export interface MapPlacementTarget {
   box_2d: number[];
   bounds: HoverBounds;
   renderY: number;
+  enterable?: boolean;
+  destinationMapId?: string;
+  interactionType?: string;
+  functionalRole?: string;
+  templateId?: string;
+  stages?: string[];
+  gamePlay?: string;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -397,6 +406,11 @@ export interface GameMapPanelContent {
     kind?: "erase" | "state" | "vfx" | "grid";
     layout?: "single" | "multi_inplace" | "detached_stages";
     linkedObstacleLabel?: string;
+    /**
+     * replace: suppress linked mask static art (keep collider) + erase underlay.
+     * overlay: draw sheet on top of existing map pixels.
+     */
+    placementMode?: "replace" | "overlay" | string;
     currentMapStateLabel?: string;
     currentState?: string;
     states: Array<{
@@ -1069,6 +1083,22 @@ export interface GameAPI {
    * game.triggerNearestMapEffect("door", 540, 820);
    */
   triggerNearestMapEffect(tag: string, atX: number, atY: number): boolean;
+
+  /**
+   * Play the nearest gameplay (non-background) map VFX near a world point,
+   * without requiring a tag. Prefer this for default interact when Maps UI
+   * marked a region animation as Gameplay.
+   *
+   * @param maxDistance Optional world-norm radius; omit to search the whole map.
+   *
+   * @example
+   * game.triggerNearestGameplayEffect(feet.x, feet.y, 140);
+   */
+  triggerNearestGameplayEffect(
+    atX: number,
+    atY: number,
+    maxDistance?: number,
+  ): boolean;
 
   /**
    * Find an obstacle-aware feet-position path in normalized world coordinates.
