@@ -8,11 +8,14 @@ export default defineConfig({
     port: 3000,
     open: "/index.html",
     strictPort: true,
+    // E2B public preview hosts look like 3000-<sandboxId>.e2b.app
+    allowedHosts: [".e2b.app"],
   },
   preview: {
     host: "0.0.0.0",
     port: 3000,
     strictPort: true,
+    allowedHosts: [".e2b.app"],
   },
   build: {
     outDir: "dist",
