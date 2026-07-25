@@ -211,6 +211,8 @@ export interface MapPlacementTarget {
   renderY: number;
   enterable?: boolean;
   destinationMapId?: string;
+  /** Spawn footprint on the destination map `[ymin,xmin,ymax,xmax]` 0–1000. */
+  destinationSpawnBox2d?: number[];
   interactionType?: string;
   functionalRole?: string;
   templateId?: string;

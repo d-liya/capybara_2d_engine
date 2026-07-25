@@ -77,6 +77,8 @@ interface PlacementEntry {
   enterable?: boolean;
   destinationMapId?: string;
   destinationMapAssetId?: string;
+  /** Spawn footprint on the destination map `[ymin,xmin,ymax,xmax]` 0–1000. */
+  destinationSpawnBox2d?: number[];
   interactionType?: string;
   functionalRole?: string;
   templateId?: string;
@@ -595,6 +597,14 @@ export default class GameMap {
                 placement.destinationMapAssetId.trim()
               ? { destinationMapId: placement.destinationMapAssetId.trim() }
               : {}),
+          ...(Array.isArray(placement.destinationSpawnBox2d) &&
+          placement.destinationSpawnBox2d.length >= 4
+            ? {
+                destinationSpawnBox2d: placement.destinationSpawnBox2d
+                  .slice(0, 4)
+                  .map(Number),
+              }
+            : {}),
           ...(typeof placement.interactionType === "string"
             ? { interactionType: placement.interactionType }
             : {}),

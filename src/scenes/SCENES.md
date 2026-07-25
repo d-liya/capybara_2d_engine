@@ -8,6 +8,7 @@
 | **Bootstrap** | `bootstrapWorldFromAssets` via `createGeneratedWorld` |
 | **Gameplay** | `configureGameplay` in `mainScene.ts` + `BootstrapGameplayOptions` |
 | **Inputs** | Built-in WASD / arrows; default `interact` (KeyE / touch) from bootstrap |
+| **Enterables** | Proximity glow + “Press E to enter” prompt; transition only on interact |
 
 ```ts
 import { createMainScene } from "./scenes/mainScene";
