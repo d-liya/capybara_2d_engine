@@ -65,7 +65,10 @@ import type {
   GeneratedAssetCatalog,
   GeneratedAudioAsset,
   GeneratedDialogueEntry,
+  LoadMapOptions,
+  TransitionMapOptions,
 } from "./Game.types";
+import { runScreenFade } from "./utils/screenFade";
 
 const dialogueById = new Map<string, GeneratedDialogueEntry>();
 
@@ -141,13 +144,12 @@ function registerGeneratedAudioCatalog(catalog: GeneratedAssetCatalog): void {
  * @example
  * const game = createGame({
  *   canvasId: "game",
- *   map: {
- *     panel: mapStudy,
- *     extensions: [
- *       { direction: "east", panel: mapStudyEast },
- *       { direction: "west", panel: mapStudyWest },
- *     ],
- *   },
+ *   map: toMapData(mapStudy),
+ * });
+ *
+ * // Travel to another map (door / room transition):
+ * await game.transitionMap(toMapData(mapInterior), {
+ *   spawn: { x: 500, y: 820, anchor: "feet" },
  * });
  *
  * game.defineArchetype("player", {
@@ -186,6 +188,33 @@ export function createGame(config: GameConfig): GameAPI {
       ...touchOptions,
     });
   }
+
+  const applyLoadMap = (
+    mapData: GameConfig["map"],
+    options: LoadMapOptions = {},
+  ) => {
+    runtime.loadMap(new GameMap(mapData), options);
+    const nextStaticWorldContext =
+      createStaticWorldContextFromGameMapData(mapData);
+    try {
+      const existing = runtime.getResource<typeof nextStaticWorldContext>(
+        NPC_WORLD_CONTEXT_RESOURCE,
+      );
+      if (existing && typeof existing === "object") {
+        Object.assign(existing, nextStaticWorldContext);
+      } else {
+        runtime.registerResource(
+          NPC_WORLD_CONTEXT_RESOURCE,
+          nextStaticWorldContext,
+        );
+      }
+    } catch {
+      runtime.registerResource(
+        NPC_WORLD_CONTEXT_RESOURCE,
+        nextStaticWorldContext,
+      );
+    }
+  };
 
   const api: GameAPI = {
     registerAudioCatalog: (catalog) => {
@@ -240,27 +269,20 @@ export function createGame(config: GameConfig): GameAPI {
       return undefined;
     },
     loadMap: (mapData, options = {}) => {
-      runtime.loadMap(new GameMap(mapData), options);
-      const nextStaticWorldContext =
-        createStaticWorldContextFromGameMapData(mapData);
-      try {
-        const existing = runtime.getResource<typeof nextStaticWorldContext>(
-          NPC_WORLD_CONTEXT_RESOURCE,
-        );
-        if (existing && typeof existing === "object") {
-          Object.assign(existing, nextStaticWorldContext);
+      applyLoadMap(mapData, options);
+    },
+    transitionMap: async (mapData, options = {}) => {
+      const { during, fadeMs, ...loadOptions } = options as TransitionMapOptions;
+      await runScreenFade(() => {
+        const swap = () => {
+          applyLoadMap(mapData, loadOptions);
+        };
+        if (during) {
+          during(swap);
         } else {
-          runtime.registerResource(
-            NPC_WORLD_CONTEXT_RESOURCE,
-            nextStaticWorldContext,
-          );
+          swap();
         }
-      } catch {
-        runtime.registerResource(
-          NPC_WORLD_CONTEXT_RESOURCE,
-          nextStaticWorldContext,
-        );
-      }
+      }, { fadeMs });
     },
     defineArchetype: (name, defaults) => {
       runtime.defineArchetype(name, defaults);

@@ -15,6 +15,7 @@ import {
   type GeneratedCharacterPlacement,
   type MapOverlayTarget,
   type MapPlacementTarget,
+  type TouchControlsConfig,
 } from "../Game"
 import {
   toArchetype,
@@ -22,7 +23,6 @@ import {
   type AnyGeneratedCharacter,
   type GeneratedMap,
 } from "../data"
-import { runScreenFade } from "../utils/screenFade"
 
 /** Fallback art size when a placement has no usable box (source pixels). */
 const CHARACTER_ART_WIDTH_PX = 76
@@ -103,6 +103,12 @@ export type BootstrapCharacterEntry = {
   archetype?: string
 }
 
+export type BootstrapArchetypeDefaults = {
+  speed?: number
+  radius?: number
+  frameDurationMs?: number
+}
+
 export type BootstrapWorldOptions = {
   canvasId?: string
   maps: BootstrapMapEntry[]
@@ -134,6 +140,11 @@ export type BootstrapWorldOptions = {
   followZoom?: number
   /** Cap on CSS canvas upscale; default 1 avoids magnifying map art. */
   maxViewportScale?: number
+  /**
+   * On-screen touch actions. Defaults to `{ actions: [{ action: "interact", label: "E" }] }`.
+   * Pass `false` to disable the default touch chrome.
+   */
+  touchControls?: false | TouchControlsConfig
   onAudioReady?: (start: () => void) => void
   /** Called after the first map + entities are live. */
   onBootstrapped?: (game: GameAPI) => void
@@ -144,7 +155,32 @@ export type BootstrapWorldOptions = {
   resolveCharacterArchetype?: (
     placement: GeneratedCharacterPlacement
   ) => string | null | undefined
+  /** Override default player/npc archetype fields (speed, radius, …). */
+  archetypeDefaults?: {
+    player?: BootstrapArchetypeDefaults
+    npc?: BootstrapArchetypeDefaults
+  }
+  /**
+   * When false, skip the built-in interact binding (map enter / overlay /
+   * gameplay VFX). Default true. Use with `onInteract` or scene systems.
+   */
+  enableDefaultInteract?: boolean
+  /**
+   * Runs on interact `down` before the built-in handler.
+   * Return `true` to claim the event and skip default interact.
+   */
+  onInteract?: (game: GameAPI) => boolean | void
 }
+
+/**
+ * Gameplay-facing options that `createGeneratedWorld` / `createMainScene`
+ * should forward into bootstrap. Asset sync supplies maps/characters/audio;
+ * hand-written code customizes via these fields without editing generated files.
+ */
+export type BootstrapGameplayOptions = Omit<
+  BootstrapWorldOptions,
+  "maps" | "characters" | "commonAudio"
+>
 
 function archetypeNameForAssetId(assetId: string): string {
   const trimmed = assetId.trim()
@@ -645,14 +681,15 @@ function handleDefaultInteract(
   if (enterableDest) {
     const next = mapsById.get(enterableDest)
     if (next) {
-      void runScreenFade(() => {
-        clearMapLocal(game)
-        game.loadMap(toMapData(next.map), {
-          spawn: { x, y, anchor: "feet" },
-        })
-        currentMapIdRef.id = next.id
-        spawnMapCharacters(game, opts, next.map, definedArchetypes)
-        applyMapAudio?.(next.id)
+      void game.transitionMap(toMapData(next.map), {
+        spawn: { x, y, anchor: "feet" },
+        during: (swap) => {
+          clearMapLocal(game)
+          swap()
+          currentMapIdRef.id = next.id
+          spawnMapCharacters(game, opts, next.map, definedArchetypes)
+          applyMapAudio?.(next.id)
+        },
       })
       return
     }
@@ -731,7 +768,12 @@ export function bootstrapWorldFromAssets(
     cameraEdgePadding: opts.cameraEdgePadding ?? 120,
     followZoom: opts.followZoom ?? 1.45,
     maxViewportScale: opts.maxViewportScale ?? 1,
-    touchControls: { actions: [{ action: "interact", label: "E" }] },
+    touchControls:
+      opts.touchControls === false
+        ? false
+        : (opts.touchControls ?? {
+            actions: [{ action: "interact", label: "E" }],
+          }),
   })
 
   if (opts.commonAudio?.length) {
@@ -791,11 +833,15 @@ export function bootstrapWorldFromAssets(
           (p.role === "player" || playerIdMeta === assetId)
       )
     )
+    const roleDefaults = isPlayerLike
+      ? opts.archetypeDefaults?.player
+      : opts.archetypeDefaults?.npc
     const def = toArchetype(entry.character, {
       kind: isPlayerLike ? "player" : "npc",
-      radius: isPlayerLike ? PLAYER_RADIUS : NPC_RADIUS,
-      speed: isPlayerLike ? 95 : 20,
-      frameDurationMs: 125,
+      radius:
+        roleDefaults?.radius ?? (isPlayerLike ? PLAYER_RADIUS : NPC_RADIUS),
+      speed: roleDefaults?.speed ?? (isPlayerLike ? 95 : 20),
+      frameDurationMs: roleDefaults?.frameDurationMs ?? 125,
       // Default only — spawn overrides with map-editor placement size.
       ...defaultCharacterSize(panelPixelSize(game)),
     })
@@ -847,18 +893,27 @@ export function bootstrapWorldFromAssets(
     window.addEventListener("keydown", startMusic, { once: true })
   }
 
-  game.bindInputAction("interact", ["KeyE"])
-  game.onInputAction("interact", ({ phase }) => {
-    if (phase !== "down") return
-    handleDefaultInteract(
-      game,
-      opts,
-      mapsById,
-      currentMapIdRef,
-      definedArchetypes,
-      applyMapAudio
-    )
-  })
+  if (opts.enableDefaultInteract !== false) {
+    game.bindInputAction("interact", ["KeyE"])
+    game.onInputAction("interact", ({ phase }) => {
+      if (phase !== "down") return
+      if (opts.onInteract?.(game) === true) return
+      handleDefaultInteract(
+        game,
+        opts,
+        mapsById,
+        currentMapIdRef,
+        definedArchetypes,
+        applyMapAudio
+      )
+    })
+  } else if (opts.onInteract) {
+    game.bindInputAction("interact", ["KeyE"])
+    game.onInputAction("interact", ({ phase }) => {
+      if (phase !== "down") return
+      opts.onInteract?.(game)
+    })
+  }
 
   opts.onBootstrapped?.(game)
   return game

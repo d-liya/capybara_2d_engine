@@ -411,11 +411,10 @@ export interface GeneratedMap {
   overwrites?: GeneratedMapOverwrite[];
 }
 
-/** Options for stitching multi-panel maps or overriding panel pixel size. */
+/** Options for wrapping generated map JSON into engine MapData. */
 export interface ToMapDataOptions {
-  extensions?: GameMapData["extensions"];
   /**
-   * Optional override for panel pixel size. When omitted, GameMap uses the
+   * Optional override for map pixel size. When omitted, GameMap uses the
    * loaded background image's natural dimensions.
    */
   panelPixelWidth?: number;
@@ -946,7 +945,6 @@ export function toMapData(
       placement: map.placement ?? [],
       mapOverlays,
     },
-    extensions: options.extensions,
     // Only set when the caller overrides — otherwise GameMap uses the loaded
     // background image's naturalWidth/naturalHeight.
     panelPixelWidth: options.panelPixelWidth,

@@ -254,7 +254,6 @@ World context is compact static generated-map context:
 - generated placement points
 - map overlays
 - spritesheet VFX
-- stitched map extension offsets
 - stable `itemId`s for tools and movement helpers
 
 Use:

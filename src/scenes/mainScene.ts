@@ -1,10 +1,13 @@
 import { createGame, type GameAPI, type GameMapData } from "../Game";
 import { toMapData } from "../data";
 import { createGeneratedWorld } from "./generatedWorld";
+import type { BootstrapGameplayOptions } from "./bootstrapWorldFromAssets";
 
 export {
   bootstrapWorldFromAssets,
+  type BootstrapArchetypeDefaults,
   type BootstrapCharacterEntry,
+  type BootstrapGameplayOptions,
   type BootstrapMapEntry,
   type BootstrapWorldOptions,
 } from "./bootstrapWorldFromAssets";
@@ -33,24 +36,62 @@ const STARTER_MAP: GameMapData = toMapData({
 });
 
 /**
+ * Hand-written gameplay layered on asset bootstrap.
+ * Survives regeneration of `generatedWorld.ts` — put systems, widgets,
+ * input, and entity patches here (or modules this calls).
+ */
+function configureGameplay(_game: GameAPI): void {
+  // Register systems / widgets / patches here.
+}
+
+/**
  * Main scene entry. Prefers auto-generated world wiring when
  * `./generatedWorld` exports maps; otherwise boots the blank SVG floor.
  *
  * Sync from capybara_game regenerates `generatedWorld.ts` — do not hand-edit it.
+ * Customize via `configureGameplay` above or `BootstrapGameplayOptions`.
  */
-export function createMainScene(options?: {
-  onAudioReady?: (start: () => void) => void;
-}): GameAPI {
-  const fromAssets = createGeneratedWorld({
-    onAudioReady: options?.onAudioReady,
-  });
-  if (fromAssets) return fromAssets;
+export function createMainScene(
+  options?: BootstrapGameplayOptions
+): GameAPI {
+  // Keep onBootstrapped in mainScene so it always runs once after return,
+  // even when a generated world only forwards onAudioReady.
+  const { onBootstrapped, ...generatedOpts } = options ?? {};
 
-  return createGame({
-    canvasId: "game",
+  const fromAssets = createGeneratedWorld(generatedOpts);
+  if (fromAssets) {
+    configureGameplay(fromAssets);
+    onBootstrapped?.(fromAssets);
+    return fromAssets;
+  }
+
+  const game = createGame({
+    canvasId: generatedOpts.canvasId ?? "game",
     map: STARTER_MAP,
-    cameraEdgePadding: 120,
-    followZoom: 1.45,
-    maxViewportScale: 1,
+    cameraEdgePadding: generatedOpts.cameraEdgePadding ?? 120,
+    followZoom: generatedOpts.followZoom ?? 1.45,
+    maxViewportScale: generatedOpts.maxViewportScale ?? 1,
+    touchControls:
+      generatedOpts.touchControls === false
+        ? false
+        : generatedOpts.touchControls,
   });
+
+  if (generatedOpts.onAudioReady) {
+    generatedOpts.onAudioReady(() => {
+      /* starter map has no generated BGM */
+    });
+  }
+
+  if (generatedOpts.enableDefaultInteract !== false && generatedOpts.onInteract) {
+    game.bindInputAction("interact", ["KeyE"]);
+    game.onInputAction("interact", ({ phase }) => {
+      if (phase !== "down") return;
+      generatedOpts.onInteract?.(game);
+    });
+  }
+
+  configureGameplay(game);
+  onBootstrapped?.(game);
+  return game;
 }

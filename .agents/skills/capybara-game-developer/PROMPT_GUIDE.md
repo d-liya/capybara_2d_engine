@@ -2,7 +2,7 @@
 
 The schema automatically validates asset types, IDs, dependencies (`referenceId`), and field structures. Use these instructions to guide the **content, style, composition, and physical layout** of your prompts.
 
-**Always include a `base_map` as the first asset in the batch.** It is the anchor for consistency: extend maps, map overlays, placement-aware props, and other world-space assets should set `referenceId` to that base map so materials, scale, palette, and layout stay aligned. You do not need separate generation calls—list the `base_map` first and include dependent assets in the same batch request.
+**Always include a `base_map` as the first asset in the batch.** It is the anchor for consistency: related maps, map overlays, placement-aware props, and other world-space assets should set `referenceId` to that base map so materials, scale, palette, and layout stay aligned. You do not need separate generation calls—list the `base_map` first and include dependent assets in the same batch request.
 
 ---
 
@@ -18,9 +18,11 @@ The schema automatically validates asset types, IDs, dependencies (`referenceId`
 
 ### 2. Base Map Composition & Pathing
 
-List the `base_map` before any extend maps, `props_map_overlay` assets, or other assets that depend on a `referenceId` in the same batch payload. Downstream prompts should copy floor materials, wall language, and spatial scale from this map. Set batch-level `artStyle` and, when available, batch-level `art_reference_url` on the generation request (not on the `base_map` asset).
+List the `base_map` before any related maps, `props_map_overlay` assets, or other assets that depend on a `referenceId` in the same batch payload. Downstream prompts should copy floor materials, wall language, and spatial scale from this map. Set batch-level `artStyle` and, when available, batch-level `art_reference_url` on the generation request (not on the `base_map` asset).
 
-- **Open-Edge Layout**: Compose maps with the North boundary containing the structural walls, cliff faces, buildings, or deep foliage. Leave the East, West, and South edges open and walkable to facilitate future map extensions.
+Each map is a **self-contained** playable space with its own walkable floor, boundaries, and transition points. Travel between maps at runtime with `game.transitionMap` (doors, stairs, enterable placements).
+
+- **Complete Layout**: Compose each map as a self-contained space with clear walkable floor, North-boundary structure, and authored transition points (doors, gates, stairs) when the player should leave for another map.
 - **The North-Wall Buffer Rule**: If an NPC or player must stand or move behind a counter, bar, desk, or workstation along the North wall, you must describe a horizontal walkable aisle or gap between that furniture piece and the North wall. If the furniture is flush against the North wall, place the interactive space on its open South side.
 - **Clear Walkable Lanes**: Keep central corridors open. Group decorative props and heavy furniture tightly in designated corners or along boundaries to prevent collision-locking.
 - **Precise Alignment**: When placing transitions (doors, gates, stairs) along the North boundary, define their horizontal position clearly (e.g., _"exactly centered on the North wall"_).
@@ -28,21 +30,23 @@ List the `base_map` before any extend maps, `props_map_overlay` assets, or other
 #### Base Map Prompt Template:
 
 ```text
-[Theme/Location] interior/exterior. Floor is smooth [material] with East, West, and South edges left open and continuous. The North boundary is a flat, straight [wall material/facade] containing [aligned doors/archways] and [wall-mounted decor]. A compact [main furniture/feature] sits in the upper-middle floor, leaving a clear horizontal aisle behind it. Isolated, grid-aligned [props] are placed in the [named corner/zone] surrounded by open walkable floor space. Flat ambient lighting and small clean drop shadows directly underneath each asset.
+[Theme/Location] interior/exterior. Floor is smooth [material] with clear walkable lanes. The North boundary is a flat, straight [wall material/facade] containing [aligned doors/archways] and [wall-mounted decor]. A compact [main furniture/feature] sits in the upper-middle floor, leaving a clear horizontal aisle behind it. Isolated, grid-aligned [props] are placed in the [named corner/zone] surrounded by open walkable floor space. Flat ambient lighting and small clean drop shadows directly underneath each asset.
 ```
 
 ---
 
-### 3. Extend Map Composition
+### 3. Related Map Composition
 
-- **Seamless Seams**: Keep the transition edge shared with the reference map completely clear of props, walls, or decorative assets.
-- **Material Matching**: Use the exact floor-material description from the reference map verbatim to maintain consistency across transition boundaries.
-- **Secondary Scale**: Keep extensions structurally simple. Push heavy utility elements (hearths, shelves, storage) flat against the North wall.
+Generate additional maps (interiors, adjacent rooms, exteriors) as **separate** assets with `referenceId` pointing at the base map for material/style match. Each loads independently via `transitionMap` / `loadMap` as its own self-contained space.
 
-#### Extend Map Prompt Template:
+- **Material Matching**: Use the exact floor-material description from the reference map verbatim so related rooms feel like the same world.
+- **Transition Clarity**: Describe doors / stairs / gates that gameplay will wire as enterable placements to another map id.
+- **Secondary Scale**: Keep secondary rooms structurally simple. Push heavy utility elements (hearths, shelves, storage) flat against the North wall.
+
+#### Related Map Prompt Template:
 
 ```text
-[Same shell type as reference map]. Floor is made of the exact same [floor material phrase copied verbatim from reference map], bleeding continuously off the [open transition edge] with no obstacles. The North boundary features the same flat [wall material] with [theme-specific wall fixtures] flush against it. The floor is highly walkable, with isolated [props] placed in the [opposite zone] far from the transition seam.
+[Same shell type as reference map]. Floor is made of the exact same [floor material phrase copied verbatim from reference map]. The North boundary features the same flat [wall material] with [theme-specific wall fixtures] flush against it. A clear [door/stairs/gate] on the [wall/edge] marks the exit back toward the reference location. The floor is highly walkable, with isolated [props] placed in the [named zone].
 ```
 
 ---

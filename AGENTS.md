@@ -55,13 +55,13 @@ This project uses **documentation-driven development**. When working with genera
 
 ### Coordinate System
 
-- **Normalized coordinates**: 0-1000 per panel
+- **Normalized coordinates**: 0-1000 per map
 - **Entity `x`, `y`**: Always **top-left** corner
 - **Spawning methods**:
   - `spawnAtFeet(archetype, feetX, feetY, props)` — For characters (feetX = feet center, feetY = bottom edge)
   - `spawnCentered(archetype, centerX, centerY, props)` — For static props (arguments are center; entity stores top-left)
   - `placeProp(archetype, placement, props)` — For generated placement boxes (top-left + size)
-- **Map extensions**: When stitching panels, world origin is the compiled map's top-left. Extending west/north shifts origin; adjust spawn coordinates to keep entities reachable.
+- **Map travel**: Each map is a self-contained space. Prefer `game.transitionMap(toMapData(...))` for doors / room swaps (fades by default). Use instant `game.loadMap(...)` only when you already own the transition.
 
 ### Asset Integration
 

@@ -14,7 +14,7 @@ export interface Rect {
 }
 
 /**
- * Map normalised coords → world pixel coords (full stitched map extent).
+ * Map normalised coords → world pixel coords (map extent).
  * The canvas is a viewport; camera transform pans world pixels on screen.
  */
 export function toPixel(

@@ -10,7 +10,7 @@ For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep
 
 1. **`src/data/` generated JSON** — map/character/prop/audio handles for _this_ game (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; exports from `index.ts` / `props.ts`). Never invent names from recipes or placeholders.
 2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `mergeMapSidecars`, `mergeMapSprites`, `toArchetype`). Stable across regenerations.
-3. **`src/Game.ts`** — public gameplay API (`createGame`, `loadMap`, overlays, audio helpers, spawning).
+3. **`src/Game.ts`** — public gameplay API (`createGame`, `transitionMap` / `loadMap`, overlays, audio helpers, spawning).
 
 Prefer lean `map_*.json` for layout/overlays. Open `map_*.sprites.json` for collision polygons and `map_*.placements.json` for placement lists. Do not hand-edit generated JSON unless explicitly asked.
 
@@ -42,10 +42,8 @@ When new generated files land, register them before using them in a scene:
 
 ```txt
 Need different map geography?
-  ├─ Same continuous world (stitched panels)
-  │    → toMapData(base, { extensions: [...] })
-  └─ Separate room / interior ↔ exterior
-       → clear mapLocal entities, then game.loadMap(toMapData(...))
+  └─ Separate room / interior ↔ exterior / any travel
+       → clear mapLocal in `during`, then game.transitionMap(toMapData(...))
 
 Change a map-baked door / chest / gate visual or collider?
   → game.setMapOverlayState(id, state)   // NOT a spawned prop
@@ -60,9 +58,9 @@ Map-authored spritesheet VFX?
 
 | Intent                                | API                                            |
 | ------------------------------------- | ---------------------------------------------- |
-| First / only panel at boot            | `createGame({ map: toMapData(mapHandle) })`    |
-| Stitch adjacent panels into one world | `toMapData(base, { extensions })`              |
-| Swap to a non-stitched map            | `game.loadMap(toMapData(...), { spawn })`      |
+| First / only map at boot              | `createGame({ map: toMapData(mapHandle) })`    |
+| Door / room travel (fade by default)  | `game.transitionMap(toMapData(...), { spawn, during })` |
+| Instant swap (tools / custom fade)    | `game.loadMap(toMapData(...), { spawn })`      |
 | Toggle baked overlay state            | `setMapOverlayState`                           |
 | Spawn / stage portable props          | `placeProp` + `getPropItemUrl`                 |
 | Trigger map VFX                       | `triggerMapEffect` / `triggerNearestMapEffect` |
@@ -103,73 +101,39 @@ game.setControlledEntity(playerId);
 // Portrait / HUD art: getAssetUrl("<portrait_name_from_common.json>")
 ```
 
-## Recipe: extended (stitched) map
+## Recipe: map travel (`transitionMap`)
 
-One continuous world from multiple generated panels:
+Each map is a **self-contained** space. Prefer `transitionMap` for house interior → village exterior, dungeon room → overworld, and any other travel between authored maps. It fades to black by default, runs your mid-fade work, swaps the map, then fades back in.
 
-```ts
-import { mapMain, mapEast, toMapData } from "../data";
-import { createGame } from "../Game";
+`loadMap` is the instant primitive underneath (same preserve/reset rules). Use it only for tools, tests, or when you already own a custom transition.
 
-const game = createGame({
-  canvasId: "game",
-  map: toMapData(mapMain, {
-    extensions: [{ direction: "east", panel: toMapData(mapEast) }],
-  }),
-  cameraEdgePadding: 120,
-  // Optional: followZoom / maxViewportScale for phone FOV and upscale cap
-});
-```
-
-**Origin gotcha:** stitched world origin is the top-left of the _compiled_ map. Extending east/south is easiest; west/north can shift the origin so spawn coords must be adjusted. Prefer extending right/down when designing the layout.
-
-You can also pass the same `extensions` option into `loadMap(toMapData(...))` when replacing the whole stitched world.
-
-## Recipe: separate map load (room swap)
-
-Use when maps are **not** stitched panels (house interior → village exterior, dungeon room → overworld).
-
-`loadMap` **preserves** resources, widgets, archetypes, and existing entities. It **resets** navigation/pathfinding, hover, held movement input, and camera bounds; moves the controlled entity if `spawn` is set; emits `map:changed`.
+Both **preserve** resources, widgets, archetypes, and existing entities. They **reset** navigation/pathfinding, hover, held movement input, and camera bounds; move the controlled entity if `spawn` is set; emit `map:changed`.
 
 Clear room-only entities yourself — do not assume the previous map’s NPCs/props disappear:
 
 ```ts
 import { mapInterior, mapExterior, toMapData } from "../data";
-import { runScreenFade } from "../utils/screenFade";
 
-await runScreenFade(() => {
-  for (const id of game.query((c) => c.mapLocal === true)) {
-    game.destroy(id);
-  }
-
-  game.loadMap(toMapData(mapExterior), {
-    spawn: { x: 500, y: 820, anchor: "feet" },
-  });
-  spawnExteriorStuff(game);
-  game.emit("map:entered", { mapId: "exterior" });
+await game.transitionMap(toMapData(mapExterior), {
+  spawn: { x: 500, y: 820, anchor: "feet" },
+  during: (swap) => {
+    for (const id of game.query((c) => c.mapLocal === true)) {
+      game.destroy(id);
+    }
+    swap();
+    spawnExteriorStuff(game);
+    game.emit("map:entered", { mapId: "exterior" });
+  },
 });
 ```
 
-### Screen fade around `loadMap`
+Call `swap()` inside `during` when you want the map load to apply — clear before it, respawn after. If you omit `during`, the map swaps automatically mid-fade.
 
-`loadMap` is instant — wrap it in `runScreenFade` from `src/utils/screenFade.ts` for door/room transitions. The helper fades to black, runs your callback (destroy `mapLocal`, `loadMap`, respawn room content), waits one paint, then fades back in. Blocks pointer input during the fade.
-
-```ts
-import { runScreenFade } from "../utils/screenFade";
-
-await runScreenFade(
-  () => {
-    game.loadMap(toMapData(nextMap), {
-      spawn: { x: 500, y: 900, anchor: "feet" },
-    });
-  },
-  { fadeMs: 400 },
-);
-```
-
-Live pattern: `src/systems/MapTransitionSystem.ts`. Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
+Optional: `{ fadeMs: 400 }` (default). Live pattern: `src/scenes/bootstrapWorldFromAssets.ts` (enterable placements). Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
 
 Keep an explicit lifecycle: each NPC/clue/pickup is either `mapLocal` (rebuild), hidden off-map, or intentionally persistent.
+
+Low-level fade helper (rarely needed if you use `transitionMap`): `runScreenFade` from `src/utils/screenFade.ts`.
 
 ## Recipe: map overlays (baked state changes)
 
@@ -320,7 +284,7 @@ loadingGate.teardown();
 
 Inside the scene, start looping BGM with the **dual-path** unlock (`onAudioReady` **and** one-shot `keydown`/`pointerdown`) — see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md) “Audio/music pattern”. Gate-only wiring fails in local/dev.
 
-After wiring a scene, update `src/scenes/SCENES.md` (active file, map/extensions, resources, archetypes, systems, inputs, widgets, audio, SDK). Checklist: [`src/scenes/README.md`](../../../src/scenes/README.md).
+After wiring a scene, update `src/scenes/SCENES.md` (active file, maps / `transitionMap` travel, resources, archetypes, systems, inputs, widgets, audio, SDK). Checklist: [`src/scenes/README.md`](../../../src/scenes/README.md).
 
 ## Name collisions: “overlay”
 

@@ -288,6 +288,22 @@ export interface LoadMapOptions {
   };
 }
 
+/**
+ * Options for `game.transitionMap` — fades to black, runs mid-fade work, loads
+ * the map, then fades back in.
+ */
+export interface TransitionMapOptions extends LoadMapOptions {
+  /** Fade duration in ms (default 400). */
+  fadeMs?: number;
+  /**
+   * Runs while the screen is fully black. Call `swap()` to apply `loadMap`
+   * (with `spawn`). Clear map-local entities before `swap()`; respawn after.
+   *
+   * If omitted, `swap()` runs automatically.
+   */
+  during?: (swap: () => void) => void;
+}
+
 /** Public Game facade type. Same pattern as PathPoint. */
 export type InputActionPhase = "down" | "up";
 
@@ -332,9 +348,6 @@ export type UiStatePatch<
 
 /** Public Game facade type. Same pattern as PathPoint. */
 export type Box2D = [number, number, number, number] | number[];
-
-/** Public Game facade type. Same pattern as PathPoint. */
-export type CardinalDirection = "north" | "south" | "east" | "west";
 
 /** Normalized polygon vertex for map collision (0–1000 space). */
 export interface GameMapCollisionPoint {
@@ -441,16 +454,9 @@ export interface GameMapPanelContent {
   }>;
 }
 
-/** Public Game facade type. Same pattern as PathPoint. */
-export interface GameMapExtension {
-  direction: CardinalDirection;
-  panel: GameMapPanelData;
-}
-
-/** Public Game facade type. Same pattern as PathPoint. */
+/** Nested map payload — one isolated map (use `loadMap` to travel between maps). */
 export interface GameMapPanelData {
   panel: GameMapPanelContent;
-  extensions?: GameMapExtension[];
 }
 
 /**
@@ -458,6 +464,9 @@ export interface GameMapPanelData {
  *
  * Generated map JSON is flat — wrap it with `toMapData(generatedMap)` from
  * `src/data` instead of hand-building `panel`.
+ *
+ * Each `GameMapData` is one self-contained map. Swap maps with
+ * `game.transitionMap(toMapData(...))` (fade) or `game.loadMap(...)` (instant).
  */
 export interface GameMapData extends GameMapPanelData {
   name?: string;
@@ -635,11 +644,6 @@ export interface GameConfig {
    *       },
    *     ],
    *   },
-   * // Optional map panel extensions for multi-panel maps.
-   *   extensions: [
-   *     { direction: "east", panel: mapStudyEast },
-   *     { direction: "west", panel: mapStudyWest },
-   *   ],
    * }
    */
   map: GameMapData;
@@ -690,10 +694,11 @@ export interface GameAPI {
   getDialogue(id: string): GeneratedDialogueEntry | undefined;
 
   /**
-   * Replace the current map with a separate non-stitched map.
+   * Replace the current map with another isolated map (instant).
    *
-   * Use this for interior/exterior transitions, dungeon rooms, overworld swaps,
-   * or any transition that should not be modeled as a stitched extension panel.
+   * Prefer `transitionMap` for doors / room travel — it fades by default.
+   * Use raw `loadMap` for tools, tests, or when you already own the fade.
+   *
    * Existing resources, widgets, archetypes, and entities are preserved. Destroy
    * and respawn map-local entities in gameplay code if needed.
    *
@@ -703,6 +708,29 @@ export interface GameAPI {
    * - `feet` treats x/y as the character feet/bottom anchor.
    */
   loadMap(map: GameMapData, options?: LoadMapOptions): void;
+
+  /**
+   * Fade to black, swap to another isolated map, then fade back in.
+   *
+   * Default door/room travel path. Mid-fade work (clear `mapLocal`, respawn,
+   * audio) goes in `during` — call `swap()` when you want `loadMap` to run:
+   *
+   * @example
+   * await game.transitionMap(toMapData(mapExterior), {
+   *   spawn: { x: 500, y: 820, anchor: "feet" },
+   *   during: (swap) => {
+   *     for (const id of game.query((c) => c.mapLocal === true)) {
+   *       game.destroy(id);
+   *     }
+   *     swap();
+   *     spawnExteriorStuff(game);
+   *   },
+   * });
+   */
+  transitionMap(
+    map: GameMapData,
+    options?: TransitionMapOptions,
+  ): Promise<void>;
 
   /**
    * Register reusable default components for a named entity type.

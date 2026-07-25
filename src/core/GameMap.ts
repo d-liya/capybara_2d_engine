@@ -103,23 +103,7 @@ interface ErasePatch {
   image: HTMLImageElement | null;
 }
 
-export type CardinalDirection = "north" | "south" | "east" | "west";
-
-/** Grid-cell delta for each direction. Each panel is one 1000-unit cell. */
-const DIRECTION_GRID: Record<CardinalDirection, { dx: number; dy: number }> = {
-  north: { dx: 0, dy: -1 },
-  south: { dx: 0, dy: 1 },
-  east: { dx: 1, dy: 0 },
-  west: { dx: -1, dy: 0 },
-};
-
-/** One directional extension — can itself carry further extensions. */
-export interface MapExtension {
-  direction: CardinalDirection;
-  panel: MapPanelData;
-}
-
-/** Grouped payload for one panel's map content. */
+/** Grouped payload for one map's content. */
 export interface MapPanelContent {
   url: string;
   masks?: MapMaskEntry[];
@@ -129,15 +113,9 @@ export interface MapPanelContent {
   mapOverlays?: MapOverlayEntry[];
 }
 
-/**
- * Per-panel data. Extensions are recursive: a panel can itself have
- * extensions, allowing chains of any depth (e.g. east → east-east → east-east-east).
- */
+/** Nested map payload — one isolated map (no panel stitching). */
 export interface MapPanelData {
-  /** Grouped shape for panel-specific fields. */
   panel: MapPanelContent;
-  /** Panels stitched to this panel in the given direction. */
-  extensions?: MapExtension[];
 }
 
 export interface MapData extends MapPanelData {
@@ -145,8 +123,8 @@ export interface MapData extends MapPanelData {
   characterPlacements?: CharacterPlacementEntry[];
   panel: MapPanelContent & { masks: MapMaskEntry[] };
   /**
-   * Pixel dimensions of a single panel. Determines the total canvas size when
-   * panels are stitched together. Defaults to 2508 × 1672.
+   * Pixel dimensions of the map image. Defaults to 2508 × 1672 until the
+   * background loads (then natural size is used unless these were set).
    */
   panelPixelWidth?: number;
   panelPixelHeight?: number;
@@ -303,21 +281,20 @@ interface BackgroundPanel {
 }
 
 /**
- * GameMap owns the background image(s), all MapObjects, and the walkable areas
- * for one level. A level may consist of multiple image panels stitched together
- * in any cardinal direction via the `extensions` field on MapData.
+ * GameMap owns the background image, MapObjects, and walkable areas for one
+ * isolated map. Travel between maps with `game.loadMap(...)` — maps are never
+ * stitched into a multi-panel world.
  *
  * Coordinate contract
  * -------------------
- * All stored values (object bounds, colliders, walkable boxes) are in the
- * world-norm space: 0 – worldNormWidth × 0 – worldNormHeight.
- * Each panel occupies exactly 1000 × 1000 norm units.
+ * All stored values (object bounds, colliders, walkable boxes) are in
+ * world-norm space: 0–1000 × 0–1000.
  * The canvas is sized to worldPixelWidth × worldPixelHeight.
  *
  * Public surface
  * --------------
- * .worldPixelWidth / .worldPixelHeight  – total canvas size for camera init
- * .worldNormWidth  / .worldNormHeight   – total norm extent (for toPixel calls)
+ * .worldPixelWidth / .worldPixelHeight  – canvas size for camera init
+ * .worldNormWidth  / .worldNormHeight   – always 1000 × 1000
  * .checkCollision(rect)  – true if rect should be blocked
  * .drawBackground(ctx)   – renders map url and mask backgroundImages
  * .getRenderables()      – returns MapObject[] + map spritesheets for Y-sort queue
@@ -358,38 +335,19 @@ export default class GameMap {
     this.panelPixelWidth = panelPixelWidth;
     this.panelPixelHeight = panelPixelHeight;
 
-    // ── Resolve all panels into grid cells (BFS, supports recursive chaining) ─
-    type Cell = { data: MapPanelData; gridX: number; gridY: number };
-    const cells: Cell[] = [];
-    const queue: Cell[] = [{ data: mapData, gridX: 0, gridY: 0 }];
-    while (queue.length > 0) {
-      const cell = queue.shift()!;
-      cells.push(cell);
-      for (const ext of cell.data.extensions ?? []) {
-        const { dx, dy } = DIRECTION_GRID[ext.direction];
-        queue.push({
-          data: ext.panel,
-          gridX: cell.gridX + dx,
-          gridY: cell.gridY + dy,
-        });
-      }
-    }
+    // One isolated map — travel between maps via loadMap, not panel stitching.
+    this._numCols = 1;
+    this._numRows = 1;
+    this.worldNormWidth = NORM;
+    this.worldNormHeight = NORM;
+    this.worldPixelWidth = panelPixelWidth;
+    this.worldPixelHeight = panelPixelHeight;
 
-    // Normalise so the minimum grid coords become (0, 0).
-    const minGridX = Math.min(...cells.map((c) => c.gridX));
-    const minGridY = Math.min(...cells.map((c) => c.gridY));
-    const maxGridX = Math.max(...cells.map((c) => c.gridX));
-    const maxGridY = Math.max(...cells.map((c) => c.gridY));
-
-    const numCols = maxGridX - minGridX + 1;
-    const numRows = maxGridY - minGridY + 1;
-    this._numCols = numCols;
-    this._numRows = numRows;
-
-    this.worldNormWidth = numCols * NORM;
-    this.worldNormHeight = numRows * NORM;
-    this.worldPixelWidth = numCols * panelPixelWidth;
-    this.worldPixelHeight = numRows * panelPixelHeight;
+    const cells: Array<{ data: MapPanelData; gridX: number; gridY: number }> = [
+      { data: mapData, gridX: 0, gridY: 0 },
+    ];
+    const minGridX = 0;
+    const minGridY = 0;
 
     // ── Build per-panel objects ──────────────────────────────────────────────
     this._backgroundPanels = [];

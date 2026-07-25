@@ -127,48 +127,41 @@ void (async () => {
 return game;
 ```
 
-### Separate map transitions
+### Map transitions (`transitionMap`)
 
-For registration, stitched extensions vs `loadMap`, and map overlay wiring, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
+For registration, map travel, and map overlay wiring, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
 
-Use `game.loadMap(...)` when moving between maps that are not stitched extension panels, such as house interior → village exterior or dungeon room → overworld. Existing resources, widgets, archetypes, and entities are preserved; gameplay code must deliberately destroy, hide, rebuild, or preserve map-local entities as needed. Do not assume `loadMap` clears NPCs, props, clue decals, or timers for the previous room.
+Each map is a **self-contained** space. Prefer `game.transitionMap(...)` for doors / room travel — it fades to black by default, runs mid-fade work, swaps the map, then fades in. Use instant `game.loadMap(...)` only for tools, tests, or custom transitions. Existing resources, widgets, archetypes, and entities are preserved; gameplay code must deliberately destroy, hide, rebuild, or preserve map-local entities as needed. A map swap does not clear NPCs, props, clue decals, or timers for the previous room — handle those explicitly.
 
 ```ts
 import { mapInterior, mapExterior, toMapData } from "../data";
-import { runScreenFade } from "../utils/screenFade";
 
-// Interior -> exterior. Wrap loadMap for a smooth fade (see ASSET_INTEGRATION.md).
-await runScreenFade(() => {
-  game.loadMap(toMapData(mapExterior), {
-    spawn: { x: 500, y: 820, anchor: "feet" },
-  });
+// Interior -> exterior with default fade.
+await game.transitionMap(toMapData(mapExterior), {
+  spawn: { x: 500, y: 820, anchor: "feet" },
 });
 ```
 
 A common gameplay pattern is to mark room-specific entities as map-local and clear them before loading the next room:
 
 ```ts
-import { runScreenFade } from "../utils/screenFade";
-
-await runScreenFade(() => {
-  for (const id of game.query((c) => c.mapLocal === true)) {
-    game.destroy(id);
-  }
-
-  game.loadMap(toMapData(mapInterior), {
-    spawn: { x: 480, y: 760, anchor: "feet" },
-  });
-
-  // Respawn only the entities that belong in this room.
-  spawnInteriorNpcsAndClues(game);
-
-  game.emit("map:entered", { mapId: "interior" });
+await game.transitionMap(toMapData(mapInterior), {
+  spawn: { x: 480, y: 760, anchor: "feet" },
+  during: (swap) => {
+    for (const id of game.query((c) => c.mapLocal === true)) {
+      game.destroy(id);
+    }
+    swap();
+    // Respawn only the entities that belong in this room.
+    spawnInteriorNpcsAndClues(game);
+    game.emit("map:entered", { mapId: "interior" });
+  },
 });
 ```
 
 For multi-map games, keep an explicit lifecycle table in the scene/plan: each NPC, clue prop, pickup, and room-only marker should be either `mapLocal` and rebuilt, hidden while off-map, or intentionally persistent. A courtyard clue or NPC should not remain visible in an interior/study map unless that is deliberate.
 
-`loadMap` resets active navigation/pathfinding state, clears hover state, stops held movement input, updates the camera bounds, moves the controlled entity if a spawn is supplied, and emits `map:changed`.
+`loadMap` / the swap inside `transitionMap` resets active navigation/pathfinding state, clears hover state, stops held movement input, updates the camera bounds, moves the controlled entity if a spawn is supplied, and emits `map:changed`.
 
 ### Resources
 
@@ -358,22 +351,18 @@ Lean `map_*.json` shape:
 }
 ```
 
-`createGame` expects the engine's nested `{ panel: { ... } }` `MapData`. Use `toMapData(...)` to bridge the two instead of hand-wrapping. It also accepts `extensions` for multi-panel maps, so single-panel scenes stay simple while staying extensible:
+`createGame` expects the engine's nested `{ panel: { ... } }` `MapData`. Use `toMapData(...)` to bridge the two instead of hand-wrapping. Each map is isolated — travel with `game.transitionMap(toMapData(...))` (fade) or `game.loadMap(...)` (instant):
 
 ```ts
-// Single panel:
 const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120,
 });
 
-// Multi-panel (stitch flat panels together):
-createGame({
-  canvasId: "game",
-  map: toMapData(mapMain, {
-    extensions: [{ direction: "east", panel: toMapData(mapEast) }],
-  }),
+// Later — swap to another authored map with default fade:
+await game.transitionMap(toMapData(mapInterior), {
+  spawn: { x: 500, y: 820, anchor: "feet" },
 });
 ```
 
@@ -481,7 +470,7 @@ game.setEntityAnimation(playerId, "<character>_default_animation");
 game.setEntityFacingX(npcId, player.x < npc.x ? -1 : 1);
 ```
 
-Coordinates are normalized per map panel: `0-1000`.
+Coordinates are normalized per map: `0-1000`. Maps are isolated — travel with `transitionMap` (preferred) or `loadMap`.
 
 ### NPC pathfinding / destinations
 

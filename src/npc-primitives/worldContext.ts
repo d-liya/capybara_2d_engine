@@ -69,67 +69,13 @@ function generatedMapFromGameMapData(mapData: GameMapData): GeneratedMap {
   };
 }
 
-function directionGridDelta(direction: unknown): { x: number; y: number } {
-  switch (direction) {
-    case "east":
-      return { x: 1, y: 0 };
-    case "west":
-      return { x: -1, y: 0 };
-    case "south":
-      return { x: 0, y: 1 };
-    case "north":
-      return { x: 0, y: -1 };
-    default:
-      return { x: 0, y: 0 };
-  }
-}
-
 function collectPositionedMapsFromGameMapData(mapData: GameMapData): PositionedGeneratedMap[] {
-  const entries: Array<PositionedGeneratedMap & { gridX: number; gridY: number }> = [];
-  const queue: Array<{ data: unknown; fallbackName: string; gridX: number; gridY: number }> = [
-    { data: mapData, fallbackName: "map", gridX: 0, gridY: 0 },
-  ];
+  const raw = mapData as unknown as UnknownRecord;
+  if (!raw || typeof raw !== "object" || !raw.panel) return [];
 
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    const raw = current.data as UnknownRecord;
-    if (!raw || typeof raw !== "object" || !raw.panel) continue;
-
-    const map = generatedMapFromGameMapData(raw as unknown as GameMapData);
-    if (!map.name) map.name = current.fallbackName;
-    entries.push({
-      map,
-      gridX: current.gridX,
-      gridY: current.gridY,
-      offsetX: current.gridX * 1000,
-      offsetY: current.gridY * 1000,
-    });
-
-    const extensions = Array.isArray(raw.extensions) ? raw.extensions as UnknownRecord[] : [];
-    for (const extension of extensions) {
-      const delta = directionGridDelta(extension.direction);
-      queue.push({
-        data: extension.panel,
-        fallbackName: `${map.name ?? current.fallbackName}_${extension.direction ?? "extension"}`,
-        gridX: current.gridX + delta.x,
-        gridY: current.gridY + delta.y,
-      });
-    }
-  }
-
-  if (entries.length === 0) return [];
-
-  // GameMap normalizes stitched panels so the minimum grid coordinate becomes 0,0.
-  // World context must use the same normalized offsets or movement targets land on
-  // the wrong panel for west/north/east/south extensions.
-  const minGridX = Math.min(...entries.map((entry) => entry.gridX));
-  const minGridY = Math.min(...entries.map((entry) => entry.gridY));
-
-  return entries.map((entry) => ({
-    map: entry.map,
-    offsetX: (entry.gridX - minGridX) * 1000,
-    offsetY: (entry.gridY - minGridY) * 1000,
-  }));
+  const map = generatedMapFromGameMapData(mapData);
+  if (!map.name) map.name = "map";
+  return [{ map, offsetX: 0, offsetY: 0 }];
 }
 
 function collectMapsFromGameMapData(mapData: GameMapData): GeneratedMap[] {

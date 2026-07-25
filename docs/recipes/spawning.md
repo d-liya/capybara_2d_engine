@@ -98,7 +98,7 @@ game.defineArchetype(
 );
 ```
 
-Use `spawnAtFeet(...)` with these character sizes so the visible foot anchor, collision, and Y-sort stay consistent. In the current stitched/camera setup, comfortable movement is about `95` for the player and `14`-`20` for slow NPC patrols; tune by visual feel.
+Use `spawnAtFeet(...)` with these character sizes so the visible foot anchor, collision, and Y-sort stay consistent. Comfortable movement is about `95` for the player and `14`-`20` for slow NPC patrols; tune by visual feel.
 
 ## Prop aspect ratio
 
