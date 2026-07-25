@@ -5,6 +5,8 @@ import {
   rectsOverlap,
   snapCanvasValue,
   toPixel,
+  fitRectInBox,
+  resolveImageFit,
   NORM,
 } from "../utils/common";
 import GameMap from "./GameMap";
@@ -842,12 +844,7 @@ export default class GameRuntime {
     if (typeof patch.left === "boolean") this.keys.left = patch.left;
     if (typeof patch.right === "boolean") this.keys.right = patch.right;
 
-    if (
-      this.keys.up ||
-      this.keys.down ||
-      this.keys.left ||
-      this.keys.right
-    ) {
+    if (this.keys.up || this.keys.down || this.keys.left || this.keys.right) {
       this._clearControlledEntityNavigation();
     }
   }
@@ -2124,6 +2121,7 @@ export default class GameRuntime {
         this._inferEntityWidth(entity),
         this._inferEntityHeight(entity),
       );
+      actor.setImageFit(entity.imageFit);
       const facingX = Number(entity.facingX);
       if (Number.isFinite(facingX)) actor.setFacingX(facingX);
       // Freeze a walk-strip frame when there is no dedicated idle art.
@@ -2433,13 +2431,27 @@ export default class GameRuntime {
           const drawY = snapCanvasValue(p1.y);
           const drawX2 = snapCanvasValue(p2.x);
           const drawY2 = snapCanvasValue(p2.y);
+          const boxW = drawX2 - drawX;
+          const boxH = drawY2 - drawY;
+          const natW = imageState.image.naturalWidth;
+          const natH = imageState.image.naturalHeight;
+          const contentAspect = natW > 0 && natH > 0 ? natW / natH : 1;
+          const fitted = fitRectInBox(
+            drawX,
+            drawY,
+            boxW,
+            boxH,
+            contentAspect,
+            resolveImageFit(entity.imageFit),
+            "center",
+          );
           this._drawWithEntityEffects(ctx, entity, () => {
             ctx.drawImage(
               imageState.image,
-              drawX,
-              drawY,
-              drawX2 - drawX,
-              drawY2 - drawY,
+              fitted.x,
+              fitted.y,
+              fitted.w,
+              fitted.h,
             );
           });
         },

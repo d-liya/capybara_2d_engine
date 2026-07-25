@@ -11,6 +11,13 @@
 export type EntityId = string;
 export type ComponentBag = Record<string, unknown>;
 
+/**
+ * How a sprite fills its entity `width`×`height` box.
+ * - `contain` (default): preserve aspect; letterbox inside the box.
+ * - `fill`: stretch to fill the box (floor decals, intentional distortion).
+ */
+export type ImageFit = "contain" | "fill";
+
 /** Current generated-data contract understood by this engine. */
 export const GENERATED_ASSET_CONTRACT_VERSION = 1 as const;
 export type GeneratedAssetContractVersion =
@@ -83,8 +90,7 @@ export interface GeneratedCharacterPlacement {
 }
 
 /** Spawn-ready feet anchor derived from a generated character placement. */
-export interface CharacterPlacementSpawnPlan
-  extends GeneratedCharacterPlacement {
+export interface CharacterPlacementSpawnPlan extends GeneratedCharacterPlacement {
   feetX: number;
   feetY: number;
 }
@@ -705,6 +711,7 @@ export interface GameAPI {
    * - Animated actor: `spriteSheets`
    * - Static image: `sprite` or `imageUrl`
    * - Common placement/sizing: `x`, `y`, `width`, `height`, `renderY`
+   * - `imageFit`: `"contain"` (default) or `"fill"` — how the sprite fills width×height
    *
    * @example
    * game.defineArchetype("npc", {

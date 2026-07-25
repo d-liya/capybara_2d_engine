@@ -59,11 +59,12 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * True touch / phone UX only. Do not use `maxTouchPoints` alone — macOS
+ * trackpads report touch points and were incorrectly getting followZoom + cover.
+ */
 function isTouchPrimaryDevice(): boolean {
-  return (
-    window.matchMedia("(pointer: coarse)").matches ||
-    navigator.maxTouchPoints > 0
-  );
+  return window.matchMedia("(pointer: coarse)").matches;
 }
 
 export default class CameraViewportController {
@@ -127,30 +128,36 @@ export default class CameraViewportController {
     const pw = this.panelPixelWidth;
     const ph = this.panelPixelHeight;
 
-    // Camera follow is needed when the world is wider/taller than one panel
-    // (multi-panel map) OR when on a touch device (zoom + pan UX).
+    // Camera follow when the world is wider/taller than one panel, on a real
+    // touch phone, OR when edge padding is requested (desktop Maps preview
+    // keeps follow + cover so the camera can drift with cameraEdgePadding).
     const worldOverflows =
       this.worldPixelWidth > pw || this.worldPixelHeight > ph;
     const shouldFollow = isTouch || worldOverflows || this.edgePadding > 0;
     this.cameraFollowEnabled = shouldFollow;
 
-    // In follow mode we use cover so the viewport window remains bounded and
-    // camera travel reaches the real world edges on any aspect ratio.
+    // Follow mode uses cover so the viewport stays filled while the camera moves.
     const rawScale = shouldFollow
       ? Math.max(vw / pw, vh / ph)
       : Math.min(vw / pw, vh / ph);
-    const scale = Math.min(rawScale, this.maxViewportScale);
+    let scale = Math.min(rawScale, this.maxViewportScale);
 
-    // Touch gets an extra zoom-in; desktop multi-panel scrolls at zoom=1.
+    // Prefer integer downscales (1/2, 1/3, …) when close — sharper CSS resample.
+    if (scale > 0 && scale < 1) {
+      const inv = 1 / scale;
+      const nearest = Math.round(inv);
+      if (nearest >= 2 && Math.abs(inv - nearest) / nearest <= 0.04) {
+        scale = 1 / nearest;
+      }
+    }
+
+    // Real touch phones only (not macOS trackpads — see isTouchPrimaryDevice).
     const zoom = isTouch ? this.followZoom : 1;
     this.camera.zoom = zoom;
 
-    // How many canvas pixels fit in the viewport at this scale.
     const visibleW = Math.min(pw, vw / scale);
     const visibleH = Math.min(ph, vh / scale);
 
-    // In follow mode the visible window can be smaller than a panel due to
-    // cover scaling and zoom; keep it centered in canvas space.
     const offsetX = shouldFollow ? (pw - visibleW) * 0.5 : 0;
     const offsetY = shouldFollow ? (ph - visibleH) * 0.5 : 0;
 
@@ -166,11 +173,15 @@ export default class CameraViewportController {
     this.viewport.cssScale = scale;
     this.viewport.devicePixelRatio = dpr;
 
-    // Logical panel size drives gameplay; buffer is DPR-scaled for Retina.
     this.canvas.width = Math.max(1, Math.floor(pw * dpr));
     this.canvas.height = Math.max(1, Math.floor(ph * dpr));
-    this.canvas.style.width = `${Math.floor(pw * scale)}px`;
-    this.canvas.style.height = `${Math.floor(ph * scale)}px`;
+
+    // Preserve panel aspect exactly (independent floor on W/H skewed CSS size).
+    const cssW = Math.max(1, Math.round(pw * scale));
+    const cssH = Math.max(1, Math.round(cssW * (ph / pw)));
+    this.canvas.style.width = `${cssW}px`;
+    this.canvas.style.height = `${cssH}px`;
+    this.viewport.cssScale = cssW / pw;
 
     const shell = this.canvas.parentElement;
     if (shouldFollow) {

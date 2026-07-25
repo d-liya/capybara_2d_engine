@@ -2,8 +2,11 @@ import {
   loadImage,
   snapCanvasValue,
   toPixel,
+  fitRectInBox,
+  resolveImageFit,
   NORM,
   type Rect,
+  type ImageFitMode,
 } from "../utils/common";
 import type { RenderLayer } from "./renderSort";
 
@@ -165,6 +168,7 @@ export default class Actor {
    */
   protected _holdFrame: number | null;
   protected _shadow: ActorShadowConfig;
+  protected _imageFit: ImageFitMode;
 
   constructor(
     x: number,
@@ -202,6 +206,7 @@ export default class Actor {
     this._hasDirectionalIdle = false;
     this._holdFrame = null;
     this._shadow = normalizeActorShadowConfig(options.shadow);
+    this._imageFit = "contain";
     this._configureSpriteSheets(sprite, options.activeAnimation);
   }
 
@@ -226,11 +231,9 @@ export default class Actor {
       allKeys[0] ??
       "idle";
     const moveKeys = allKeys.filter(
-      (k) =>
-        k.includes("walk") || k.includes("run") || k.includes("walking"),
+      (k) => k.includes("walk") || k.includes("run") || k.includes("walking"),
     );
-    this._moveAnimKey =
-      moveKeys.length === 1 ? moveKeys[0] : this._idleAnimKey;
+    this._moveAnimKey = moveKeys.length === 1 ? moveKeys[0] : this._idleAnimKey;
 
     // Directional mode: any clip named *_front / *_back / *_right / *_left
     const directionalKeys = allKeys.filter((k) => parseFacingSuffix(k));
@@ -460,6 +463,14 @@ export default class Actor {
     }
   }
 
+  setImageFit(fit: unknown): void {
+    this._imageFit = resolveImageFit(fit);
+  }
+
+  get imageFit(): ImageFitMode {
+    return this._imageFit;
+  }
+
   setActiveAnimation(animationName: string, transitionMs?: number): void {
     this._transitionToAnimation(animationName, transitionMs);
   }
@@ -587,8 +598,7 @@ export default class Actor {
   }
 
   _setMovementState(dx: number, dy: number): void {
-    const moving =
-      Math.abs(dx) > MOVE_DIR_EPS || Math.abs(dy) > MOVE_DIR_EPS;
+    const moving = Math.abs(dx) > MOVE_DIR_EPS || Math.abs(dy) > MOVE_DIR_EPS;
     this._isMoving = moving;
 
     if (this._directionalMode) {
@@ -685,10 +695,7 @@ export default class Actor {
     if (!animation) return 0;
 
     if (this._holdFrame != null) {
-      return Math.min(
-        this._holdFrame,
-        Math.max(0, animation.frameCount - 1),
-      );
+      return Math.min(this._holdFrame, Math.max(0, animation.frameCount - 1));
     }
 
     const elapsed = Math.max(0, now - this._animStartedAt);
@@ -867,14 +874,27 @@ export default class Actor {
     this._drawShadow(ctx, worldNormW, worldNormH, worldPixelW, worldPixelH);
 
     const currentFrame = this._getFrameIndex(now);
-    this._drawAnimationFrame(
-      ctx,
-      animation,
-      currentFrame,
+    const frameWidth = image.naturalWidth / animation.frameCount;
+    const frameHeight = image.naturalHeight;
+    const contentAspect =
+      frameWidth > 0 && frameHeight > 0 ? frameWidth / frameHeight : 1;
+    const fitted = fitRectInBox(
       drawX,
       drawY,
       dw,
       dh,
+      contentAspect,
+      this._imageFit,
+      "bottom-center",
+    );
+    this._drawAnimationFrame(
+      ctx,
+      animation,
+      currentFrame,
+      fitted.x,
+      fitted.y,
+      fitted.w,
+      fitted.h,
       this._facingX,
     );
   }

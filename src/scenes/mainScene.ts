@@ -50,5 +50,7 @@ export function createMainScene(options?: {
     canvasId: "game",
     map: STARTER_MAP,
     cameraEdgePadding: 120,
+    followZoom: 1.45,
+    maxViewportScale: 1,
   });
 }

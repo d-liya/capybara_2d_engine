@@ -158,6 +158,8 @@ const DEFAULT_PANEL_PIXEL_HEIGHT = 1672;
 const EDGE_EPS = 0.01;
 const OVERLAY_MASK_REPLACE_EDGE_TOLERANCE = 18;
 const OVERLAY_MASK_REPLACE_IOU_THRESHOLD = 0.82;
+/** Tight change patches often sit fully inside the mask silhouette. */
+const OVERLAY_MASK_REPLACE_CONTAINMENT_THRESHOLD = 0.72;
 
 function rectArea(rect: Rect): number {
   return Math.max(0, rect.x2 - rect.x1) * Math.max(0, rect.y2 - rect.y1);
@@ -173,17 +175,15 @@ function rectIntersectionArea(a: Rect, b: Rect): number {
 
 /**
  * Map overlays are authored as stateful replacements for map-baked props. When
- * an overlay state's box nearly matches a mask box, treat the overlay as the
- * prop/object visual owner. The caller suppresses only the mask obstacle image
- * for this case, keeping the generated background/shadow image intact.
+ * an overlay state's box nearly matches a mask box — or is a tight change
+ * patch mostly contained by it — treat the overlay as the prop/object visual
+ * owner. The caller suppresses only the mask obstacle image for this case,
+ * keeping the generated background/shadow image intact.
  */
-function boxesCloseEnoughForOverlayReplacement(
-  maskBox: Box2D,
-  overlayBox: Box2D,
+function rectsCloseEnoughForOverlayReplacement(
+  mask: Rect,
+  overlay: Rect,
 ): boolean {
-  const mask = parseBox2d(maskBox);
-  const overlay = parseBox2d(overlayBox);
-
   const edgesClose =
     Math.abs(mask.x1 - overlay.x1) <= OVERLAY_MASK_REPLACE_EDGE_TOLERANCE &&
     Math.abs(mask.y1 - overlay.y1) <= OVERLAY_MASK_REPLACE_EDGE_TOLERANCE &&
@@ -194,9 +194,27 @@ function boxesCloseEnoughForOverlayReplacement(
   const intersection = rectIntersectionArea(mask, overlay);
   if (intersection <= 0) return false;
 
-  const union = rectArea(mask) + rectArea(overlay) - intersection;
+  const overlayArea = rectArea(overlay);
+  if (
+    overlayArea > 0 &&
+    intersection / overlayArea >= OVERLAY_MASK_REPLACE_CONTAINMENT_THRESHOLD
+  ) {
+    return true;
+  }
+
+  const union = rectArea(mask) + overlayArea - intersection;
   return (
     union > 0 && intersection / union >= OVERLAY_MASK_REPLACE_IOU_THRESHOLD
+  );
+}
+
+function boxesCloseEnoughForOverlayReplacement(
+  maskBox: Box2D,
+  overlayBox: Box2D,
+): boolean {
+  return rectsCloseEnoughForOverlayReplacement(
+    parseBox2d(maskBox),
+    parseBox2d(overlayBox),
   );
 }
 
@@ -206,21 +224,62 @@ function maskKeysForOverlayLink(mask: MapMaskEntry): string[] {
     .map((value) => value.trim());
 }
 
+/** Visual box for linking — prefer explicit box_2d, else first collider AABB. */
+function maskBoxForOverlayLink(mask: MapMaskEntry): Box2D | null {
+  if (
+    Array.isArray(mask.box_2d) &&
+    mask.box_2d.length >= 4 &&
+    mask.box_2d.every((n) => Number.isFinite(Number(n)))
+  ) {
+    return mask.box_2d;
+  }
+  const collider = mask.collider?.[0]?.box_2d;
+  if (
+    Array.isArray(collider) &&
+    collider.length >= 4 &&
+    collider.every((n) => Number.isFinite(Number(n)))
+  ) {
+    return [
+      Number(collider[0]),
+      Number(collider[1]),
+      Number(collider[2]),
+      Number(collider[3]),
+    ];
+  }
+  return null;
+}
+
+function isStructuralMapOverlay(overlay: MapOverlayEntry): boolean {
+  const kind = overlay.kind ?? "state";
+  return kind === "state" || kind === "grid";
+}
+
+function overlayLinkLabels(overlay: MapOverlayEntry): string[] {
+  const labels = [
+    overlay.linkedObstacleLabel?.trim(),
+    // Edit-UI state overlays store the obstacle name on anchorLabel.
+    isStructuralMapOverlay(overlay) ? overlay.anchorLabel?.trim() : undefined,
+  ];
+  return labels.filter((value): value is string => Boolean(value));
+}
+
 function overlayLinksToMask(
   overlay: MapOverlayEntry,
   mask: MapMaskEntry,
 ): boolean {
-  const linkedLabel = overlay.linkedObstacleLabel?.trim();
+  const maskKeys = maskKeysForOverlayLink(mask);
   if (
-    linkedLabel &&
-    maskKeysForOverlayLink(mask).some((key) => key === linkedLabel)
+    overlayLinkLabels(overlay).some((label) =>
+      maskKeys.some((key) => key === label),
+    )
   ) {
     return true;
   }
 
-  if (!mask.box_2d) return false;
+  const maskBox = maskBoxForOverlayLink(mask);
+  if (!maskBox) return false;
   return overlay.states.some((state) =>
-    boxesCloseEnoughForOverlayReplacement(mask.box_2d!, state.box_2d),
+    boxesCloseEnoughForOverlayReplacement(maskBox, state.box_2d),
   );
 }
 
@@ -231,8 +290,7 @@ function maskHasCloseMapOverlay(
   if (mask.type?.toLowerCase() === "boundary") return false;
 
   return overlays.some((overlay) => {
-    const kind = overlay.kind ?? "state";
-    if (kind === "erase" || kind === "vfx") return false;
+    if (!isStructuralMapOverlay(overlay)) return false;
     return overlayLinksToMask(overlay, mask);
   });
 }
@@ -404,17 +462,13 @@ export default class GameMap {
       });
       this._objects.push(...panelObjects);
 
-      const eraseOverlays = mapOverlayData.filter(
-        (overlay) => (overlay.kind ?? "state") === "erase",
-      );
-
       loadImage(panel.url)
         .then((img) => {
           bgPanel.image = img;
           this._onBackgroundImageLoaded(
             img,
             panelObjects,
-            eraseOverlays,
+            mapOverlayData,
             normOffset,
           );
         })
@@ -423,7 +477,7 @@ export default class GameMap {
           this._onBackgroundImageLoaded(
             null,
             panelObjects,
-            eraseOverlays,
+            mapOverlayData,
             normOffset,
           );
         });
@@ -671,6 +725,7 @@ export default class GameMap {
           const primary = overlay.states[0];
           const linkedRenderY =
             resolveLinkedRenderY(overlay.linkedObstacleLabel) ??
+            resolveLinkedRenderY(overlay.anchorLabel) ??
             (primary?.box_2d
               ? inferRenderYFromOverlappingMask(primary.box_2d as Box2D)
               : undefined);
@@ -710,9 +765,13 @@ export default class GameMap {
   private _onBackgroundImageLoaded(
     img: HTMLImageElement | null,
     panelObjects: MapObject[],
-    eraseOverlays: MapOverlayEntry[],
+    mapOverlays: MapOverlayEntry[],
     normOffset?: { x: number; y: number },
   ): void {
+    const eraseOverlays = mapOverlays.filter(
+      (overlay) => (overlay.kind ?? "state") === "erase",
+    );
+
     if (img?.naturalWidth && img.naturalHeight) {
       // Prefer the real loaded map size unless the caller locked panel pixels.
       if (!this._panelSizeLocked) {
@@ -742,6 +801,14 @@ export default class GameMap {
         obj.resolveFromMapPixels(placeW, placeH);
       }
 
+      // v2 sprites only get normalized bounds after pixel_bbox resolve — re-check
+      // state/grid overlay ownership so cut-outs don't double-draw over patches.
+      this._applyStateOverlayObstacleSuppression(
+        mapOverlays,
+        panelObjects,
+        normOffset,
+      );
+
       this._applyEraseOverlayCollisions(eraseOverlays, panelObjects, normOffset);
     } else {
       // Still attempt erase collisions with whatever bounds exist.
@@ -754,6 +821,55 @@ export default class GameMap {
     );
     if (this._backgroundLoadsPending === 0) {
       this._markReady();
+    }
+  }
+
+  /**
+   * After mask bounds resolve, suppress Y-sorted obstacle cut-outs that a
+   * state/grid overlay replaces (label match or bbox containment/IoU).
+   */
+  private _applyStateOverlayObstacleSuppression(
+    overlays: MapOverlayEntry[],
+    panelObjects: MapObject[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    const structural = overlays.filter(isStructuralMapOverlay);
+    if (!structural.length) return;
+
+    for (const obj of panelObjects) {
+      if (obj.type.toLowerCase() === "boundary") continue;
+      const maskRect = obj.getBounds();
+      if (maskRect.x2 <= maskRect.x1 || maskRect.y2 <= maskRect.y1) continue;
+
+      const shouldSuppress = structural.some((overlay) => {
+        const labels = overlayLinkLabels(overlay);
+        if (
+          labels.some(
+            (label) => label === obj.label.trim() || label === obj.name.trim(),
+          )
+        ) {
+          return true;
+        }
+
+        return (overlay.states ?? []).some((state) => {
+          if (!Array.isArray(state.box_2d) || state.box_2d.length < 4) {
+            return false;
+          }
+          let overlayRect = parseBox2d(state.box_2d);
+          if (normOffset) {
+            overlayRect = offsetRect(
+              overlayRect,
+              normOffset.x,
+              normOffset.y,
+            );
+          }
+          return rectsCloseEnoughForOverlayReplacement(maskRect, overlayRect);
+        });
+      });
+
+      if (shouldSuppress) {
+        obj.suppressObstacleVisual();
+      }
     }
   }
 

@@ -1,12 +1,5 @@
 // All game logic runs in a 0-1000 normalised coordinate space.
 // The canvas can be any pixel size — conversion happens only at draw time.
-//
-// Important: X and Y are NOT square pixels on landscape panels.
-// 1000 norm-X → panelPixelWidth, 1000 norm-Y → panelPixelHeight (defaults
-// 2508×1672). A sprite that is 76×114 *pixels* must use norm size
-//   width  = 76  / panelPixelWidth  * 1000
-//   height = 114 / panelPixelHeight * 1000
-// — not width/height = 76/114 in norm space (that draws ~1:1 on screen).
 export const NORM = 1000;
 
 /** Default pixel size of one map panel (matches GameMap / camera). */
@@ -45,6 +38,53 @@ export function toPixel(
 /** Snap visual canvas coordinates without changing gameplay/world positions. */
 export function snapCanvasValue(value: number): number {
   return Math.round(value);
+}
+
+/** How a sprite fills its destination box. Default: contain. */
+export type ImageFitMode = "contain" | "fill";
+
+export type ObjectFitAnchor = "center" | "bottom-center";
+
+/** Normalize entity `imageFit`; unknown/omitted → contain. */
+export function resolveImageFit(value: unknown): ImageFitMode {
+  return value === "fill" ? "fill" : "contain";
+}
+
+/**
+ * Fit content of a given aspect (width/height) into a pixel box.
+ * `contain` letterboxes; `fill` stretches. Anchor applies only for contain.
+ */
+export function fitRectInBox(
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  contentAspect: number,
+  fit: ImageFitMode = "contain",
+  anchor: ObjectFitAnchor = "center",
+): { x: number; y: number; w: number; h: number } {
+  if (!(boxW > 0) || !(boxH > 0) || !(contentAspect > 0)) {
+    return { x: boxX, y: boxY, w: boxW, h: boxH };
+  }
+  if (fit === "fill") {
+    return { x: boxX, y: boxY, w: boxW, h: boxH };
+  }
+
+  const boxAspect = boxW / boxH;
+  let w: number;
+  let h: number;
+  if (boxAspect > contentAspect) {
+    h = boxH;
+    w = h * contentAspect;
+  } else {
+    w = boxW;
+    h = w / contentAspect;
+  }
+
+  const x = boxX + (boxW - w) * 0.5;
+  const y =
+    anchor === "bottom-center" ? boxY + (boxH - h) : boxY + (boxH - h) * 0.5;
+  return { x, y, w, h };
 }
 
 export function offsetRect(rect: Rect, dx: number, dy: number): Rect {
@@ -109,7 +149,11 @@ export function offsetPoint(point: Point, dx: number, dy: number): Point {
   return { x: point.x + dx, y: point.y + dy };
 }
 
-export function offsetPolygon(polygon: Point[], dx: number, dy: number): Point[] {
+export function offsetPolygon(
+  polygon: Point[],
+  dx: number,
+  dy: number,
+): Point[] {
   return polygon.map((p) => offsetPoint(p, dx, dy));
 }
 
@@ -144,7 +188,12 @@ function onSegment(a: Point, b: Point, c: Point): boolean {
 }
 
 /** True when segments ab and cd properly intersect or touch. */
-export function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
+export function segmentsIntersect(
+  a: Point,
+  b: Point,
+  c: Point,
+  d: Point,
+): boolean {
   const o1 = orientation(a, b, c);
   const o2 = orientation(a, b, d);
   const o3 = orientation(c, d, a);
@@ -156,8 +205,8 @@ export function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boole
   if (o4 === 0 && onSegment(c, d, b)) return true;
 
   return (
-    (o1 > 0) !== (o2 > 0) &&
-    (o3 > 0) !== (o4 > 0) &&
+    o1 > 0 !== o2 > 0 &&
+    o3 > 0 !== o4 > 0 &&
     o1 !== 0 &&
     o2 !== 0 &&
     o3 !== 0 &&
