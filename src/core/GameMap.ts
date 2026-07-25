@@ -152,11 +152,12 @@ function rectIntersectionArea(a: Rect, b: Rect): number {
 }
 
 /**
- * Map overlays are authored as stateful replacements for map-baked props. When
- * an overlay state's box nearly matches a mask box — or is a tight change
- * patch mostly contained by it — treat the overlay as the prop/object visual
- * owner. The caller suppresses only the mask obstacle image for this case,
- * keeping the generated background/shadow image intact.
+ * Map overlays are authored as stateful patches for map-baked props. When a
+ * state/grid overlay uses `placementMode: "replace"` (default) and its box
+ * nearly matches a mask — or is a tight change patch mostly contained by it —
+ * treat the overlay as the prop/object visual owner and suppress only the mask
+ * obstacle image (background/shadow stays). `placementMode: "overlay"` keeps
+ * the cut-out and draws the patch on top.
  */
 function rectsCloseEnoughForOverlayReplacement(
   mask: Rect,
@@ -232,6 +233,16 @@ function isStructuralMapOverlay(overlay: MapOverlayEntry): boolean {
   return kind === "state" || kind === "grid";
 }
 
+/**
+ * State/grid overlays default to `replace` (hide linked cut-out so doors/chests
+ * don't double-draw). Explicit `overlay` keeps the base sprite and draws the
+ * patch on top — use for shelf stock, props, etc. that only patch part of a prop.
+ */
+function structuralOverlayReplacesObstacle(overlay: MapOverlayEntry): boolean {
+  if (!isStructuralMapOverlay(overlay)) return false;
+  return (overlay.placementMode ?? "replace") === "replace";
+}
+
 function overlayLinkLabels(overlay: MapOverlayEntry): string[] {
   const labels = [
     overlay.linkedObstacleLabel?.trim(),
@@ -268,7 +279,7 @@ function maskHasCloseMapOverlay(
   if (mask.type?.toLowerCase() === "boundary") return false;
 
   return overlays.some((overlay) => {
-    if (!isStructuralMapOverlay(overlay)) return false;
+    if (!structuralOverlayReplacesObstacle(overlay)) return false;
     return overlayLinksToMask(overlay, mask);
   });
 }
@@ -593,7 +604,9 @@ export default class GameMap {
           ...(typeof placement.templateId === "string"
             ? { templateId: placement.templateId }
             : {}),
-          ...(Array.isArray(placement.stages) ? { stages: placement.stages } : {}),
+          ...(Array.isArray(placement.stages)
+            ? { stages: placement.stages }
+            : {}),
           ...(typeof placement.gamePlay === "string"
             ? { gamePlay: placement.gamePlay }
             : {}),
@@ -657,7 +670,7 @@ export default class GameMap {
                   label:
                     validStates.length > 1
                       ? `${overlay.anchorLabel ?? overlay.id}:${state.name}`
-                      : overlay.anchorLabel ?? overlay.id,
+                      : (overlay.anchorLabel ?? overlay.id),
                   mask_prompt:
                     validStates.length > 1
                       ? `${overlay.id}:${state.name}`
@@ -735,10 +748,7 @@ export default class GameMap {
       if (!this._panelSizeLocked) {
         const nextW = img.naturalWidth;
         const nextH = img.naturalHeight;
-        if (
-          nextW !== this.panelPixelWidth ||
-          nextH !== this.panelPixelHeight
-        ) {
+        if (nextW !== this.panelPixelWidth || nextH !== this.panelPixelHeight) {
           this.panelPixelWidth = nextW;
           this.panelPixelHeight = nextH;
           this.worldPixelWidth = this._numCols * nextW;
@@ -767,10 +777,22 @@ export default class GameMap {
         normOffset,
       );
 
-      this._applyEraseOverlayCollisions(eraseOverlays, panelObjects, normOffset);
+      // Anchor state/grid overlays to the resolved cut-out Y + real mask label
+      // (authoring labels like "market stall" often differ from sprite labels).
+      this._syncOverlayMaskLinks(mapOverlays, panelObjects, normOffset);
+
+      this._applyEraseOverlayCollisions(
+        eraseOverlays,
+        panelObjects,
+        normOffset,
+      );
     } else {
       // Still attempt erase collisions with whatever bounds exist.
-      this._applyEraseOverlayCollisions(eraseOverlays, panelObjects, normOffset);
+      this._applyEraseOverlayCollisions(
+        eraseOverlays,
+        panelObjects,
+        normOffset,
+      );
     }
 
     this._backgroundLoadsPending = Math.max(
@@ -784,14 +806,16 @@ export default class GameMap {
 
   /**
    * After mask bounds resolve, suppress Y-sorted obstacle cut-outs that a
-   * state/grid overlay replaces (label match or bbox containment/IoU).
+   * state/grid overlay with `placementMode: "replace"` (default) owns
+   * (label match or bbox containment/IoU). `placementMode: "overlay"` leaves
+   * the base cut-out and draws the patch on top.
    */
   private _applyStateOverlayObstacleSuppression(
     overlays: MapOverlayEntry[],
     panelObjects: MapObject[],
     normOffset?: { x: number; y: number },
   ): void {
-    const structural = overlays.filter(isStructuralMapOverlay);
+    const structural = overlays.filter(structuralOverlayReplacesObstacle);
     if (!structural.length) return;
 
     for (const obj of panelObjects) {
@@ -815,11 +839,7 @@ export default class GameMap {
           }
           let overlayRect = parseBox2d(state.box_2d);
           if (normOffset) {
-            overlayRect = offsetRect(
-              overlayRect,
-              normOffset.x,
-              normOffset.y,
-            );
+            overlayRect = offsetRect(overlayRect, normOffset.x, normOffset.y);
           }
           return rectsCloseEnoughForOverlayReplacement(maskRect, overlayRect);
         });
@@ -827,6 +847,101 @@ export default class GameMap {
 
       if (shouldSuppress) {
         obj.suppressObstacleVisual();
+      }
+    }
+  }
+
+  /**
+   * Bind structural overlays to the cut-out they patch so they share renderY
+   * and draw immediately after that mask (needed for placementMode: overlay —
+   * otherwise the shelf patch sorts by its own smaller box and paints under the
+   * stall canopy cut-out).
+   */
+  private _syncOverlayMaskLinks(
+    overlays: MapOverlayEntry[],
+    panelObjects: MapObject[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    const candidates = panelObjects.filter((obj) => {
+      if (obj.type.toLowerCase() === "boundary") return false;
+      const bounds = obj.getBounds();
+      return bounds.x2 > bounds.x1 && bounds.y2 > bounds.y1;
+    });
+    if (!candidates.length) return;
+
+    for (const overlayObj of this._overlays) {
+      const entry = overlays.find((overlay) => overlay.id === overlayObj.id);
+      if (!entry || !isStructuralMapOverlay(entry)) continue;
+
+      const labels = overlayLinkLabels(entry);
+      let matched =
+        candidates.find((obj) =>
+          labels.some(
+            (label) => label === obj.label.trim() || label === obj.name.trim(),
+          ),
+        ) ?? null;
+
+      if (!matched) {
+        const overlayRect = overlayObj.getBounds();
+        const centerX = (overlayRect.x1 + overlayRect.x2) * 0.5;
+        const centerY = (overlayRect.y1 + overlayRect.y2) * 0.5;
+        const containing = candidates
+          .map((obj) => {
+            const bounds = obj.getBounds();
+            return {
+              obj,
+              bounds,
+              area: rectArea(bounds),
+              contains:
+                centerX >= bounds.x1 &&
+                centerX <= bounds.x2 &&
+                centerY >= bounds.y1 &&
+                centerY <= bounds.y2,
+            };
+          })
+          .filter((entry) => entry.contains)
+          .sort((a, b) => a.area - b.area)[0];
+        if (containing) {
+          matched = containing.obj;
+        } else {
+          const overlapping = candidates
+            .map((obj) => {
+              const bounds = obj.getBounds();
+              return {
+                obj,
+                area: rectArea(bounds),
+                hit: rectsOverlap(bounds, overlayRect),
+              };
+            })
+            .filter((entry) => entry.hit)
+            .sort((a, b) => a.area - b.area)[0];
+          matched = overlapping?.obj ?? null;
+        }
+      }
+
+      // Also accept close bbox match against authored state boxes (replace patches).
+      if (!matched) {
+        for (const obj of candidates) {
+          const maskRect = obj.getBounds();
+          const close = (entry.states ?? []).some((state) => {
+            if (!Array.isArray(state.box_2d) || state.box_2d.length < 4) {
+              return false;
+            }
+            let overlayRect = parseBox2d(state.box_2d);
+            if (normOffset) {
+              overlayRect = offsetRect(overlayRect, normOffset.x, normOffset.y);
+            }
+            return rectsCloseEnoughForOverlayReplacement(maskRect, overlayRect);
+          });
+          if (close) {
+            matched = obj;
+            break;
+          }
+        }
+      }
+
+      if (matched) {
+        overlayObj.bindLinkedMask(matched.label, matched.renderY);
       }
     }
   }
@@ -1015,6 +1130,9 @@ export default class GameMap {
       (MapObject | MapEffectObject | MapOverlayObject) & RenderSortable
     > = [];
     const unlinkedSprites = [...this._mapSprites];
+    const unlinkedOverlays = this._overlays.filter(
+      (overlay) => overlay.participatesInYSort,
+    );
 
     for (const obj of this._objects) {
       if (!obj.participatesInYSort) {
@@ -1029,12 +1147,20 @@ export default class GameMap {
           unlinkedSprites.splice(i, 1);
         }
       }
+      // State/grid patches (esp. placementMode: overlay) must draw right after
+      // their base cut-out when Y ties — otherwise a smaller shelf box sorts
+      // behind the full stall canopy.
+      for (let i = unlinkedOverlays.length - 1; i >= 0; i -= 1) {
+        const overlay = unlinkedOverlays[i];
+        if (overlay.linkedMaskKey && keys.has(overlay.linkedMaskKey)) {
+          renderables.push(overlay);
+          unlinkedOverlays.splice(i, 1);
+        }
+      }
     }
 
     renderables.push(...unlinkedSprites);
-    renderables.push(
-      ...this._overlays.filter((overlay) => overlay.participatesInYSort),
-    );
+    renderables.push(...unlinkedOverlays);
     return renderables;
   }
 

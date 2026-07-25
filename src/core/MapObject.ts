@@ -287,8 +287,9 @@ export default class MapObject {
 
   /**
    * Hide the Y-sorted obstacle cut-out while keeping collision + background /
-   * shadow art. Used when a `kind: "state" | "grid"` mapOverlay owns the
-   * visual (edit-UI change patches would otherwise double-draw over the cut-out).
+   * shadow art. Used when a `kind: "state" | "grid"` mapOverlay with
+   * `placementMode: "replace"` (default) owns the visual. Patches with
+   * `placementMode: "overlay"` leave the cut-out and draw on top instead.
    */
   suppressObstacleVisual(): void {
     this._suppressObstacleVisual = true;
@@ -504,7 +505,10 @@ export default class MapObject {
     worldPixelH?: number,
   ): void {
     if (this._visualSuppressed || this._collisionDisabled) return;
-    if (this._bounds.x2 <= this._bounds.x1 && this._bounds.y2 <= this._bounds.y1) {
+    if (
+      this._bounds.x2 <= this._bounds.x1 &&
+      this._bounds.y2 <= this._bounds.y1
+    ) {
       return;
     }
 

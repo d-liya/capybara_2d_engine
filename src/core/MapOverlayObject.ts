@@ -19,10 +19,7 @@ export type MapOverlayRenderLayer =
 
 export type MapOverlayKind = "erase" | "state" | "vfx" | "grid";
 
-export type MapOverlayLayout =
-  | "single"
-  | "multi_inplace"
-  | "detached_stages";
+export type MapOverlayLayout = "single" | "multi_inplace" | "detached_stages";
 
 export interface MapOverlayColliderEntry {
   box_2d: number[];
@@ -55,8 +52,9 @@ export interface MapOverlayEntry {
   /** Mask label/name whose obstacle visual this overlay replaces. */
   linkedObstacleLabel?: string;
   /**
-   * replace: suppress linked mask static art (keep collider) + optional erase underlay.
-   * overlay: draw sheet on top of existing map pixels.
+   * replace: suppress linked mask obstacle cut-out (keep collider) so the
+   * overlay owns the visual — default for `kind: "state" | "grid"`.
+   * overlay: draw patch/sheet on top; base sprite stays — default for `kind: "vfx"`.
    */
   placementMode?: "replace" | "overlay" | string;
   currentMapStateLabel?: string;
@@ -103,6 +101,13 @@ export default class MapOverlayObject {
   readonly anchorLabel?: string;
   readonly gamePlay?: string;
   readonly states: MapOverlayStateEntry[];
+  /** Authoring placement mode — `overlay` keeps base cut-out underneath. */
+  readonly placementMode: "replace" | "overlay" | string;
+  /**
+   * Mask label/name this overlay sorts with. Set after mask bounds resolve so
+   * `placementMode: "overlay"` patches draw immediately after the base cut-out.
+   */
+  linkedMaskKey?: string;
 
   currentStateName: string;
   renderY: number;
@@ -115,7 +120,7 @@ export default class MapOverlayObject {
   private readonly _cellBboxes?: number[][];
   private readonly _normOffset?: { x: number; y: number };
   /** When set, linked parent inheritance locks Y-sort to the parent. */
-  private readonly _linkedRenderY?: number;
+  private _linkedRenderY?: number;
   private _bounds: Rect;
   private _box2d: number[];
   private _colliders: Rect[];
@@ -127,11 +132,14 @@ export default class MapOverlayObject {
   constructor(
     data: MapOverlayEntry,
     normOffset?: { x: number; y: number },
-    options: { linkedRenderY?: number } = {},
+    options: { linkedRenderY?: number; linkedMaskKey?: string } = {},
   ) {
     this.id = data.id;
     this.anchorLabel = data.anchorLabel;
     this.gamePlay = data.gamePlay;
+    this.placementMode =
+      data.placementMode ??
+      ((data.kind ?? "state") === "vfx" ? "overlay" : "replace");
     this.states = (data.states ?? []).map((state, index) => {
       const cell =
         data.kind === "grid" &&
@@ -173,6 +181,11 @@ export default class MapOverlayObject {
       Number.isFinite(options.linkedRenderY)
         ? options.linkedRenderY
         : undefined;
+    const initialLinkKey =
+      options.linkedMaskKey?.trim() ||
+      data.linkedObstacleLabel?.trim() ||
+      data.anchorLabel?.trim();
+    if (initialLinkKey) this.linkedMaskKey = initialLinkKey;
 
     const initialName =
       data.currentMapStateLabel ??
@@ -199,6 +212,25 @@ export default class MapOverlayObject {
     this._imageUrl = "";
 
     this._applyState(initialState);
+  }
+
+  /** Visual placement bounds in world-norm space. */
+  getBounds(): Rect {
+    return { ...this._bounds };
+  }
+
+  /**
+   * Lock Y-sort to a resolved map cut-out (call after pixel_bbox resolve).
+   * Also sets `linkedMaskKey` to the real mask label so getRenderables can
+   * draw this patch immediately after the base sprite.
+   */
+  bindLinkedMask(maskKey: string, renderY: number): void {
+    const key = maskKey.trim();
+    if (key) this.linkedMaskKey = key;
+    if (Number.isFinite(renderY)) {
+      this._linkedRenderY = renderY;
+      this.renderY = renderY;
+    }
   }
 
   get blocksMovement(): boolean {
