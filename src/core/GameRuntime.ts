@@ -1095,6 +1095,10 @@ export default class GameRuntime {
     const { ctx, map, widgets } = this;
     widgets.update(now, this);
     const controlsBlocked = widgets.blocksWorldInput(this);
+    if (controlsBlocked) {
+      // Drop sticky WASD / joystick flags so closing a modal does not lurch.
+      this.clearMovementInput();
+    }
 
     this._updatePlayer(controlsBlocked ? NO_MOVEMENT_INPUT : this.keys, dt);
     this._updateNavigation(dt);

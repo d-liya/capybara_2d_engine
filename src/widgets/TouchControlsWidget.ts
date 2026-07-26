@@ -24,6 +24,18 @@ function isTouchPrimaryDevice(): boolean {
   );
 }
 
+function hasBlockingUiOverlay(game: {
+  getResource?: (name: string) => unknown;
+}): boolean {
+  if (typeof game.getResource !== "function") return false;
+  const ui = game.getResource("ui") as
+    | { overlays?: Record<string, boolean> }
+    | null
+    | undefined;
+  if (!ui?.overlays || typeof ui.overlays !== "object") return false;
+  return Object.values(ui.overlays).some((open) => open === true);
+}
+
 function dirsFromStick(dx: number, dy: number): Set<Direction> {
   const out = new Set<Direction>();
   const mag = Math.hypot(dx, dy);
@@ -186,7 +198,8 @@ export function createTouchControlsWidget(
   return {
     id: "touch-controls",
     zIndex: 200,
-    isVisible: () => isTouchPrimaryDevice(),
+    isVisible: (api) =>
+      isTouchPrimaryDevice() && !hasBlockingUiOverlay(api.game),
     // Keep root non-interactive so empty HUD areas don't swallow taps; only
     // the stick layer / action buttons use pointer-events-auto.
     isInteractive: () => false,
@@ -334,6 +347,13 @@ export function createTouchControlsWidget(
       api.setState({ onBlur, onVisibility });
 
       return root;
+    },
+
+    update(api) {
+      // Modal/dialogue opened mid-gesture — drop the stick so it cannot fight the HUD.
+      if (hasBlockingUiOverlay(api.game) && activePointerId != null) {
+        clearAll(api.game);
+      }
     },
 
     destroy(api) {
