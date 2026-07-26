@@ -55,7 +55,7 @@ docs/recipes/combat-projectiles.md # combat, bullets, damage, cooldowns
 docs/recipes/enemy-ai-waves.md     # simple enemy behavior and wave spawning
 docs/recipes/rpg-quests-inventory.md # quests, inventory, pickups, equipment
 docs/recipes/world-pointer-input.md # click/touch aiming and world targeting
-docs/recipes/mobile-touch-controls.md # touch D-pad + action buttons (keyboard parity)
+docs/recipes/mobile-touch-controls.md # floating joystick + action buttons (keyboard parity)
 ```
 
 Use `src/Game.ts` as reference only when you need exact TypeScript signatures.
@@ -184,7 +184,7 @@ game.defineArchetype(
   toArchetype(charPlayer, {
     kind: "character",
     label: "Player",
-    speed: 190,
+    speed: 55,
     radius: 34,
     width: 140,
     height: 168,
@@ -232,7 +232,7 @@ const game = createGame({
 });
 ```
 
-HUD widgets should dispatch the same input actions as keyboard/pointer controls (`dispatchInputAction`). Movement uses `setMovementInput` / `clearMovementInput` (WASD and the default D-pad share this path). See `docs/recipes/mobile-touch-controls.md`.
+HUD widgets should dispatch the same input actions as keyboard/pointer controls (`dispatchInputAction`). Movement uses `setMovementInput` / `clearMovementInput` (WASD and the default floating joystick share this path). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Widgets
 
@@ -373,8 +373,9 @@ const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120,
-  // Optional phone FOV / scale tuning:
+  // Optional framing / soft follow / scale tuning:
   // followZoom: 1.45,
+  // cameraFollowLerp: 10,
   // maxViewportScale: 1,
   touchControls: {
     actions: [{ action: "interact", label: "E" }],

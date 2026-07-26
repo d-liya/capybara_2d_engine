@@ -90,8 +90,8 @@ When generating new assets (maps, characters, props, audio):
 Treat phone browsers as a first-class target whenever you add gameplay:
 
 1. **Never ship keyboard-only intent.** Bind discrete actions with `bindInputAction`, handle them with `onInputAction`, and expose the same names on touch via `createGame({ touchControls: { actions: [...] } })` or `dispatchInputAction`.
-2. **Movement is shared.** WASD and the default touch D-pad both drive `setMovementInput` / the controlled entity. Do not invent a separate touch movement system.
-3. **Pad the camera for HUD chrome.** Use `cameraEdgePadding` (and optional `followZoom` / `maxViewportScale`) so edge controls do not cover walkable corners. Default touch controls sit in the bottom corners (`zIndex` 100–299).
+2. **Movement is shared.** WASD and the default floating touch joystick both drive `setMovementInput` / the controlled entity. Do not invent a separate touch movement system.
+3. **Pad the camera for HUD chrome.** Use `cameraEdgePadding` (and optional `followZoom` / `cameraFollowLerp` / `maxViewportScale`) so edge controls do not cover walkable corners. Default touch controls use a floating left-side joystick plus bottom-right actions (`zIndex` 100–299).
 4. **High-res maps.** The canvas uses a DPR-aware backing store; prefer `image-rendering: auto` for photographic maps. See `docs/recipes/mobile-touch-controls.md`.
 
 ### Scene Creation Pattern
@@ -132,7 +132,7 @@ export function createMainScene({
   });
 
   // Register resources, archetypes, systems, inputs, widgets
-  game.defineArchetype("player", toArchetype(charPlayer, { speed: 190 }));
+  game.defineArchetype("player", toArchetype(charPlayer, { speed: 55 }));
   const playerId = game.spawnAtFeet("player", 500, 820);
   game.setControlledEntity(playerId);
 
@@ -263,7 +263,7 @@ When implementing specific gameplay features, consult `docs/recipes/`:
 - `npc-dialogue.md` — Scripted dialogue and dialogue widgets
 - `hud-widget.md` — HUD widget creation patterns
 - `world-pointer-input.md` — Pointer/click input handling
-- `mobile-touch-controls.md` — Touch D-pad + action buttons (keyboard parity)
+- `mobile-touch-controls.md` — Floating touch joystick + action buttons (keyboard parity)
 - `save-load.md` — Save/load persistence patterns
 - `map-placement.md` — Prop placement with generated placement boxes
 - `season-atmosphere.md` — Seasonal effects
@@ -313,7 +313,7 @@ game.onInputAction("interact", () => {
 game.dispatchInputAction("interact");
 ```
 
-Touch D-pad movement uses `game.setMovementInput` / `clearMovementInput` (same path as WASD). Configure default on-screen buttons with `createGame({ touchControls: { actions: [...] } })`. See `docs/recipes/mobile-touch-controls.md`.
+Touch joystick movement uses `game.setMovementInput` / `clearMovementInput` (same path as WASD). Configure default on-screen buttons with `createGame({ touchControls: { actions: [...] } })`. See `docs/recipes/mobile-touch-controls.md`.
 ## Notes
 
 Do not cast type to unknow to bypass typescript error

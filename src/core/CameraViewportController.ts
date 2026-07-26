@@ -39,10 +39,16 @@ interface CameraControllerOptions {
    */
   maxViewportScale?: number;
   /**
-   * Extra zoom applied on touch devices so the player isn't dwarfed by a
-   * large panel. Has no effect on desktop.
+   * Camera zoom while following so the player is not dwarfed by a full panel.
+   * Applied on both desktop and touch when follow is active. Default `1.45`.
    */
   followZoom?: number;
+  /**
+   * Soft-follow stiffness (higher = snappier). Frame-rate independent via
+   * `1 - exp(-followLerp * dt)`. Default `10`. Pass a very large value (e.g.
+   * `1000`) for near-instant lock.
+   */
+  followLerp?: number;
 }
 
 interface PlayerLike {
@@ -54,6 +60,7 @@ interface PlayerLike {
 
 // Normalised coordinate space per panel.
 const NORM = 1000;
+const DEFAULT_FOLLOW_LERP = 10;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -61,7 +68,7 @@ function clamp(value: number, min: number, max: number): number {
 
 /**
  * True touch / phone UX only. Do not use `maxTouchPoints` alone — macOS
- * trackpads report touch points and were incorrectly getting followZoom + cover.
+ * trackpads report touch points and were incorrectly getting cover layout.
  */
 function isTouchPrimaryDevice(): boolean {
   return window.matchMedia("(pointer: coarse)").matches;
@@ -76,9 +83,13 @@ export default class CameraViewportController {
   edgePadding: number;
   maxViewportScale: number;
   followZoom: number;
+  /** Soft-follow stiffness; see constructor options. */
+  followLerp: number;
   cameraFollowEnabled: boolean;
   camera: Camera;
   viewport: Viewport;
+  /** Snap on the first follow frame so the camera does not ease in from origin. */
+  private _followInitialized: boolean;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -90,6 +101,7 @@ export default class CameraViewportController {
       edgePadding = 0,
       maxViewportScale = 1,
       followZoom = 1.45,
+      followLerp = DEFAULT_FOLLOW_LERP,
     }: CameraControllerOptions,
   ) {
     this.canvas = canvas;
@@ -102,9 +114,15 @@ export default class CameraViewportController {
       Number.isFinite(maxViewportScale) && maxViewportScale > 0
         ? maxViewportScale
         : Number.POSITIVE_INFINITY;
-    this.followZoom = followZoom;
+    this.followZoom =
+      Number.isFinite(followZoom) && followZoom > 0 ? followZoom : 1.45;
+    this.followLerp =
+      Number.isFinite(followLerp) && followLerp > 0
+        ? followLerp
+        : DEFAULT_FOLLOW_LERP;
 
     this.cameraFollowEnabled = false;
+    this._followInitialized = false;
     this.camera = { x: 0, y: 0, zoom: 1 };
     this.viewport = {
       width: panelPixelWidth,
@@ -134,6 +152,9 @@ export default class CameraViewportController {
     const worldOverflows =
       this.worldPixelWidth > pw || this.worldPixelHeight > ph;
     const shouldFollow = isTouch || worldOverflows || this.edgePadding > 0;
+    if (!shouldFollow) {
+      this._followInitialized = false;
+    }
     this.cameraFollowEnabled = shouldFollow;
 
     // Follow mode uses cover so the viewport stays filled while the camera moves.
@@ -151,8 +172,8 @@ export default class CameraViewportController {
       }
     }
 
-    // Real touch phones only (not macOS trackpads — see isTouchPrimaryDevice).
-    const zoom = isTouch ? this.followZoom : 1;
+    // Closer framing whenever the camera follows (desktop + touch).
+    const zoom = shouldFollow ? this.followZoom : 1;
     this.camera.zoom = zoom;
 
     const visibleW = Math.min(pw, vw / scale);
@@ -208,11 +229,12 @@ export default class CameraViewportController {
     }
   }
 
-  updateForPlayer(player: PlayerLike): void {
+  updateForPlayer(player: PlayerLike, dt = 1 / 60): void {
     if (!this.cameraFollowEnabled) {
       this.camera.x = 0;
       this.camera.y = 0;
       this.camera.zoom = 1;
+      this._followInitialized = false;
       return;
     }
 
@@ -238,7 +260,16 @@ export default class CameraViewportController {
       view.offsetY + view.height - this.worldPixelHeight * zoom - edgePadding;
     const maxX = view.offsetX + edgePadding;
     const maxY = view.offsetY + edgePadding;
-    this.camera.x = clamp(targetX, minX, maxX);
-    this.camera.y = clamp(targetY, minY, maxY);
+    const clampedX = clamp(targetX, minX, maxX);
+    const clampedY = clamp(targetY, minY, maxY);
+
+    const safeDt = Number.isFinite(dt) && dt > 0 ? Math.min(dt, 0.1) : 1 / 60;
+    const alpha = this._followInitialized
+      ? 1 - Math.exp(-this.followLerp * safeDt)
+      : 1;
+
+    this.camera.x = this.camera.x + (clampedX - this.camera.x) * alpha;
+    this.camera.y = this.camera.y + (clampedY - this.camera.y) * alpha;
+    this._followInitialized = true;
   }
 }

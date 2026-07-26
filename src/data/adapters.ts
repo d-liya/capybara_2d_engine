@@ -960,7 +960,7 @@ export function toMapData(
  *
  * @example
  * import { charPlayer, toArchetype } from "../data";
- * game.defineArchetype("player", toArchetype(charPlayer, { speed: 190 }));
+ * game.defineArchetype("player", toArchetype(charPlayer, { speed: 55 }));
  * const playerId = game.spawnAtFeet("player", 500, 820);
  */
 export function toArchetype(

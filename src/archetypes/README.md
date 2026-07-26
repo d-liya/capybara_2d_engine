@@ -11,7 +11,7 @@ export function registerMyArchetypes(game: GameAPI): void {
   game.defineArchetype("player", {
     kind: "character",
     spriteSheets: [],
-    speed: 190,
+    speed: 55,
     radius: 34,
     width: 140,
     height: 168,

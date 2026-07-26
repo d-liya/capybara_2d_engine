@@ -70,6 +70,7 @@ export function createMainScene(
     map: STARTER_MAP,
     cameraEdgePadding: generatedOpts.cameraEdgePadding ?? 120,
     followZoom: generatedOpts.followZoom ?? 1.45,
+    cameraFollowLerp: generatedOpts.cameraFollowLerp ?? 10,
     maxViewportScale: generatedOpts.maxViewportScale ?? 1,
     touchControls:
       generatedOpts.touchControls === false

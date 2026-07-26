@@ -158,7 +158,7 @@ function registerGeneratedAudioCatalog(catalog: GeneratedAssetCatalog): void {
  *     url: "/sprites/hero_idle.png",
  *     frame_count: 8,
  *   }],
- *   speed: 190,
+ *   speed: 55,
  *   radius: 34,
  *   width: 140,
  *   height: 168,
@@ -175,6 +175,7 @@ export function createGame(config: GameConfig): GameAPI {
     cameraEdgePadding: config.cameraEdgePadding,
     maxViewportScale: config.maxViewportScale,
     followZoom: config.followZoom,
+    cameraFollowLerp: config.cameraFollowLerp,
   });
 
   // Default widgets mounted here

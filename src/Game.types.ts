@@ -569,7 +569,7 @@ export interface EntityShadowConfig {
   useEntityWidth?: boolean;
 }
 
-/** Directional movement flags shared by keyboard WASD and touch D-pad. */
+/** Directional movement flags shared by keyboard WASD and touch joystick. */
 export interface MovementInput {
   up: boolean;
   down: boolean;
@@ -612,14 +612,19 @@ export interface GameConfig {
    */
   maxViewportScale?: number;
   /**
-   * Extra camera zoom on touch-primary devices so the player is not dwarfed by
-   * a full panel. Desktop stays at zoom `1`. Default `1.45`.
+   * Camera zoom while following so the player is not dwarfed by a full panel.
+   * Applied on desktop and touch when follow is active. Default `1.45`.
    */
   followZoom?: number;
   /**
-   * Default touch D-pad + action buttons. Mounted automatically on
-   * touch-primary devices. Pass `false` to disable, or `{ actions: [...] }` to
-   * configure right-side buttons that call `dispatchInputAction`.
+   * Soft camera follow stiffness (higher = snappier). Frame-rate independent.
+   * Default `10`. Pass a large value (e.g. `1000`) for near-instant lock.
+   */
+  cameraFollowLerp?: number;
+  /**
+   * Default floating virtual joystick + action buttons. Mounted automatically
+   * on touch-primary devices. Pass `false` to disable, or `{ actions: [...] }`
+   * to configure right-side buttons that call `dispatchInputAction`.
    */
   touchControls?: false | TouchControlsConfig;
   /**
@@ -773,7 +778,7 @@ export interface GameAPI {
    * motion state (walk vs idle).
    *
    * @example
-   * game.defineArchetype("player_with_plow", toArchetype(charFarmerHoldingPlow, { speed: 190 }));
+   * game.defineArchetype("player_with_plow", toArchetype(charFarmerHoldingPlow, { speed: 55 }));
    * game.applyEntityArchetype(playerId, "player_with_plow", { heldTool: "plow" });
    */
   applyEntityArchetype(
@@ -1087,8 +1092,8 @@ export interface GameAPI {
 
   /**
    * Patch directional movement for the controlled entity (same path as WASD).
-   * Used by the touch D-pad. Activating any direction clears navigation on the
-   * controlled entity so pathfinding does not fight manual control.
+   * Used by the floating touch joystick. Activating any direction clears
+   * navigation on the controlled entity so player input wins.
    *
    * @example
    * game.setMovementInput({ up: true });

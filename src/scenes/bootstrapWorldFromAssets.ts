@@ -42,6 +42,14 @@ const DEFAULT_PANEL_PIXEL_HEIGHT = 1672
 const PLAYER_RADIUS = 34
 const NPC_RADIUS = 24
 
+/** Fallback player walk speed when height is unknown (norm units / sec). */
+const PLAYER_SPEED_DEFAULT = 55
+const NPC_SPEED_DEFAULT = 20
+/** Walk ≈ 0.85 body-heights/sec, clamped for dense village maps. */
+const PLAYER_SPEED_HEIGHT_RATIO = 0.85
+const PLAYER_SPEED_MIN = 40
+const PLAYER_SPEED_MAX = 70
+
 const INTERACT_RADIUS = 140
 
 type PanelPixels = { width: number; height: number }
@@ -55,6 +63,26 @@ function defaultCharacterSize(panel: PanelPixels): {
     width: ((CHARACTER_ART_WIDTH_PX * CHARACTER_SCALE) / panel.width) * 1000,
     height: ((CHARACTER_ART_HEIGHT_PX * CHARACTER_SCALE) / panel.height) * 1000,
   }
+}
+
+/**
+ * Player walk speed from sprite height so placement-sized characters stay
+ * readable on dense maps. NPCs keep a slow patrol default.
+ */
+function walkSpeedForHeight(
+  height: number,
+  role: "player" | "npc",
+  override?: number
+): number {
+  if (Number.isFinite(override) && (override as number) > 0) {
+    return override as number
+  }
+  if (role === "npc") return NPC_SPEED_DEFAULT
+  if (!Number.isFinite(height) || height <= 0) return PLAYER_SPEED_DEFAULT
+  return Math.min(
+    PLAYER_SPEED_MAX,
+    Math.max(PLAYER_SPEED_MIN, height * PLAYER_SPEED_HEIGHT_RATIO)
+  )
 }
 
 /** Placement row as emitted by Maps compile (may exceed engine PlacementTarget). */
@@ -145,8 +173,13 @@ export type BootstrapWorldOptions = {
     autoplay?: boolean
   }>
   cameraEdgePadding?: number
-  /** Touch-only camera zoom (ignored on desktop / Maps preview). */
+  /**
+   * Camera zoom while following (desktop + touch). Default `1.45` so the
+   * player is readable on dense village maps.
+   */
   followZoom?: number
+  /** Soft camera follow stiffness. Default `10`. */
+  cameraFollowLerp?: number
   /** Cap on CSS canvas upscale; default 1 avoids magnifying map art. */
   maxViewportScale?: number
   /**
@@ -586,6 +619,13 @@ function spawnMapCharacters(
         width: size.width,
         height: size.height,
         radius: radiusForSize(size, role, panel),
+        speed: walkSpeedForHeight(
+          size.height,
+          role,
+          role === "player"
+            ? opts.archetypeDefaults?.player?.speed
+            : opts.archetypeDefaults?.npc?.speed
+        ),
       })
     } catch (err) {
       console.warn(
@@ -1119,6 +1159,7 @@ export function bootstrapWorldFromAssets(
     map: toMapData(start.map),
     cameraEdgePadding: opts.cameraEdgePadding ?? 120,
     followZoom: opts.followZoom ?? 1.45,
+    cameraFollowLerp: opts.cameraFollowLerp ?? 10,
     maxViewportScale: opts.maxViewportScale ?? 1,
     touchControls:
       opts.touchControls === false
@@ -1190,14 +1231,15 @@ export function bootstrapWorldFromAssets(
     const roleDefaults = isPlayerLike
       ? opts.archetypeDefaults?.player
       : opts.archetypeDefaults?.npc
+    const size = defaultCharacterSize(panelPixelSize(game))
+    const role = isPlayerLike ? "player" : "npc"
     const def = toArchetype(entry.character, {
       kind: isPlayerLike ? "player" : "npc",
-      radius:
-        roleDefaults?.radius ?? (isPlayerLike ? PLAYER_RADIUS : NPC_RADIUS),
-      speed: roleDefaults?.speed ?? (isPlayerLike ? 95 : 20),
+      radius: roleDefaults?.radius ?? (isPlayerLike ? PLAYER_RADIUS : NPC_RADIUS),
+      speed: walkSpeedForHeight(size.height, role, roleDefaults?.speed),
       frameDurationMs: roleDefaults?.frameDurationMs ?? 125,
       // Default only — spawn overrides with map-editor placement size.
-      ...defaultCharacterSize(panelPixelSize(game)),
+      ...size,
     })
     game.defineArchetype(primary, def)
     definedArchetypes.add(primary)

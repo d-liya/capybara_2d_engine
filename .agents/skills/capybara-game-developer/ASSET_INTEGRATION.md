@@ -85,7 +85,7 @@ game.defineArchetype(
   toArchetype(charPlayer, {
     kind: "character",
     label: "Player",
-    speed: 190,
+    speed: 55,
     radius: 34,
     width: 140,
     height: 168,

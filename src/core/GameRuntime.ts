@@ -138,6 +138,7 @@ const KEY_MAP: Record<string, keyof MovementInput> = {
 };
 
 const CAMERA_FOLLOW_ZOOM = 1.45;
+const CAMERA_FOLLOW_LERP = 10;
 const SPAWN_REVEAL_MS = 320;
 const DEFAULT_ENTITY_WIDTH = 80;
 const DEFAULT_ENTITY_HEIGHT = 80;
@@ -200,6 +201,7 @@ export default class GameRuntime {
       cameraEdgePadding?: number;
       maxViewportScale?: number;
       followZoom?: number;
+      cameraFollowLerp?: number;
     } = {},
   ) {
     const cameraEdgePadding = options.cameraEdgePadding ?? 0;
@@ -207,6 +209,11 @@ export default class GameRuntime {
       Number.isFinite(options.followZoom) && (options.followZoom as number) > 0
         ? (options.followZoom as number)
         : CAMERA_FOLLOW_ZOOM;
+    const cameraFollowLerp =
+      Number.isFinite(options.cameraFollowLerp) &&
+      (options.cameraFollowLerp as number) > 0
+        ? (options.cameraFollowLerp as number)
+        : CAMERA_FOLLOW_LERP;
     this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d");
     this.cameraController = new CameraViewportController(this.canvas, {
@@ -215,6 +222,7 @@ export default class GameRuntime {
       worldPixelWidth: map.worldPixelWidth,
       worldPixelHeight: map.worldPixelHeight,
       followZoom,
+      followLerp: cameraFollowLerp,
       edgePadding: cameraEdgePadding,
       maxViewportScale: options.maxViewportScale,
     });
@@ -1062,7 +1070,7 @@ export default class GameRuntime {
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
   }
 
-  _updateCamera(): void {
+  _updateCamera(dt = 1 / 60): void {
     if (!this._controlledEntityId) {
       return;
     }
@@ -1071,7 +1079,7 @@ export default class GameRuntime {
     if (!player) {
       return;
     }
-    this.cameraController.updateForPlayer(player);
+    this.cameraController.updateForPlayer(player, dt);
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
   }
 
@@ -1093,7 +1101,7 @@ export default class GameRuntime {
     for (const system of this._systems.values()) {
       system(dt, this);
     }
-    this._updateCamera();
+    this._updateCamera(dt);
 
     const dpr = this.viewport.devicePixelRatio || 1;
 

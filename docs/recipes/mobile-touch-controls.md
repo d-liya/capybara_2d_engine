@@ -8,7 +8,7 @@ Keyboard and touch must drive the **same** gameplay intents:
 
 | Intent | Keyboard | Touch |
 | --- | --- | --- |
-| Move | WASD / arrows | Default D-pad → `setMovementInput` |
+| Move | WASD / arrows | Floating virtual joystick → `setMovementInput` |
 | Discrete actions | `bindInputAction` | Touch buttons → `dispatchInputAction` |
 
 Do not add key-only features. If a player can press `KeyE` on desktop, they need a touch button (or equivalent HUD) that fires the same action name.
@@ -20,8 +20,9 @@ const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120, // leave room for bottom-corner controls
-  // Optional: tune phone FOV / upscale cap
+  // Optional: closer framing while following (desktop + touch) / soft follow / upscale cap
   // followZoom: 1.45,
+  // cameraFollowLerp: 10,
   // maxViewportScale: 1,
   touchControls: {
     actions: [
@@ -46,7 +47,8 @@ game.onInputAction("attack", ({ phase }) => {
 ```
 
 - Pass `touchControls: false` only when the scene has no player controls (tools, cinematics).
-- Omit `actions` to mount the D-pad alone.
+- Omit `actions` to mount the floating joystick alone.
+- Tap/drag on the **left ~70%** of the screen: a stick appears under your finger and steers the player. Release to hide it and stop.
 - The default widget is visible only on touch-primary devices (`pointer: coarse` or `maxTouchPoints > 0`).
 
 ## Manual / custom HUD
@@ -66,7 +68,7 @@ Custom widgets should use `zIndex` 100–299, stay bottom-edge anchored, and **n
 
 - The engine sizes the canvas backing store with `devicePixelRatio` (capped at 2) while gameplay math stays in logical panel pixels.
 - Default CSS uses `image-rendering: auto` so photographic / high-res map art stays smooth. Pixel-art games can override the canvas rule to `pixelated`.
-- `cameraEdgePadding`, `followZoom`, and `maxViewportScale` are public `createGame` options.
+- `cameraEdgePadding`, `followZoom`, `cameraFollowLerp`, and `maxViewportScale` are public `createGame` options.
 
 ## Checklist when adding a feature
 
@@ -80,5 +82,5 @@ Custom widgets should use `zIndex` 100–299, stay bottom-edge anchored, and **n
 
 - `docs/recipes/world-pointer-input.md` — click/touch aiming and world markers
 - `docs/recipes/hud-widget.md` — HUD chrome and padding
-- `src/widgets/TouchControlsWidget.ts` — default D-pad + action buttons
+- `src/widgets/TouchControlsWidget.ts` — default floating joystick + action buttons
 - `src/inputs/README.md` — where to put binding modules
