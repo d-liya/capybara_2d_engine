@@ -374,11 +374,29 @@ export interface GeneratedHudPlacement {
   url?: string;
 }
 
+/** Sky-layer atmosphere placement (world-normalized 0–1000). */
+export interface GeneratedAtmospherePlacement {
+  placementId: string;
+  assetId: string;
+  label: string;
+  box_2d: [number, number, number, number] | number[];
+  width?: number;
+  height?: number;
+  url?: string;
+  spriteSheetUrl?: string;
+  kind?: "flyer" | "drift";
+  supportsFlipX?: boolean;
+  frameCount?: number;
+  frameWidth?: number;
+  frameHeight?: number;
+}
+
 /** Sidecar file shape: `map_<id>.placements.json`. */
 export interface GeneratedMapPlacementsFile {
   placement?: PanelContent["placement"];
   characterPlacements?: GeneratedCharacterPlacement[];
   hudPlacements?: GeneratedHudPlacement[];
+  atmospherePlacements?: GeneratedAtmospherePlacement[];
 }
 
 /** Flat generated map handle, e.g. the default export of `map_*.json`. */
@@ -397,6 +415,7 @@ export interface GeneratedMap {
   mapOverlays?: PanelContent["mapOverlays"];
   characterPlacements?: GeneratedCharacterPlacement[];
   hudPlacements?: GeneratedHudPlacement[];
+  atmospherePlacements?: GeneratedAtmospherePlacement[];
   /**
    * Map v2 cut-out sprites (boundary + walkable_area). Prefer loading these
    * from `map_*.sprites.json` via `mergeMapSidecars` so `map_*.json` stays lean.
@@ -864,6 +883,9 @@ export function mergeMapSidecars(
       ...(placements.hudPlacements?.length
         ? { hudPlacements: placements.hudPlacements }
         : {}),
+      ...(placements.atmospherePlacements?.length
+        ? { atmospherePlacements: placements.atmospherePlacements }
+        : {}),
     };
   }
 
@@ -937,6 +959,7 @@ export function toMapData(
       ? { generatedAssetContractVersion }
       : {}),
     characterPlacements: map.characterPlacements ?? [],
+    atmospherePlacements: map.atmospherePlacements ?? [],
     panel: {
       url: map.url,
       masks,

@@ -19,6 +19,7 @@ export {
   type GeneratedCollisionPoint,
   type GeneratedDirectionalCharacter,
   type GeneratedDirectionalSheet,
+  type GeneratedAtmospherePlacement,
   type GeneratedHudPlacement,
   type GeneratedMap,
   type GeneratedMapPlacementsFile,
@@ -55,8 +56,8 @@ export {
  *   });
  *
  * Keep full `sprites[]` (polygons) in `map_*.sprites.json` and
- * placement / characterPlacements / hudPlacements in `map_*.placements.json`.
- * Lean layout (`url`, walkableBoxes, mapOverlays) stays in `map_*.json`.
- * Put the merged handle in `allDataFiles`.
+ * placement / characterPlacements / hudPlacements / atmospherePlacements in
+ * `map_*.placements.json`. Lean layout (`url`, walkableBoxes, mapOverlays)
+ * stays in `map_*.json`. Put the merged handle in `allDataFiles`.
  */
 export const allDataFiles: unknown[] = [];

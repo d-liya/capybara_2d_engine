@@ -1142,6 +1142,7 @@ export default class GameRuntime {
       item.draw(ctx, now, worldNormW, worldNormH, worldPixelW, worldPixelH);
     }
     map.drawOverlay(ctx, now);
+    map.drawAtmosphere(ctx, now);
 
     if (this.debug) {
       map.drawDebug(ctx);

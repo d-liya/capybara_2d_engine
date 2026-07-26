@@ -89,6 +89,23 @@ export interface GeneratedCharacterPlacement {
   role?: "player" | "npc";
 }
 
+/** Sky-layer atmosphere placement authored by the map editor. */
+export interface GeneratedAtmospherePlacement {
+  placementId: string;
+  assetId: string;
+  label: string;
+  box_2d: Box2D;
+  width?: number;
+  height?: number;
+  url?: string;
+  spriteSheetUrl?: string;
+  kind?: "flyer" | "drift";
+  supportsFlipX?: boolean;
+  frameCount?: number;
+  frameWidth?: number;
+  frameHeight?: number;
+}
+
 /** Spawn-ready feet anchor derived from a generated character placement. */
 export interface CharacterPlacementSpawnPlan extends GeneratedCharacterPlacement {
   feetX: number;
@@ -475,6 +492,8 @@ export interface GameMapData extends GameMapPanelData {
   generatedAssetContractVersion?: GeneratedAssetContractVersion;
   /** Authored placements are data only; game code explicitly decides what to spawn. */
   characterPlacements?: GeneratedCharacterPlacement[];
+  /** Sky-layer atmosphere sprites loaded automatically with the map. */
+  atmospherePlacements?: GeneratedAtmospherePlacement[];
   panel: GameMapPanelContent & {
     masks: GameMapMaskEntry[];
   };

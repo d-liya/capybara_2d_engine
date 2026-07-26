@@ -1,6 +1,7 @@
 import MapObject from "./MapObject";
 import MapEffectObject from "./MapEffectObject";
 import MapOverlayObject, { type MapOverlayEntry } from "./MapOverlayObject";
+import AtmosphereObject, { type AtmosphereEntry } from "./AtmosphereObject";
 import {
   loadImage,
   parseBox2d,
@@ -123,6 +124,8 @@ export interface MapPanelData {
 export interface MapData extends MapPanelData {
   name?: string;
   characterPlacements?: CharacterPlacementEntry[];
+  /** Sky-layer atmosphere sprites (clouds / birds / balloons). */
+  atmospherePlacements?: AtmosphereEntry[];
   panel: MapPanelContent & { masks: MapMaskEntry[] };
   /**
    * Pixel dimensions of the map image. Defaults to 2508 × 1672 until the
@@ -311,6 +314,7 @@ interface BackgroundPanel {
  * .checkCollision(rect)  – true if rect should be blocked
  * .drawBackground(ctx)   – renders map url and mask backgroundImages
  * .getRenderables()      – returns MapObject[] + map spritesheets for Y-sort queue
+ * .drawAtmosphere(ctx)   – floating sky-layer sprites after the Y-sort queue
  * .drawDebug(ctx)        – renders obstacle colliders + walkable area outlines
  */
 export default class GameMap {
@@ -319,6 +323,7 @@ export default class GameMap {
   private _mapSprites: MapEffectObject[];
   private _placements: MapPlacementTarget[];
   private _characterPlacements: CharacterPlacementEntry[];
+  private _atmosphere: AtmosphereObject[];
   private _overlays: MapOverlayObject[];
   private _erasePatches: ErasePatch[];
   private _walkable: Rect[];
@@ -373,6 +378,14 @@ export default class GameMap {
         box_2d: [...placement.box_2d],
       }),
     );
+    this._atmosphere = (mapData.atmospherePlacements ?? [])
+      .filter(
+        (entry) =>
+          Array.isArray(entry.box_2d) &&
+          entry.box_2d.length >= 4 &&
+          Boolean(entry.spriteSheetUrl?.trim() || entry.url?.trim()),
+      )
+      .map((entry) => new AtmosphereObject(entry));
     this._overlays = [];
     this._erasePatches = [];
     this._walkable = [];
@@ -1231,6 +1244,20 @@ export default class GameMap {
 
   drawOverlay(_ctx: CanvasRenderingContext2D, _now = performance.now()): void {
     // Map spritesheets participate in the Y-sorted render queue via getRenderables().
+  }
+
+  /** Floating sky-layer sprites — drawn after the world Y-sort queue. */
+  drawAtmosphere(
+    ctx: CanvasRenderingContext2D,
+    now = performance.now(),
+  ): void {
+    const worldNormW = this.worldNormWidth;
+    const worldNormH = this.worldNormHeight;
+    const worldPixelW = this.worldPixelWidth;
+    const worldPixelH = this.worldPixelHeight;
+    for (const item of this._atmosphere) {
+      item.draw(ctx, now, worldNormW, worldNormH, worldPixelW, worldPixelH);
+    }
   }
 
   playGameplayEffectByTag(tag: string, now = performance.now()): boolean {
