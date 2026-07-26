@@ -356,16 +356,31 @@ export function setupOrientationReload() {
     navigator.maxTouchPoints > 0;
   if (!isTouchDevice) return;
 
+  // Only reload when the aspect class actually flips (portrait ↔ landscape).
+  // Backgrounding the browser can spuriously fire orientationchange on some
+  // mobile WebViews without a real rotate — that was replaying the loading gate.
+  let lastLandscape =
+    window.innerWidth > window.innerHeight ||
+    Math.abs(Number(window.orientation) || 0) === 90;
   let hasReloaded = false;
+
   const reloadForOrientation = () => {
     if (hasReloaded) return;
+    const nextLandscape =
+      window.innerWidth > window.innerHeight ||
+      Math.abs(Number(window.orientation) || 0) === 90;
+    if (nextLandscape === lastLandscape) return;
+    lastLandscape = nextLandscape;
     hasReloaded = true;
     window.setTimeout(() => {
       window.location.reload();
     }, 120);
   };
 
-  window.addEventListener("orientationchange", reloadForOrientation);
+  window.addEventListener("orientationchange", () => {
+    // Wait a tick so innerWidth/Height match the new orientation.
+    window.setTimeout(reloadForOrientation, 250);
+  });
 }
 
 import {

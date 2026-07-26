@@ -16,7 +16,7 @@ async function bootstrap() {
   const canvas = document.getElementById("game") as HTMLCanvasElement;
   const loadingGate = createLoadingGate(canvas);
 
-  // Starter scene — blank panel until you generate and wire a map/player.
+  // Starter scene — SVG floor + box player until generated maps/characters exist.
   createMainScene({ onAudioReady: loadingGate.onContinue });
 
   await loadingGate.waitForCompletion();

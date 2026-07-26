@@ -3,6 +3,24 @@ const LOGO_CROSSFADE_MS = 420;
 const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
+/** One splash per browser tab session — skip on return / soft reload. */
+const SESSION_GATE_KEY = "capybara.loadingGate.completed";
+
+function hasCompletedLoadingGateThisSession(): boolean {
+  try {
+    return sessionStorage.getItem(SESSION_GATE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markLoadingGateCompletedThisSession(): void {
+  try {
+    sessionStorage.setItem(SESSION_GATE_KEY, "1");
+  } catch {
+    // Private mode / blocked storage — gate may show again; acceptable.
+  }
+}
 
 function isE2bHost(hostname: string): boolean {
   // e.g. 3000-xxxx.e2b.dev, *.e2b.app
@@ -438,7 +456,17 @@ export function createCoreLoadingGate(
   canvas: HTMLCanvasElement | null,
   options: Record<string, unknown> = {},
 ): LoadingGate {
+  const skipSplash = hasCompletedLoadingGateThisSession();
+
   if (isDevMode()) {
+    if (skipSplash) {
+      return {
+        onContinue: () => () => undefined,
+        waitForCompletion: () => Promise.resolve(),
+        teardown: () => undefined,
+      };
+    }
+
     document.body.style.opacity = "0";
     document.body.style.transition = `opacity ${DEV_REVEAL_MS}ms ease`;
 
@@ -446,10 +474,24 @@ export function createCoreLoadingGate(
       onContinue: () => () => undefined,
       waitForCompletion: () => Promise.resolve(),
       teardown: () => {
+        markLoadingGateCompletedThisSession();
         requestAnimationFrame(() => {
           document.body.style.opacity = "1";
         });
       },
+    };
+  }
+
+  // Returning to the tab/app often remounts the page — don't force the splash again.
+  if (skipSplash) {
+    return {
+      onContinue: (listener) => {
+        // No user gesture available; scenes should unlock audio on first input.
+        listener({ userActivated: false });
+        return () => undefined;
+      },
+      waitForCompletion: () => Promise.resolve(),
+      teardown: () => undefined,
     };
   }
 
@@ -483,6 +525,9 @@ export function createCoreLoadingGate(
       return;
     }
     hasEmittedContinue = true;
+    if (detail.userActivated) {
+      markLoadingGateCompletedThisSession();
+    }
     for (const listener of continueListeners) {
       listener(detail);
     }

@@ -48,7 +48,7 @@ game.onInputAction("attack", ({ phase }) => {
 
 - Pass `touchControls: false` only when the scene has no player controls (tools, cinematics).
 - Omit `actions` to mount the floating joystick alone.
-- Tap/drag on the **left ~70%** of the screen: a stick appears under your finger and steers the player. Release to hide it and stop.
+- Tap/drag **anywhere** on the screen (except action buttons): a stick appears under your finger and steers the player. Release to hide it and stop.
 - The default widget is visible only on touch-primary devices (`pointer: coarse` or `maxTouchPoints > 0`).
 
 ## Manual / custom HUD

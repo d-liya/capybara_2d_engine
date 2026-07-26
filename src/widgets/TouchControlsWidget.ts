@@ -50,9 +50,9 @@ function dirsFromStick(dx: number, dy: number): Set<Direction> {
 /**
  * Mobile floating virtual joystick + action buttons.
  *
- * Tap/drag on the left side of the screen: a stick appears under the finger
- * and drives `setMovementInput` (same path as WASD). Action buttons on the
- * right call `dispatchInputAction` with the same names as keyboard bindings.
+ * Tap/drag anywhere on the screen (except action buttons): a stick appears
+ * under the finger and drives `setMovementInput` (same path as WASD). Action
+ * buttons call `dispatchInputAction` with the same names as keyboard bindings.
  */
 export function createTouchControlsWidget(
   options: TouchControlsConfig = {},
@@ -91,11 +91,48 @@ export function createTouchControlsWidget(
     game.setMovementInput(patch);
   };
 
+  const hideStick = () => {
+    if (!baseEl || !knobEl) return;
+    baseEl.style.opacity = "0";
+    knobEl.style.transform = "translate(-50%, -50%) translate(0px, 0px)";
+  };
+
+  const endStick = (
+    pointerId: number,
+    game: {
+      setMovementInput: (patch: Partial<MovementInput>) => void;
+      clearMovementInput: () => void;
+    },
+  ) => {
+    if (activePointerId !== pointerId) return;
+    activePointerId = null;
+    heldDirs.clear();
+    syncMovement(game);
+    hideStick();
+    try {
+      if (stickLayer?.hasPointerCapture(pointerId)) {
+        stickLayer.releasePointerCapture(pointerId);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   const clearAll = (game: { clearMovementInput: () => void }) => {
+    const locked = activePointerId;
     heldDirs.clear();
     game.clearMovementInput();
     hideStick();
     activePointerId = null;
+    if (locked != null) {
+      try {
+        if (stickLayer?.hasPointerCapture(locked)) {
+          stickLayer.releasePointerCapture(locked);
+        }
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const showStick = (clientX: number, clientY: number) => {
@@ -119,12 +156,6 @@ export function createTouchControlsWidget(
     baseEl.style.left = `${x - half}px`;
     baseEl.style.top = `${y - half}px`;
     baseEl.style.opacity = "1";
-    knobEl.style.transform = "translate(-50%, -50%) translate(0px, 0px)";
-  };
-
-  const hideStick = () => {
-    if (!baseEl || !knobEl) return;
-    baseEl.style.opacity = "0";
     knobEl.style.transform = "translate(-50%, -50%) translate(0px, 0px)";
   };
 
@@ -156,7 +187,9 @@ export function createTouchControlsWidget(
     id: "touch-controls",
     zIndex: 200,
     isVisible: () => isTouchPrimaryDevice(),
-    isInteractive: () => true,
+    // Keep root non-interactive so empty HUD areas don't swallow taps; only
+    // the stick layer / action buttons use pointer-events-auto.
+    isInteractive: () => false,
     blocksWorldInput: () => false,
 
     mount(api) {
@@ -168,10 +201,9 @@ export function createTouchControlsWidget(
       ].join(" ");
       root.dataset.touchControls = "true";
 
-      // Left ~70% of the screen: floating joystick capture zone.
+      // Full-screen capture — action buttons sit above and stopPropagation.
       stickLayer = document.createElement("div");
-      stickLayer.className =
-        "pointer-events-auto absolute inset-y-0 left-0 w-[70%]";
+      stickLayer.className = "pointer-events-auto absolute inset-0";
       stickLayer.setAttribute("aria-label", "Movement joystick");
       stickLayer.style.touchAction = "none";
 
@@ -197,11 +229,19 @@ export function createTouchControlsWidget(
 
       const onPointerDown = (event: PointerEvent) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
+        // Recover from a stuck gesture (cancelled touch that never cleared).
+        if (activePointerId != null && activePointerId !== event.pointerId) {
+          endStick(activePointerId, api.game);
+        }
         if (activePointerId != null) return;
         event.preventDefault();
         event.stopPropagation();
         activePointerId = event.pointerId;
-        stickLayer?.setPointerCapture(event.pointerId);
+        try {
+          stickLayer?.setPointerCapture(event.pointerId);
+        } catch {
+          // Some browsers reject capture; tracking by pointerId still works.
+        }
         showStick(event.clientX, event.clientY);
         applyStickOffset(event.clientX, event.clientY, api.game);
       };
@@ -215,22 +255,20 @@ export function createTouchControlsWidget(
       const onPointerUp = (event: PointerEvent) => {
         if (event.pointerId !== activePointerId) return;
         event.preventDefault();
-        activePointerId = null;
-        heldDirs.clear();
-        syncMovement(api.game);
-        hideStick();
-        try {
-          stickLayer?.releasePointerCapture(event.pointerId);
-        } catch {
-          // ignore
-        }
+        endStick(event.pointerId, api.game);
+      };
+
+      const onLostCapture = (event: PointerEvent) => {
+        // Only clear if this was our active stick — avoid racing releasePointerCapture.
+        if (event.pointerId !== activePointerId) return;
+        endStick(event.pointerId, api.game);
       };
 
       stickLayer.addEventListener("pointerdown", onPointerDown);
       stickLayer.addEventListener("pointermove", onPointerMove);
       stickLayer.addEventListener("pointerup", onPointerUp);
       stickLayer.addEventListener("pointercancel", onPointerUp);
-      stickLayer.addEventListener("lostpointercapture", onPointerUp);
+      stickLayer.addEventListener("lostpointercapture", onLostCapture);
 
       root.appendChild(stickLayer);
 
@@ -238,7 +276,7 @@ export function createTouchControlsWidget(
       if (actions.length > 0) {
         const right = document.createElement("div");
         right.className =
-          "pointer-events-auto absolute bottom-5 right-4 flex flex-col-reverse gap-2";
+          "pointer-events-auto absolute bottom-5 right-4 z-10 flex flex-col-reverse gap-2";
 
         for (const entry of actions) {
           const button = document.createElement("button");
@@ -264,6 +302,8 @@ export function createTouchControlsWidget(
           };
 
           button.addEventListener("pointerdown", (event) => {
+            // Don't start a stick under an action button.
+            event.stopPropagation();
             button.setPointerCapture(event.pointerId);
             fire("down", event);
           });
@@ -286,16 +326,22 @@ export function createTouchControlsWidget(
       }
 
       const onBlur = () => clearAll(api.game);
+      const onVisibility = () => {
+        if (document.hidden) clearAll(api.game);
+      };
       window.addEventListener("blur", onBlur);
-      api.setState({ onBlur });
+      document.addEventListener("visibilitychange", onVisibility);
+      api.setState({ onBlur, onVisibility });
 
       return root;
     },
 
     destroy(api) {
       const onBlur = api.state.onBlur as (() => void) | undefined;
-      if (onBlur) {
-        window.removeEventListener("blur", onBlur);
+      const onVisibility = api.state.onVisibility as (() => void) | undefined;
+      if (onBlur) window.removeEventListener("blur", onBlur);
+      if (onVisibility) {
+        document.removeEventListener("visibilitychange", onVisibility);
       }
       if (api.game && typeof api.game.clearMovementInput === "function") {
         clearAll(api.game);

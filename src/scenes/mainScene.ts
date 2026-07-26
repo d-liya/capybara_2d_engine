@@ -35,6 +35,20 @@ const STARTER_MAP: GameMapData = toMapData({
   sprites: [],
 });
 
+/** Simple box stand-in until generated character art is wired. */
+const STARTER_PLAYER_SPRITE =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="72" viewBox="0 0 48 72">
+  <rect x="10" y="2" width="28" height="26" rx="8" fill="#7ec8ff"/>
+  <rect x="6" y="28" width="36" height="40" rx="6" fill="#3d9be0"/>
+  <rect x="16" y="10" width="6" height="8" rx="2" fill="#0b1a28"/>
+  <rect x="26" y="10" width="6" height="8" rx="2" fill="#0b1a28"/>
+  <rect x="12" y="58" width="10" height="12" rx="2" fill="#2a6fa8"/>
+  <rect x="26" y="58" width="10" height="12" rx="2" fill="#2a6fa8"/>
+</svg>`,
+  );
+
 /**
  * Hand-written gameplay layered on asset bootstrap.
  * Survives regeneration of `generatedWorld.ts` — put systems, widgets,
@@ -44,9 +58,35 @@ function configureGameplay(_game: GameAPI): void {
   // Register systems / widgets / patches here.
 }
 
+function spawnStarterPlayer(game: GameAPI): void {
+  game.defineArchetype("player", {
+    kind: "player",
+    label: "Player",
+    speed: 80,
+    radius: 20,
+    width: 36,
+    height: 54,
+    spriteSheets: [
+      {
+        name: "idle",
+        url: STARTER_PLAYER_SPRITE,
+        frame_count: 1,
+      },
+      {
+        name: "walk",
+        url: STARTER_PLAYER_SPRITE,
+        frame_count: 1,
+      },
+    ],
+  });
+  const playerId = game.spawnAtFeet("player", 500, 700);
+  game.setControlledEntity(playerId);
+}
+
 /**
  * Main scene entry. Prefers auto-generated world wiring when
- * `./generatedWorld` exports maps; otherwise boots the blank SVG floor.
+ * `./generatedWorld` exports maps; otherwise boots the blank SVG floor
+ * with a box placeholder player (replaced once real assets sync in).
  *
  * Sync from capybara_game regenerates `generatedWorld.ts` — do not hand-edit it.
  * Customize via `configureGameplay` above or `BootstrapGameplayOptions`.
@@ -77,6 +117,8 @@ export function createMainScene(
         ? false
         : generatedOpts.touchControls,
   });
+
+  spawnStarterPlayer(game);
 
   if (generatedOpts.onAudioReady) {
     generatedOpts.onAudioReady(() => {

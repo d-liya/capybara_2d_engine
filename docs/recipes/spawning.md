@@ -98,7 +98,7 @@ game.defineArchetype(
 );
 ```
 
-Use `spawnAtFeet(...)` with these character sizes so the visible foot anchor, collision, and Y-sort stay consistent. Comfortable player walk speed is about `55` (or ~0.85× character height, clamped ~40–70) and `14`-`20` for slow NPC patrols; tune by visual feel on dense maps.
+Use `spawnAtFeet(...)` with these character sizes so the visible foot anchor, collision, and Y-sort stay consistent. Comfortable player walk speed is about `80` (or ~1× character height, clamped ~55–95) and `14`-`20` for slow NPC patrols; tune by visual feel on dense maps.
 
 ## Prop aspect ratio
 

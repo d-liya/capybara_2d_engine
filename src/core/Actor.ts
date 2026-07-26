@@ -107,8 +107,8 @@ const DEFAULT_W = 26; // sprite width
 const DEFAULT_H = 72; // sprite height
 const FOOT_INSET_RATIO = 6 / 26; // feet are narrower than shoulders
 const FOOT_H_RATIO = 1 / 9; // only the bottom slice triggers collisions
-/** Dense top-down village walk pace (~0.7–1 body-height/sec at typical sizes). */
-const DEFAULT_SPEED = 55; // normalized map units per second
+/** Dense top-down village walk pace (~1 body-height/sec at typical sizes). */
+const DEFAULT_SPEED = 80; // normalized map units per second
 const DEFAULT_FRAME_DURATION_MS = 100;
 const DEFAULT_TRANSITION_MS = 0;
 const DEFAULT_MAP_WIDTH_PX = 2508;

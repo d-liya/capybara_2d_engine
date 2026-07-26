@@ -43,12 +43,12 @@ const PLAYER_RADIUS = 34
 const NPC_RADIUS = 24
 
 /** Fallback player walk speed when height is unknown (norm units / sec). */
-const PLAYER_SPEED_DEFAULT = 55
+const PLAYER_SPEED_DEFAULT = 80
 const NPC_SPEED_DEFAULT = 20
-/** Walk ≈ 0.85 body-heights/sec, clamped for dense village maps. */
-const PLAYER_SPEED_HEIGHT_RATIO = 0.85
-const PLAYER_SPEED_MIN = 40
-const PLAYER_SPEED_MAX = 70
+/** Walk ≈ body-height/sec, clamped for dense village maps. */
+const PLAYER_SPEED_HEIGHT_RATIO = 1.0
+const PLAYER_SPEED_MIN = 55
+const PLAYER_SPEED_MAX = 95
 
 const INTERACT_RADIUS = 140
 
