@@ -8,19 +8,19 @@ For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep
 
 ## Source of truth
 
-1. **`src/data/` generated JSON** — map/character/prop/audio handles for _this_ game (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; exports from `index.ts` / `props.ts`). Never invent names from recipes or placeholders.
+1. **`src/data/` generated JSON** — map/character/prop/audio handles for _this_ game (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`; exports from `generated.ts` / `props.ts`, re-exported by `index.ts`). Never invent names from recipes or placeholders.
 2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `mergeMapSidecars`, `mergeMapSprites`, `toArchetype`). Stable across regenerations.
 3. **`src/Game.ts`** — public gameplay API (`createGame`, `transitionMap` / `loadMap`, overlays, audio helpers, spawning).
 
 Prefer lean `map_*.json` for layout/overlays. Open `map_*.sprites.json` for collision polygons and `map_*.placements.json` for placement lists. Do not hand-edit generated JSON unless explicitly asked.
 
-Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` below are **placeholders**. Copy real names from generated JSON / `index.ts` exports.
+Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` below are **placeholders**. Copy real names from generated JSON / `generated.ts` exports.
 
 ## Registration checklist
 
 When new generated files land, register them before using them in a scene:
 
-1. **Maps / characters** — import `map_*.json` / `char_*.json` in [`src/data/index.ts`](../../../src/data/index.ts), export the handles, and include them in `allDataFiles`.
+1. **Maps / characters** — import `map_*.json` / `char_*.json` in [`src/data/generated.ts`](../../../src/data/generated.ts), export the handles, and include them in `allDataFiles`. Do not rewrite [`src/data/index.ts`](../../../src/data/index.ts) (stable `export *` barrel).
    - **Map v2 sidecars**: keep lean layout in `map_<id>.json` (`url`, `walkableBoxes`, `mapOverlays`). Put full `sprites[]` in `map_<id>.sprites.json` and `placement` / `characterPlacements` / `hudPlacements` in `map_<id>.placements.json`. Merge at registration:
      ```ts
      import mapFarmBase from "./map_farm.json";
@@ -32,7 +32,7 @@ When new generated files land, register them before using them in a scene:
      });
      ```
      Scenes still call `toMapData(mapFarm)`. Open the sidecars (or use the merged handle) when you need sprite geometry or placement lists.
-2. **Prop groups** — add each `prop_*.json` to `allPropFiles` in [`src/data/props.ts`](../../../src/data/props.ts).
+2. **Prop groups** — add each `prop_*.json` to `allPropFiles` in [`src/data/generated-props.ts`](../../../src/data/generated-props.ts) (types/helpers stay in `props.ts`).
 3. **Music / portraits / shared art** — add `{ name, url }` entries to [`src/data/common.json`](../../../src/data/common.json).
 4. **HUD art** — when a HUD is generated, a boilerplate `Hud...` widget scaffold is usually written under `src/widgets/`. Confirm factory names from the scaffold export; adapt it (do not treat it as finished gameplay UI).
 5. **Scene status** — when a scene owns the map, update [`src/scenes/SCENES.md`](../../../src/scenes/SCENES.md) with the wired handles and placement usage.

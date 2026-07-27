@@ -32,7 +32,7 @@ npm run build
 - **`src/systems/`** — Per-frame gameplay logic (e.g., footstep audio, AI waves, combat). Systems receive `(dt, game)` and run each frame.
 - **`src/archetypes/`** — Reusable entity defaults (body/render prefabs).
 - **`src/widgets/`** — DOM HUD plugins mounted via `game.useWidget()`.
-- **`src/data/`** — Generated JSON content and TypeScript handles (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`, exports in `index.ts`).
+- **`src/data/`** — Generated JSON content and TypeScript handles (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`, synced exports in `generated.ts`; stable barrel in `index.ts`).
 - **`src/sdk/`** — Capybara SDK facade for save/load, auth, multiplayer. Import from `src/sdk/index.ts`.
 
 ### Data Flow
@@ -48,7 +48,7 @@ npm run build
 
 This project uses **documentation-driven development**. When working with generated assets or engine patterns:
 
-1. **`src/data/` JSON** — Source of truth for generated maps, characters, props, audio, animation names, and placement (`map_*.json`, `map_*.sprites.json`, `map_*.placements.json`, `char_*.json`, `prop_*.json`, `common.json`; handles exported from `index.ts` / `props.ts`). Prefer lean `map_*.json`; open sprite/placement sidecars when you need polygons or placement lists.
+1. **`src/data/` JSON** — Source of truth for generated maps, characters, props, audio, animation names, and placement (`map_*.json`, `map_*.sprites.json`, `map_*.placements.json`, `char_*.json`, `prop_*.json`, `common.json`; handles exported from `generated.ts` / `props.ts`, re-exported by `index.ts`). Prefer lean `map_*.json`; open sprite/placement sidecars when you need polygons or placement lists.
 2. **`src/scenes/SCENES.md`** — Scene composition facts (resources, archetypes, systems, inputs, widgets)
 3. **`docs/recipes/`** — Optional implementation patterns (combat, inventory, NPCs, etc.)
 4. **DO NOT** reverse-engineer `src/core/` or SDK internals — build from the docs and facades
@@ -68,7 +68,7 @@ This project uses **documentation-driven development**. When working with genera
 When generating new assets (maps, characters, props, audio):
 
 1. **Generation alone is incomplete** — assets must be wired into the game
-2. Register new JSON in `src/data/index.ts` / `props.ts` / `common.json` and export handles
+2. Register new JSON in `src/data/generated.ts` / `generated-props.ts` / `common.json` and export handles (`index.ts` / `props.ts` stay stable)
 3. Import those handles in scenes using `src/data/` adapters
 4. For common assets (HUD, reference art, music, SFX), add to `src/data/common.json` as `{ name, url }`
 
