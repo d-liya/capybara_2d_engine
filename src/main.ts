@@ -17,7 +17,11 @@ async function bootstrap() {
   const loadingGate = createLoadingGate(canvas);
 
   // Starter scene — SVG floor + box player until generated maps/characters exist.
-  createMainScene({ onAudioReady: loadingGate.onContinue });
+  createMainScene({
+    onAudioReady: loadingGate.onContinue,
+    followZoom: 1,
+    maxViewportScale: 0.6,
+  });
 
   await loadingGate.waitForCompletion();
   loadingGate.teardown();

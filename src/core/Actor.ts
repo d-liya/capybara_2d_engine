@@ -49,11 +49,21 @@ interface ActorOptions {
   shadow?: unknown;
 }
 
+export type ActorShadowMode = "sprite" | "ellipse";
+
 export interface ActorShadowConfig {
   enabled: boolean;
+  /** `sprite` = flattened active-frame silhouette; `ellipse` = soft oval. */
+  mode: ActorShadowMode;
   opacity: number;
   scaleX: number;
+  /** Sprite: vertical squash (1 = full height). Ellipse: oval aspect vs width. */
   scaleY: number;
+  /**
+   * Horizontal shear for sprite shadows. Positive leans the top toward the
+   * right (light from the upper-left).
+   */
+  skewX: number;
   offsetX: number;
   offsetY: number;
   useEntityWidth: boolean;
@@ -61,13 +71,62 @@ export interface ActorShadowConfig {
 
 export const DEFAULT_ACTOR_SHADOW: ActorShadowConfig = {
   enabled: true,
-  opacity: 0.3,
+  mode: "sprite",
+  opacity: 0.32,
   scaleX: 1,
-  scaleY: 0.18,
+  scaleY: 0.5,
+  skewX: 0.42,
   offsetX: 0,
   offsetY: 0,
   useEntityWidth: false,
 };
+
+/** Reused buffer for Safari-safe silhouette (canvas `filter` is unreliable). */
+let shadowSilhouetteScratch: HTMLCanvasElement | null = null;
+
+function getShadowSilhouetteScratch(
+  width: number,
+  height: number,
+): CanvasRenderingContext2D | null {
+  const w = Math.max(1, Math.ceil(width));
+  const h = Math.max(1, Math.ceil(height));
+  if (!shadowSilhouetteScratch) {
+    shadowSilhouetteScratch = document.createElement("canvas");
+  }
+  const canvas = shadowSilhouetteScratch;
+  if (canvas.width < w) canvas.width = w;
+  if (canvas.height < h) canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  return ctx;
+}
+
+/**
+ * Draw the active frame as an opaque black silhouette into the scratch canvas.
+ * Uses `source-in` instead of `ctx.filter` so Safari matches Chrome.
+ */
+function paintBlackSilhouetteFrame(
+  image: HTMLImageElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number,
+  dw: number,
+  dh: number,
+): { canvas: HTMLCanvasElement; width: number; height: number } | null {
+  const sctx = getShadowSilhouetteScratch(dw, dh);
+  if (!sctx || !shadowSilhouetteScratch) return null;
+  const w = Math.max(1, Math.ceil(dw));
+  const h = Math.max(1, Math.ceil(dh));
+  sctx.drawImage(image, sx, sy, sw, sh, 0, 0, w, h);
+  sctx.globalCompositeOperation = "source-in";
+  sctx.fillStyle = "#000";
+  sctx.fillRect(0, 0, w, h);
+  sctx.globalCompositeOperation = "source-over";
+  return { canvas: shadowSilhouetteScratch, width: w, height: h };
+}
 
 function normalizeActorShadowConfig(shadow: unknown): ActorShadowConfig {
   const input =
@@ -78,11 +137,18 @@ function normalizeActorShadowConfig(shadow: unknown): ActorShadowConfig {
   const opacity = Number(input.opacity);
   const scaleX = Number(input.scaleX);
   const scaleY = Number(input.scaleY);
+  const skewX = Number(input.skewX);
   const offsetX = Number(input.offsetX);
   const offsetY = Number(input.offsetY);
+  const modeRaw = input.mode;
+  const mode: ActorShadowMode =
+    modeRaw === "ellipse" || modeRaw === "sprite"
+      ? modeRaw
+      : DEFAULT_ACTOR_SHADOW.mode;
 
   return {
     enabled: input.enabled !== false,
+    mode,
     opacity:
       Number.isFinite(opacity) && opacity >= 0
         ? opacity
@@ -95,6 +161,7 @@ function normalizeActorShadowConfig(shadow: unknown): ActorShadowConfig {
       Number.isFinite(scaleY) && scaleY > 0
         ? scaleY
         : DEFAULT_ACTOR_SHADOW.scaleY,
+    skewX: Number.isFinite(skewX) ? skewX : DEFAULT_ACTOR_SHADOW.skewX,
     offsetX: Number.isFinite(offsetX) ? offsetX : DEFAULT_ACTOR_SHADOW.offsetX,
     offsetY: Number.isFinite(offsetY) ? offsetY : DEFAULT_ACTOR_SHADOW.offsetY,
     useEntityWidth: input.useEntityWidth === true,
@@ -498,10 +565,12 @@ export default class Actor {
     return this._footboxMode;
   }
 
-  setFootboxRatios(options: {
-    footHeightRatio?: unknown;
-    footInsetRatio?: unknown;
-  } = {}): void {
+  setFootboxRatios(
+    options: {
+      footHeightRatio?: unknown;
+      footInsetRatio?: unknown;
+    } = {},
+  ): void {
     const heightRatio = Number(options.footHeightRatio);
     if (Number.isFinite(heightRatio) && heightRatio > 0 && heightRatio <= 1) {
       this._footHeightRatio = heightRatio;
@@ -623,7 +692,10 @@ export default class Actor {
    * (`imageFit` + bottom-center). Falls back to the full entity box when the
    * sheet aspect is not known yet.
    */
-  _getFittedSpriteRect(x: number, y: number): {
+  _getFittedSpriteRect(
+    x: number,
+    y: number,
+  ): {
     x: number;
     y: number;
     w: number;
@@ -633,14 +705,7 @@ export default class Actor {
     if (aspect == null) {
       return { x, y, w: this._w, h: this._h };
     }
-    return fitSpriteInEntityBox(
-      x,
-      y,
-      this._w,
-      this._h,
-      aspect,
-      this._imageFit,
-    );
+    return fitSpriteInEntityBox(x, y, this._w, this._h, aspect, this._imageFit);
   }
 
   _footAt(x: number, y: number): Rect {
@@ -816,11 +881,143 @@ export default class Actor {
     worldNormH = NORM,
     worldPixelW?: number,
     worldPixelH?: number,
+    now = performance.now(),
   ): void {
     if (!this._shadow.enabled) {
       return;
     }
 
+    if (
+      this._shadow.mode === "sprite" &&
+      this._drawSpriteCastShadow(
+        ctx,
+        worldNormW,
+        worldNormH,
+        worldPixelW,
+        worldPixelH,
+        now,
+      )
+    ) {
+      return;
+    }
+
+    this._drawEllipseShadow(
+      ctx,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+  }
+
+  /**
+   * Flattened + skewed silhouette of the active frame, anchored at the feet
+   * and drawn before the character so boots cover the contact edge.
+   */
+  private _drawSpriteCastShadow(
+    ctx: CanvasRenderingContext2D,
+    worldNormW: number,
+    worldNormH: number,
+    worldPixelW: number | undefined,
+    worldPixelH: number | undefined,
+    now: number,
+  ): boolean {
+    const anim = this._animations[this._activeAnimation];
+    const image = anim?.image;
+    if (!image?.complete || !image.naturalWidth) {
+      return false;
+    }
+
+    const fitted = this._getFittedSpriteRect(this.x, this.y);
+    const trim = this._collisionTrim ?? anim.trim;
+    const bottom = trim
+      ? fitted.y + trim.bottom * fitted.h
+      : fitted.y + fitted.h;
+    const centerX =
+      fitted.x + fitted.w * 0.5 + this._shadow.offsetX * this._facingX;
+    const feetY = bottom + this._shadow.offsetY;
+
+    const { x: px1, y: py1 } = toPixel(
+      fitted.x,
+      fitted.y,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+    const { x: px2, y: py2 } = toPixel(
+      fitted.x + fitted.w,
+      fitted.y + fitted.h,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+    const { x: feetPxX, y: feetPxY } = toPixel(
+      centerX,
+      feetY,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+
+    const dw = px2 - px1;
+    const dh = py2 - py1;
+    if (!(Math.abs(dw) > 0.5) || !(Math.abs(dh) > 0.5)) {
+      return false;
+    }
+
+    const frameIndex = this._getFrameIndex(now);
+    const frameWidth = image.naturalWidth / anim.frameCount;
+    const frameHeight = image.naturalHeight;
+    const drawW = Math.abs(dw);
+    const drawH = Math.abs(dh);
+    const silhouette = paintBlackSilhouetteFrame(
+      image,
+      frameIndex * frameWidth,
+      0,
+      frameWidth,
+      frameHeight,
+      drawW,
+      drawH,
+    );
+    if (!silhouette) {
+      return false;
+    }
+
+    // Positive skewX → top leans right (shear uses -skew because local Y is up).
+    const shear = -this._shadow.skewX;
+
+    ctx.save();
+    ctx.translate(feetPxX, feetPxY);
+    ctx.transform(this._shadow.scaleX, 0, shear, this._shadow.scaleY, 0, 0);
+    if (this._facingX < 0) {
+      ctx.scale(-1, 1);
+    }
+    ctx.globalAlpha = this._shadow.opacity;
+    ctx.drawImage(
+      silhouette.canvas,
+      0,
+      0,
+      silhouette.width,
+      silhouette.height,
+      -drawW * 0.5,
+      -drawH,
+      drawW,
+      drawH,
+    );
+    ctx.restore();
+    return true;
+  }
+
+  private _drawEllipseShadow(
+    ctx: CanvasRenderingContext2D,
+    worldNormW: number,
+    worldNormH: number,
+    worldPixelW?: number,
+    worldPixelH?: number,
+  ): void {
     const anim = this._animations[this._activeAnimation];
     const trim = this._collisionTrim ?? anim?.trim;
     const foot = this._footAt(this.x, this.y);
@@ -837,8 +1034,6 @@ export default class Actor {
     } else if (this._footboxMode === "auto") {
       const fitted = this._getFittedSpriteRect(this.x, this.y);
       if (trim) {
-        // Shadow follows feet Y from trim, but stays centered on the fitted
-        // flip axis so it does not jump when facing changes.
         const bottom = fitted.y + trim.bottom * fitted.h;
         const opaqueW = Math.max(1, (trim.right - trim.left) * fitted.w);
         const centerX = fitted.x + fitted.w * 0.5;
@@ -888,10 +1083,14 @@ export default class Actor {
       worldPixelH,
     );
 
+    // When this is a fallback from a failed sprite cast, keep a flat contact blob.
+    const ellipseAspect =
+      this._shadow.mode === "sprite" ? 0.18 : this._shadow.scaleY;
+
     const cx = (px1 + px2) / 2;
     const cy = py;
     const rx = ((px2 - px1) / 2) * this._shadow.scaleX;
-    const ry = Math.max(2, rx * this._shadow.scaleY);
+    const ry = Math.max(2, rx * ellipseAspect);
 
     ctx.save();
     ctx.beginPath();
@@ -991,7 +1190,14 @@ export default class Actor {
       return;
     }
 
-    this._drawShadow(ctx, worldNormW, worldNormH, worldPixelW, worldPixelH);
+    this._drawShadow(
+      ctx,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+      now,
+    );
 
     const currentFrame = this._getFrameIndex(now);
     const frameWidth = image.naturalWidth / animation.frameCount;

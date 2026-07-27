@@ -565,24 +565,41 @@ export interface EntityRenderComponents {
 /** Default feet shadow used by animated characters when `shadow` is omitted. */
 export const DEFAULT_ENTITY_SHADOW = {
   enabled: true,
-  opacity: 0.3,
+  mode: "sprite",
+  opacity: 0.32,
   scaleX: 1,
-  scaleY: 0.18,
+  scaleY: 0.5,
+  skewX: 0.42,
   offsetX: 0,
   offsetY: 0,
   useEntityWidth: false,
 } as const satisfies Required<EntityShadowConfig>;
 
+/** Soft oval vs flattened active-frame silhouette. */
+export type EntityShadowMode = "sprite" | "ellipse";
+
 /** Per-entity feet shadow tuning for animated characters. */
 export interface EntityShadowConfig {
-  /** Draw the feet ellipse shadow. Default `true`. */
+  /** Draw the feet shadow. Default `true`. */
   enabled?: boolean;
-  /** Center opacity of the radial gradient. Default `0.3`. */
+  /**
+   * `sprite` — darkened active frame, flattened + skewed (default).
+   * `ellipse` — soft radial oval under the feet.
+   */
+  mode?: EntityShadowMode;
+  /** Fill opacity. Default `0.32` (sprite) / tune per mode. */
   opacity?: number;
-  /** Horizontal radius multiplier. Default `1`. */
+  /** Horizontal scale. Default `1`. */
   scaleX?: number;
-  /** Vertical radius as a fraction of the horizontal radius. Default `0.18`. */
+  /**
+   * Sprite: vertical squash (`0.5` = half height). Ellipse: oval height vs width.
+   */
   scaleY?: number;
+  /**
+   * Sprite shear. Positive leans the top toward the right (light from upper-left).
+   * Default `0.42`. Ignored for `ellipse`.
+   */
+  skewX?: number;
   /**
    * Horizontal offset in normalized map units. Positive shifts right when facing
    * right; mirrors automatically when the actor faces left.
@@ -591,8 +608,8 @@ export interface EntityShadowConfig {
   /** Vertical offset in normalized map units. Positive moves the shadow down. Default `0`. */
   offsetY?: number;
   /**
-   * Span the shadow across the full entity width instead of trimmed sprite pixels.
-   * Useful for wide tool-holding variants.
+   * Ellipse only: span the shadow across the full entity width instead of
+   * trimmed sprite pixels. Useful for wide tool-holding variants.
    */
   useEntityWidth?: boolean;
 }

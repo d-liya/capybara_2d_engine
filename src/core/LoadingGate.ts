@@ -3,7 +3,11 @@ const LOGO_CROSSFADE_MS = 420;
 const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
-/** One splash per browser tab session — skip on return / soft reload. */
+/**
+ * One splash per browser tab session — skip when a mobile WebView remounts
+ * the page after switching apps (same tab session, navigation type "navigate").
+ * Explicit refresh (navigation type "reload") always shows the gate again.
+ */
 const SESSION_GATE_KEY = "capybara.loadingGate.completed";
 
 function hasCompletedLoadingGateThisSession(): boolean {
@@ -20,6 +24,37 @@ function markLoadingGateCompletedThisSession(): void {
   } catch {
     // Private mode / blocked storage — gate may show again; acceptable.
   }
+}
+
+function isReloadNavigation(): boolean {
+  try {
+    const entries = performance.getEntriesByType("navigation");
+    const nav = entries[0] as PerformanceNavigationTiming | undefined;
+    if (nav?.type === "reload") {
+      return true;
+    }
+  } catch {
+    // Fall through to legacy API.
+  }
+  try {
+    // Legacy PerformanceNavigation.TYPE_RELOAD === 1
+    return (
+      typeof performance !== "undefined" &&
+      "navigation" in performance &&
+      (performance as Performance & { navigation?: { type?: number } })
+        .navigation?.type === 1
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Skip remount splash, but always show again after an explicit refresh. */
+function shouldSkipLoadingGate(): boolean {
+  if (isReloadNavigation()) {
+    return false;
+  }
+  return hasCompletedLoadingGateThisSession();
 }
 
 function isE2bHost(hostname: string): boolean {
@@ -103,6 +138,8 @@ function injectLoadingStyles(): void {
       align-items: center;
       gap: 12px;
       width: max-content;
+      max-width: min(92vw, 22em);
+      box-sizing: border-box;
     }
 
     .cpy-loading-logo-dim {
@@ -119,8 +156,18 @@ function injectLoadingStyles(): void {
       font-weight: 400;
       letter-spacing: 0.04em;
       text-transform: uppercase;
-      line-height: 1;
+      line-height: 1.15;
       text-align: center;
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-break: normal;
+      max-width: 100%;
+    }
+
+    /* Game title phase: allow long names to wrap instead of overflowing. */
+    .cpy-loading-logo.is-title .cpy-loading-logo-content {
+      width: min(92vw, 22em);
+      max-width: min(92vw, 22em);
     }
 
     .cpy-loading-subtitle {
@@ -456,7 +503,7 @@ export function createCoreLoadingGate(
   canvas: HTMLCanvasElement | null,
   options: Record<string, unknown> = {},
 ): LoadingGate {
-  const skipSplash = hasCompletedLoadingGateThisSession();
+  const skipSplash = shouldSkipLoadingGate();
 
   if (isDevMode()) {
     if (skipSplash) {
@@ -482,7 +529,8 @@ export function createCoreLoadingGate(
     };
   }
 
-  // Returning to the tab/app often remounts the page — don't force the splash again.
+  // App-switch remounts keep sessionStorage and are not "reload" — skip splash.
+  // Explicit refresh is "reload" and shows the gate again via shouldSkipLoadingGate.
   if (skipSplash) {
     return {
       onContinue: (listener) => {

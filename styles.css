@@ -4,7 +4,7 @@
    (p-*, px-*, py-*, etc.). Tailwind preflight already resets margin/padding in @layer base. */
 
 body {
-  background: #111;
+  background: #000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -18,12 +18,14 @@ body {
 }
 #game-shell {
   position: relative;
+  background: #000;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
 }
 canvas {
   display: block;
+  background: #000;
   /* High-res map art: smooth resampling. Pixel-art games can override to `pixelated`. */
   image-rendering: auto;
   -webkit-user-select: none;
@@ -34,6 +36,7 @@ canvas {
 #hud-root {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
   -webkit-user-select: none;
   user-select: none;

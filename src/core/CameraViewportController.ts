@@ -182,10 +182,7 @@ export default class CameraViewportController {
     const offsetX = shouldFollow ? (pw - visibleW) * 0.5 : 0;
     const offsetY = shouldFollow ? (ph - visibleH) * 0.5 : 0;
 
-    const dpr = Math.min(
-      Math.max(1, window.devicePixelRatio || 1),
-      2,
-    );
+    const dpr = Math.min(Math.max(1, window.devicePixelRatio || 1), 2);
 
     this.viewport.width = visibleW;
     this.viewport.height = visibleH;
@@ -204,7 +201,10 @@ export default class CameraViewportController {
     this.canvas.style.height = `${cssH}px`;
     this.viewport.cssScale = cssW / pw;
 
-    const shell = this.canvas.parentElement;
+    const shellEl =
+      this.canvas.closest("#game-shell") ?? this.canvas.parentElement;
+    const shell = shellEl instanceof HTMLElement ? shellEl : null;
+
     if (shouldFollow) {
       this.canvas.style.position = "absolute";
       this.canvas.style.left = "50%";
