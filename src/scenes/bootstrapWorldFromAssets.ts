@@ -3,8 +3,11 @@
  *
  * Spawns character placements, sets the controlled player, starts BGM,
  * and binds a default interact action for state overlays / gameplay VFX /
- * enterable map transitions. Custom gameplay systems should build on top
- * of this — do not re-spawn placements by hand.
+ * enterable map transitions. Forward enterables also get a synthetic return
+ * link at `destinationSpawnBox2d` when the destination map has no authored
+ * exit back — so arriving players can walk out, then re-enter to go back.
+ * Custom gameplay systems should build on top of this — do not re-spawn
+ * placements by hand.
  */
 import {
   createGame,
@@ -111,6 +114,127 @@ function authoredPlacements(map: GeneratedMap): AuthoredPlacement[] {
     out.push(p as AuthoredPlacement)
   }
   return out
+}
+
+/** All lookup keys that resolve to the same bootstrap map entry. */
+function mapLookupKeys(entry: BootstrapMapEntry): string[] {
+  const keys = [entry.id]
+  const name = entry.map.name?.trim()
+  if (name) keys.push(name)
+  const assetId = entry.map.assetId?.trim()
+  if (assetId) keys.push(assetId)
+  return keys
+}
+
+function enterableDestinationId(placement: AuthoredPlacement): string {
+  return (
+    (typeof placement.destinationMapId === "string" &&
+      placement.destinationMapId.trim()) ||
+    (typeof placement.destinationMapAssetId === "string" &&
+      placement.destinationMapAssetId.trim()) ||
+    ""
+  )
+}
+
+function boundsOverlapOrNear(
+  a: { x1: number; y1: number; x2: number; y2: number },
+  b: { x1: number; y1: number; x2: number; y2: number },
+  pad: number
+): boolean {
+  return !(
+    a.x2 + pad < b.x1 ||
+    a.x1 - pad > b.x2 ||
+    a.y2 + pad < b.y1 ||
+    a.y1 - pad > b.y2
+  )
+}
+
+/**
+ * Per-map placements including synthetic return enterables.
+ * Forward doors with `destinationSpawnBox2d` get a reverse exit at that spawn
+ * when the destination does not already author one back to the source.
+ */
+function buildPlacementIndex(
+  maps: BootstrapMapEntry[]
+): Map<string, AuthoredPlacement[]> {
+  const byEntryId = new Map<string, AuthoredPlacement[]>()
+  const mapsById = new Map<string, BootstrapMapEntry>()
+
+  for (const entry of maps) {
+    byEntryId.set(entry.id, [...authoredPlacements(entry.map)])
+    for (const key of mapLookupKeys(entry)) {
+      mapsById.set(key, entry)
+    }
+  }
+
+  for (const source of maps) {
+    const sourcePlacements = byEntryId.get(source.id) ?? []
+    for (const placement of sourcePlacements) {
+      if (!placement.enterable) continue
+      if (placement.id.startsWith("__return_")) continue
+      const destKey = enterableDestinationId(placement)
+      if (!destKey) continue
+      const destEntry = mapsById.get(destKey)
+      if (!destEntry || destEntry.id === source.id) continue
+
+      const spawnBox = placement.destinationSpawnBox2d
+      if (!Array.isArray(spawnBox) || spawnBox.length < 4) continue
+      const spawnBounds = placementBounds(spawnBox)
+      if (!spawnBounds) continue
+
+      const sourceKeys = new Set(mapLookupKeys(source))
+      const destPlacements = byEntryId.get(destEntry.id) ?? []
+      const alreadyHasReturn = destPlacements.some((p) => {
+        if (!p.enterable) return false
+        const back = enterableDestinationId(p)
+        if (!back || !sourceKeys.has(back)) return false
+        const b = placementBounds(p.box_2d)
+        if (!b) return false
+        return boundsOverlapOrNear(b, spawnBounds, INTERACT_RADIUS)
+      })
+      if (alreadyHasReturn) continue
+
+      const returnSpawn =
+        Array.isArray(placement.box_2d) && placement.box_2d.length >= 4
+          ? placement.box_2d.slice(0, 4).map(Number)
+          : undefined
+
+      destPlacements.push({
+        id: `__return_${source.id}_${placement.id}`,
+        enterable: true,
+        destinationMapId: source.id,
+        box_2d: spawnBox.slice(0, 4).map(Number),
+        ...(returnSpawn && returnSpawn.every(Number.isFinite)
+          ? { destinationSpawnBox2d: returnSpawn }
+          : {}),
+        interactionType: "enterable",
+        element_name: placement.element_name,
+      })
+      byEntryId.set(destEntry.id, destPlacements)
+    }
+  }
+
+  // Index under every lookup key so currentMapIdRef / dest ids all resolve.
+  const index = new Map<string, AuthoredPlacement[]>()
+  for (const entry of maps) {
+    const list = byEntryId.get(entry.id) ?? []
+    for (const key of mapLookupKeys(entry)) {
+      index.set(key, list)
+    }
+  }
+  return index
+}
+
+function placementsForMap(
+  entry: BootstrapMapEntry | undefined,
+  placementIndex: Map<string, AuthoredPlacement[]>
+): AuthoredPlacement[] {
+  if (!entry) return []
+  return (
+    placementIndex.get(entry.id) ??
+    placementIndex.get(entry.map.assetId?.trim() ?? "") ??
+    authoredPlacements(entry.map)
+  )
 }
 
 function placementBounds(box: number[] | undefined): {
@@ -837,6 +961,7 @@ function clearTransitionPrompt(game: GameAPI): void {
 function updateTransitionPrompt(opts: {
   game: GameAPI
   mapsById: Map<string, BootstrapMapEntry>
+  placementIndex: Map<string, AuthoredPlacement[]>
   currentMapIdRef: { id: string }
   arrivalRef: {
     mapId: string | null
@@ -844,7 +969,14 @@ function updateTransitionPrompt(opts: {
   }
   transitionBusy: boolean
 }): void {
-  const { game, mapsById, currentMapIdRef, arrivalRef, transitionBusy } = opts
+  const {
+    game,
+    mapsById,
+    placementIndex,
+    currentMapIdRef,
+    arrivalRef,
+    transitionBusy,
+  } = opts
   let prompt: MapTransitionPromptState
   try {
     prompt = game.getResource<MapTransitionPromptState>(
@@ -888,7 +1020,7 @@ function updateTransitionPrompt(opts: {
   const currentEntry =
     mapsById.get(currentMapIdRef.id) ??
     [...mapsById.values()].find((m) => m.id === currentMapIdRef.id)
-  const authored = currentEntry ? authoredPlacements(currentEntry.map) : []
+  const authored = placementsForMap(currentEntry, placementIndex)
 
   const enterableAuthored = nearestEnterableAuthored(
     authored,
@@ -944,6 +1076,7 @@ function handleDefaultInteract(
   game: GameAPI,
   opts: BootstrapWorldOptions,
   mapsById: Map<string, BootstrapMapEntry>,
+  placementIndex: Map<string, AuthoredPlacement[]>,
   currentMapIdRef: { id: string },
   definedArchetypes: Set<string>,
   applyMapAudio?: (mapAssetId: string | null | undefined) => void,
@@ -963,7 +1096,7 @@ function handleDefaultInteract(
   const currentEntry =
     mapsById.get(currentMapIdRef.id) ??
     opts.maps.find((m) => m.id === currentMapIdRef.id)
-  const authored = currentEntry ? authoredPlacements(currentEntry.map) : []
+  const authored = placementsForMap(currentEntry, placementIndex)
 
   // Release the re-entry lock once the player walks out of the entrance they
   // arrived through (prevents an immediate transition loop after a door swap).
@@ -1025,7 +1158,7 @@ function handleDefaultInteract(
             // spawned into on the destination map.
             if (arrivalRef) {
               const destEnterable = nearestEnterableAuthored(
-                authoredPlacements(next.map),
+                placementsForMap(next, placementIndex),
                 spawnFeet.x,
                 spawnFeet.y,
                 INTERACT_RADIUS
@@ -1113,6 +1246,7 @@ export function bootstrapWorldFromAssets(
     if (assetId) mapsById.set(assetId, entry)
   }
   const currentMapIdRef = { id: start.id }
+  const placementIndex = buildPlacementIndex(opts.maps)
 
   const game = createGame({
     canvasId: opts.canvasId ?? "game",
@@ -1231,6 +1365,7 @@ export function bootstrapWorldFromAssets(
       updateTransitionPrompt({
         game,
         mapsById,
+        placementIndex,
         currentMapIdRef,
         arrivalRef,
         transitionBusy: transitionState.busy,
@@ -1286,6 +1421,7 @@ export function bootstrapWorldFromAssets(
         game,
         opts,
         mapsById,
+        placementIndex,
         currentMapIdRef,
         definedArchetypes,
         applyMapAudio,

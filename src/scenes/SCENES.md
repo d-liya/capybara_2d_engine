@@ -8,7 +8,7 @@
 | **Bootstrap** | `bootstrapWorldFromAssets` via `createGeneratedWorld` |
 | **Gameplay** | `configureGameplay` in `mainScene.ts` + `BootstrapGameplayOptions` |
 | **Inputs** | Built-in WASD / arrows; default `interact` (KeyE / touch) from bootstrap |
-| **Enterables** | Proximity glow + “Press E to enter” prompt; transition only on interact |
+| **Enterables** | Proximity glow + “Press E to enter” prompt; transition only on interact. Forward doors auto-get a return exit at `destinationSpawnBox2d` when the destination has no authored back-link. |
 
 ```ts
 import { createMainScene } from "./scenes/mainScene";
