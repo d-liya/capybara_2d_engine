@@ -20,7 +20,6 @@ import {
 import {
   toArchetype,
   toMapData,
-  toSpriteSheets,
   type AnyGeneratedCharacter,
   type GeneratedMap,
 } from "../data"
@@ -287,55 +286,20 @@ function placementBoxSize(placement: GeneratedCharacterPlacement): {
   return { width, height }
 }
 
-/** Source-art aspect ratio (w/h) from a generated character's first sheet. */
-function characterAspect(
-  character: AnyGeneratedCharacter | undefined
-): number {
-  const fallback = CHARACTER_ART_WIDTH_PX / CHARACTER_ART_HEIGHT_PX
-  if (!character) return fallback
-  for (const sheet of toSpriteSheets(character)) {
-    const w = Number(sheet.width)
-    const h = Number(sheet.height)
-    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
-      return w / h
-    }
-  }
-  return fallback
-}
-
 /**
- * Object-contain `aspect` (art w/h) inside the editor placement box so the
- * sprite fills the box on its constraining axis instead of being letterboxed
- * small by `imageFit: "contain"`.
- */
-function containSize(
-  box: { width: number; height: number },
-  aspect: number
-): { width: number; height: number } {
-  if (!Number.isFinite(aspect) || aspect <= 0) return box
-  if (box.width <= 0 || box.height <= 0) return box
-  const boxAspect = box.width / box.height
-  if (boxAspect > aspect) {
-    // Box is wider than the art → constrain by height.
-    return { width: box.height * aspect, height: box.height }
-  }
-  // Box is narrower/taller than the art → constrain by width.
-  return { width: box.width, height: box.width / aspect }
-}
-
-/**
- * Size a character entity from its editor placement box while preserving the
- * source-art aspect ratio (object-contain). Falls back to the default
- * character size when no usable box is present.
+ * Size a character entity from its editor placement box.
+ * Matches map-edit: the box_2d is the entity bounds and `imageFit: "contain"`
+ * letterboxes the art inside (same as CSS `object-contain` on the still).
+ * Do not pre-shrink by source aspect — that diverged when metadata aspect
+ * (or the 76×114 fallback) disagreed with the real plate.
  */
 function sizeFromPlacement(
   placement: GeneratedCharacterPlacement,
-  game: GameAPI,
-  aspect: number
+  game: GameAPI
 ): { width: number; height: number } {
   const box = placementBoxSize(placement)
   if (!box) return defaultCharacterSize(panelPixelSize(game))
-  return containSize(box, aspect)
+  return box
 }
 
 function radiusForSize(
@@ -592,11 +556,7 @@ function spawnMapCharacters(
     if (!Array.isArray(box) || box.length < 4) continue
     const feet = feetFromBox(box)
     const panel = panelPixelSize(game)
-    const size = sizeFromPlacement(
-      placement,
-      game,
-      characterAspect(charEntry?.character)
-    )
+    const size = sizeFromPlacement(placement, game)
     const role =
       placement.role === "player" || placement.role === "npc"
         ? placement.role
