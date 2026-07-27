@@ -2,11 +2,14 @@ import {
   loadImage,
   snapCanvasValue,
   toPixel,
-  fitRectInBox,
+  fitSpriteInEntityBox,
+  mapTrimToFittedRect,
   resolveImageFit,
+  resolveFootboxMode,
   NORM,
   type Rect,
   type ImageFitMode,
+  type FootboxMode,
 } from "../utils/common";
 import type { RenderLayer } from "./renderSort";
 
@@ -107,6 +110,8 @@ const DEFAULT_W = 26; // sprite width
 const DEFAULT_H = 72; // sprite height
 const FOOT_INSET_RATIO = 6 / 26; // feet are narrower than shoulders
 const FOOT_H_RATIO = 1 / 9; // only the bottom slice triggers collisions
+/** Minimum footbox height in normalized map units. */
+const FOOT_H_MIN = 4;
 /** Dense top-down village walk pace (~1 body-height/sec at typical sizes). */
 const DEFAULT_SPEED = 80; // normalized map units per second
 const DEFAULT_FRAME_DURATION_MS = 100;
@@ -170,6 +175,16 @@ export default class Actor {
   protected _holdFrame: number | null;
   protected _shadow: ActorShadowConfig;
   protected _imageFit: ImageFitMode;
+  protected _footboxMode: FootboxMode;
+  /** Manual / fallback foot slice height as a fraction of the reference height. */
+  protected _footHeightRatio: number;
+  /** Manual / fallback horizontal inset as a fraction of the reference width. */
+  protected _footInsetRatio: number;
+  /**
+   * First measured opaque trim — reused for collision so directional sheet
+   * swaps / facing flips do not reshape the footbox mid-stride.
+   */
+  protected _collisionTrim: SpriteTrim | null;
 
   constructor(
     x: number,
@@ -208,6 +223,10 @@ export default class Actor {
     this._holdFrame = null;
     this._shadow = normalizeActorShadowConfig(options.shadow);
     this._imageFit = "contain";
+    this._footboxMode = "auto";
+    this._footHeightRatio = FOOT_H_RATIO;
+    this._footInsetRatio = FOOT_INSET_RATIO;
+    this._collisionTrim = null;
     this._configureSpriteSheets(sprite, options.activeAnimation);
   }
 
@@ -220,6 +239,7 @@ export default class Actor {
       : [];
 
     this._animations = {};
+    this._collisionTrim = null;
     for (const sheet of sheets) {
       const key = this._normalizeAnimationKey(sheet.name);
       this._animations[key] = this._buildAnimation(sheet);
@@ -437,11 +457,9 @@ export default class Actor {
     return "prop";
   }
 
-  /** Y-sort anchor — uses trimmed sprite feet when available. */
+  /** Y-sort anchor — uses fitted + trimmed sprite feet when available. */
   get renderY(): number {
-    const anim = this._animations?.[this._activeAnimation];
-    const bottom = anim?.trim?.bottom ?? 1;
-    return this.y + bottom * this._h;
+    return this._footAt(this.x, this.y).y2;
   }
 
   setAnimationTransitionMs(durationMs: number): void {
@@ -470,6 +488,28 @@ export default class Actor {
 
   get imageFit(): ImageFitMode {
     return this._imageFit;
+  }
+
+  setFootboxMode(mode: unknown): void {
+    this._footboxMode = resolveFootboxMode(mode);
+  }
+
+  get footboxMode(): FootboxMode {
+    return this._footboxMode;
+  }
+
+  setFootboxRatios(options: {
+    footHeightRatio?: unknown;
+    footInsetRatio?: unknown;
+  } = {}): void {
+    const heightRatio = Number(options.footHeightRatio);
+    if (Number.isFinite(heightRatio) && heightRatio > 0 && heightRatio <= 1) {
+      this._footHeightRatio = heightRatio;
+    }
+    const insetRatio = Number(options.footInsetRatio);
+    if (Number.isFinite(insetRatio) && insetRatio >= 0 && insetRatio < 0.5) {
+      this._footInsetRatio = insetRatio;
+    }
   }
 
   setActiveAnimation(animationName: string, transitionMs?: number): void {
@@ -511,6 +551,9 @@ export default class Actor {
       .then((image) => {
         anim.image = image;
         anim.trim = this._measureTrimmedFrame(image, frameCount);
+        if (anim.trim && !this._collisionTrim) {
+          this._collisionTrim = anim.trim;
+        }
       })
       .catch(() => {
         anim.image = null;
@@ -564,24 +607,82 @@ export default class Actor {
     }
   }
 
-  _footAt(x: number, y: number): Rect {
+  /** Source-frame aspect (w/h) for the active sheet, or null if not loaded. */
+  _getContentAspect(): number | null {
     const anim = this._animations?.[this._activeAnimation];
-    const trim = anim?.trim;
-    const footH = Math.max(6, this._h * FOOT_H_RATIO);
+    const image = anim?.image;
+    if (!image?.complete || !image.naturalWidth || !anim) return null;
+    const frameWidth = image.naturalWidth / Math.max(1, anim.frameCount);
+    const frameHeight = image.naturalHeight;
+    if (!(frameWidth > 0) || !(frameHeight > 0)) return null;
+    return frameWidth / frameHeight;
+  }
 
-    if (trim) {
-      const x1 = x + trim.left * this._w;
-      const x2 = x + trim.right * this._w;
-      const y2 = y + trim.bottom * this._h;
-      return { x1, y1: y2 - footH, x2, y2 };
+  /**
+   * World-space rect where the sprite is actually drawn inside the entity box
+   * (`imageFit` + bottom-center). Falls back to the full entity box when the
+   * sheet aspect is not known yet.
+   */
+  _getFittedSpriteRect(x: number, y: number): {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } {
+    const aspect = this._getContentAspect();
+    if (aspect == null) {
+      return { x, y, w: this._w, h: this._h };
+    }
+    return fitSpriteInEntityBox(
+      x,
+      y,
+      this._w,
+      this._h,
+      aspect,
+      this._imageFit,
+    );
+  }
+
+  _footAt(x: number, y: number): Rect {
+    const mode = this._footboxMode;
+    const heightRatio = this._footHeightRatio;
+    const insetRatio = this._footInsetRatio;
+
+    if (mode === "box" || mode === "manual") {
+      const footH = Math.max(FOOT_H_MIN, this._h * heightRatio);
+      const footInset = Math.max(0, this._w * insetRatio);
+      return {
+        x1: x + footInset,
+        y1: y + this._h - footH,
+        x2: x + this._w - footInset,
+        y2: y + this._h,
+      };
     }
 
-    const footInset = Math.max(2, this._w * FOOT_INSET_RATIO);
+    // auto: alpha-trim for feet Y, but keep a facing-stable horizontal box.
+    // Draw flips around the fitted rect center — mirroring trim with facingX
+    // would shove the collider sideways into walls on turn-around.
+    const fitted = this._getFittedSpriteRect(x, y);
+    const anim = this._animations?.[this._activeAnimation];
+    const trim = this._collisionTrim ?? anim?.trim;
+    const bottom = trim
+      ? fitted.y + trim.bottom * fitted.h
+      : fitted.y + fitted.h;
+    const top = trim ? fitted.y + trim.top * fitted.h : fitted.y;
+    const contentH = Math.max(FOOT_H_MIN, bottom - top);
+    const footH = Math.max(FOOT_H_MIN, contentH * heightRatio);
+
+    const opaqueW = trim
+      ? Math.max(1, (trim.right - trim.left) * fitted.w)
+      : Math.max(1, fitted.w * (1 - 2 * insetRatio));
+    const centerX = fitted.x + fitted.w * 0.5;
+    const halfW = opaqueW * 0.5;
+
     return {
-      x1: x + footInset,
-      y1: y + this._h - footH,
-      x2: x + this._w - footInset,
-      y2: y + this._h,
+      x1: centerX - halfW,
+      y1: bottom - footH,
+      x2: centerX + halfW,
+      y2: bottom,
     };
   }
 
@@ -656,14 +757,14 @@ export default class Actor {
     dy: number,
     dt: number,
   ): void {
-    const step = this._speed * dt;
+    const baseStep = Math.max(1, this._speed * dt);
     const directions: Array<{ x: number; y: number }> = [];
 
     if (dx !== 0 || dy !== 0) {
       const magnitude = Math.hypot(dx, dy) || 1;
       directions.push({
-        x: (dx / magnitude) * step,
-        y: (dy / magnitude) * step,
+        x: dx / magnitude,
+        y: dy / magnitude,
       });
     }
 
@@ -677,16 +778,22 @@ export default class Actor {
       [1, -1],
       [-1, -1],
     ]) {
-      directions.push({ x: offsetX * step, y: offsetY * step });
+      const length = Math.hypot(offsetX, offsetY) || 1;
+      directions.push({ x: offsetX / length, y: offsetY / length });
     }
 
-    for (const direction of directions) {
-      const nextX = this.x + direction.x;
-      const nextY = this.y + direction.y;
-      if (!map.checkCollision(this._footAt(nextX, nextY))) {
-        this.x = nextX;
-        this.y = nextY;
-        return;
+    // Grow the search if a single frame-step cannot escape deep overlap
+    // (e.g. after a facing flip previously shifted the footbox).
+    for (const scale of [1, 2, 4, 8, 16]) {
+      const step = baseStep * scale;
+      for (const direction of directions) {
+        const nextX = this.x + direction.x * step;
+        const nextY = this.y + direction.y * step;
+        if (!map.checkCollision(this._footAt(nextX, nextY))) {
+          this.x = nextX;
+          this.y = nextY;
+          return;
+        }
       }
     }
   }
@@ -715,7 +822,7 @@ export default class Actor {
     }
 
     const anim = this._animations[this._activeAnimation];
-    const trim = anim?.trim;
+    const trim = this._collisionTrim ?? anim?.trim;
     const foot = this._footAt(this.x, this.y);
     const feetCenterX = (foot.x1 + foot.x2) / 2;
 
@@ -727,10 +834,22 @@ export default class Actor {
       worldX1 = feetCenterX - halfW;
       worldX2 = feetCenterX + halfW;
       worldBottom = foot.y2;
-    } else if (trim) {
-      worldX1 = this.x + trim.left * this._w;
-      worldX2 = this.x + trim.right * this._w;
-      worldBottom = this.y + trim.bottom * this._h;
+    } else if (this._footboxMode === "auto") {
+      const fitted = this._getFittedSpriteRect(this.x, this.y);
+      if (trim) {
+        // Shadow follows feet Y from trim, but stays centered on the fitted
+        // flip axis so it does not jump when facing changes.
+        const bottom = fitted.y + trim.bottom * fitted.h;
+        const opaqueW = Math.max(1, (trim.right - trim.left) * fitted.w);
+        const centerX = fitted.x + fitted.w * 0.5;
+        worldX1 = centerX - opaqueW * 0.5;
+        worldX2 = centerX + opaqueW * 0.5;
+        worldBottom = bottom;
+      } else {
+        worldX1 = fitted.x;
+        worldX2 = fitted.x + fitted.w;
+        worldBottom = fitted.y + fitted.h;
+      }
     } else {
       worldX1 = foot.x1;
       worldX2 = foot.x2;
@@ -879,14 +998,13 @@ export default class Actor {
     const frameHeight = image.naturalHeight;
     const contentAspect =
       frameWidth > 0 && frameHeight > 0 ? frameWidth / frameHeight : 1;
-    const fitted = fitRectInBox(
+    const fitted = fitSpriteInEntityBox(
       drawX,
       drawY,
       dw,
       dh,
       contentAspect,
       this._imageFit,
-      "bottom-center",
     );
     this._drawAnimationFrame(
       ctx,
@@ -933,37 +1051,46 @@ export default class Actor {
     ctx.fillRect(x, y, x2 - x, y2 - y);
     ctx.restore();
 
-    const anim = this._animations[this._activeAnimation];
-    const trim = anim?.trim;
-    if (trim) {
-      const tx1 = this.x + trim.left * this._w;
-      const ty1 = this.y + trim.top * this._h;
-      const tx2 = this.x + trim.right * this._w;
-      const ty2 = this.y + trim.bottom * this._h;
-      const { x: tpx1, y: tpy1 } = toPixel(
-        tx1,
-        ty1,
-        worldNormW,
-        worldNormH,
-        worldPixelW,
-        worldPixelH,
-      );
-      const { x: tpx2, y: tpy2 } = toPixel(
-        tx2,
-        ty2,
-        worldNormW,
-        worldNormH,
-        worldPixelW,
-        worldPixelH,
-      );
-
-      ctx.save();
-      ctx.strokeStyle = "rgba(0, 220, 255, 0.9)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(tpx1, tpy1, tpx2 - tpx1, tpy2 - tpy1);
-      ctx.fillStyle = "rgba(0, 220, 255, 0.06)";
-      ctx.fillRect(tpx1, tpy1, tpx2 - tpx1, tpy2 - tpy1);
-      ctx.restore();
+    if (this._footboxMode !== "auto") {
+      return;
     }
+
+    const fitted = this._getFittedSpriteRect(this.x, this.y);
+    const anim = this._animations[this._activeAnimation];
+    const trim = this._collisionTrim ?? anim?.trim;
+    // Cyan = opaque art bounds (unflipped). Yellow footbox is centered on the
+    // fitted flip axis and does not move when facing changes.
+    const bounds = trim
+      ? mapTrimToFittedRect(fitted, trim, 1)
+      : {
+          x1: fitted.x,
+          y1: fitted.y,
+          x2: fitted.x + fitted.w,
+          y2: fitted.y + fitted.h,
+        };
+    const { x: tpx1, y: tpy1 } = toPixel(
+      bounds.x1,
+      bounds.y1,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+    const { x: tpx2, y: tpy2 } = toPixel(
+      bounds.x2,
+      bounds.y2,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(0, 220, 255, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tpx1, tpy1, tpx2 - tpx1, tpy2 - tpy1);
+    ctx.fillStyle = "rgba(0, 220, 255, 0.06)";
+    ctx.fillRect(tpx1, tpy1, tpx2 - tpx1, tpy2 - tpy1);
+    ctx.restore();
   }
 }

@@ -7,6 +7,8 @@ import {
   toPixel,
   fitRectInBox,
   resolveImageFit,
+  resolveFootboxMode,
+  topLeftFromFeetWithSpriteFit,
   NORM,
 } from "../utils/common";
 import GameMap from "./GameMap";
@@ -116,14 +118,17 @@ interface SpriteFootAnchor {
   left: number;
   right: number;
   bottom: number;
+  /** Source frame width/height; used with imageFit for spawn placement. */
+  aspect: number;
 }
 
 interface PendingFeetAnchorPlacement {
   cacheKey: string;
   feetX: number;
   feetY: number;
-  usedCenterRatio: number;
-  usedBottomRatio: number;
+  /** Top-left written at spawn time (before trim resolves). */
+  usedX: number;
+  usedY: number;
 }
 
 const KEY_MAP: Record<string, keyof MovementInput> = {
@@ -324,17 +329,19 @@ export default class GameRuntime {
         const anchor = spawn.anchor ?? "top-left";
         const measuredAnchor =
           anchor === "feet" ? this._getSpriteFootAnchorFromCache(entity) : null;
-        const centerRatio = measuredAnchor
-          ? (measuredAnchor.left + measuredAnchor.right) * 0.5
-          : 0.5;
-        const bottomRatio = measuredAnchor?.bottom ?? 1;
 
         if (anchor === "center") {
           x = spawn.x - width * 0.5;
           y = spawn.y - height * 0.5;
         } else if (anchor === "feet") {
-          x = spawn.x - width * centerRatio;
-          y = spawn.y - height * bottomRatio;
+          const topLeft = this._topLeftFromFeetAnchor(
+            entity,
+            spawn.x,
+            spawn.y,
+            measuredAnchor,
+          );
+          x = topLeft.x;
+          y = topLeft.y;
         }
 
         this.patchEntity(this._controlledEntityId, { x, y });
@@ -347,13 +354,13 @@ export default class GameRuntime {
               spriteMeta.url,
               spriteMeta.frameCount,
             );
-            if (!measuredAnchor) {
+            if (!measuredAnchor && this._usesAutoFootbox(entity)) {
               this._pendingFeetAnchorPlacement.set(this._controlledEntityId, {
                 cacheKey,
                 feetX: spawn.x,
                 feetY: spawn.y,
-                usedCenterRatio: centerRatio,
-                usedBottomRatio: bottomRatio,
+                usedX: x,
+                usedY: y,
               });
             }
             this._ensureSpriteFootAnchorMeasured(
@@ -472,18 +479,16 @@ export default class GameRuntime {
 
     const merged = { ...base, ...props };
     const measuredAnchor = this._getSpriteFootAnchorFromCache(merged);
-    const centerRatio = measuredAnchor
-      ? (measuredAnchor.left + measuredAnchor.right) * 0.5
-      : 0.5;
-    const bottomRatio = measuredAnchor?.bottom ?? 1;
-    const inferredWidth = this._inferEntityWidth(merged);
-    const inferredHeight = this._inferEntityHeight(merged);
-    const x = feetX - inferredWidth * centerRatio;
-    const y = feetY - inferredHeight * bottomRatio;
+    const topLeft = this._topLeftFromFeetAnchor(
+      merged,
+      feetX,
+      feetY,
+      measuredAnchor,
+    );
     const id = this.spawn(archetype, {
       ...props,
-      x,
-      y,
+      x: topLeft.x,
+      y: topLeft.y,
     });
 
     const spriteMeta = this._getPrimarySpriteSheetMeta(merged);
@@ -492,13 +497,13 @@ export default class GameRuntime {
         spriteMeta.url,
         spriteMeta.frameCount,
       );
-      if (!measuredAnchor) {
+      if (!measuredAnchor && this._usesAutoFootbox(merged)) {
         this._pendingFeetAnchorPlacement.set(id, {
           cacheKey,
           feetX,
           feetY,
-          usedCenterRatio: centerRatio,
-          usedBottomRatio: bottomRatio,
+          usedX: topLeft.x,
+          usedY: topLeft.y,
         });
       }
       this._ensureSpriteFootAnchorMeasured(
@@ -1451,7 +1456,8 @@ export default class GameRuntime {
   private _getEntityFeetPoint(id: EntityId, entity: ComponentBag): PathPoint {
     const actor = this._entityActors.get(id);
     if (actor) {
-      return { x: actor.x + actor._w * 0.5, y: actor.renderY };
+      const foot = actor._footAt(actor.x, actor.y);
+      return { x: (foot.x1 + foot.x2) * 0.5, y: foot.y2 };
     }
 
     const x = Number(entity.x) || 0;
@@ -1766,19 +1772,92 @@ export default class GameRuntime {
         left: minX / fw,
         right: (maxX + 1) / fw,
         bottom: (maxY + 1) / fh,
+        aspect: fw / fh,
       };
     } catch {
       return null;
     }
   }
 
+  private _usesAutoFootbox(entity: ComponentBag): boolean {
+    return resolveFootboxMode(entity.footboxMode) === "auto";
+  }
+
+  /**
+   * Infer source-frame aspect from sheet metadata when the image is not loaded
+   * yet. Falls back to the entity box aspect (no letterboxing).
+   */
+  private _inferSpriteAspect(
+    entity: ComponentBag,
+    entityW: number,
+    entityH: number,
+  ): number {
+    const spriteSheets = entity.spriteSheets;
+    if (Array.isArray(spriteSheets) && spriteSheets.length > 0) {
+      const firstSheet = spriteSheets[0] as {
+        width?: number;
+        height?: number;
+        frame_count?: unknown;
+      };
+      const widthPx = Number(firstSheet?.width);
+      const heightPx = Number(firstSheet?.height);
+      const rawFrameCount = Number(firstSheet?.frame_count);
+      const frameCount =
+        Number.isFinite(rawFrameCount) && rawFrameCount > 0
+          ? Math.max(1, Math.floor(rawFrameCount))
+          : 1;
+      if (
+        Number.isFinite(widthPx) &&
+        widthPx > 0 &&
+        Number.isFinite(heightPx) &&
+        heightPx > 0
+      ) {
+        return widthPx / frameCount / heightPx;
+      }
+    }
+    if (entityW > 0 && entityH > 0) {
+      return entityW / entityH;
+    }
+    return 1;
+  }
+
+  private _topLeftFromFeetAnchor(
+    entity: ComponentBag,
+    feetX: number,
+    feetY: number,
+    measuredAnchor: SpriteFootAnchor | null,
+  ): { x: number; y: number } {
+    const width = this._inferEntityWidth(entity);
+    const height = this._inferEntityHeight(entity);
+    const mode = resolveFootboxMode(entity.footboxMode);
+
+    if (mode !== "auto") {
+      return { x: feetX - width * 0.5, y: feetY - height };
+    }
+
+    const aspect =
+      measuredAnchor?.aspect ?? this._inferSpriteAspect(entity, width, height);
+    // Horizontal feet stay on the fitted flip axis (0.5), not asymmetric
+    // opaque center — otherwise turn-around shifts the collider into walls.
+    const centerRatio = 0.5;
+    const bottomRatio = measuredAnchor?.bottom ?? 1;
+
+    return topLeftFromFeetWithSpriteFit({
+      feetX,
+      feetY,
+      entityW: width,
+      entityH: height,
+      contentAspect: aspect,
+      imageFit: entity.imageFit,
+      centerRatio,
+      bottomRatio,
+    });
+  }
+
   private _applyPendingFeetAnchorPlacements(
     cacheKey: string,
     anchor: SpriteFootAnchor,
   ): void {
-    const newCenterRatio = (anchor.left + anchor.right) * 0.5;
-    const newBottomRatio = anchor.bottom;
-
     for (const [
       entityId,
       pending,
@@ -1793,22 +1872,28 @@ export default class GameRuntime {
         continue;
       }
 
-      const width = this._inferEntityWidth(entity);
-      const height = this._inferEntityHeight(entity);
-      const expectedPreviousX = pending.feetX - width * pending.usedCenterRatio;
-      const expectedPreviousY =
-        pending.feetY - height * pending.usedBottomRatio;
+      if (!this._usesAutoFootbox(entity)) {
+        this._pendingFeetAnchorPlacement.delete(entityId);
+        continue;
+      }
+
       const currentX = Number(entity.x);
       const currentY = Number(entity.y);
 
       const movedSinceSpawn =
-        Math.abs(currentX - expectedPreviousX) > 0.001 ||
-        Math.abs(currentY - expectedPreviousY) > 0.001;
+        Math.abs(currentX - pending.usedX) > 0.001 ||
+        Math.abs(currentY - pending.usedY) > 0.001;
 
       if (!movedSinceSpawn) {
+        const topLeft = this._topLeftFromFeetAnchor(
+          entity,
+          pending.feetX,
+          pending.feetY,
+          anchor,
+        );
         this.patchEntity(entityId, {
-          x: pending.feetX - width * newCenterRatio,
-          y: pending.feetY - height * newBottomRatio,
+          x: topLeft.x,
+          y: topLeft.y,
         });
       }
 
@@ -2135,6 +2220,11 @@ export default class GameRuntime {
         this._inferEntityHeight(entity),
       );
       actor.setImageFit(entity.imageFit);
+      actor.setFootboxMode(entity.footboxMode);
+      actor.setFootboxRatios({
+        footHeightRatio: entity.footHeightRatio,
+        footInsetRatio: entity.footInsetRatio,
+      });
       const facingX = Number(entity.facingX);
       if (Number.isFinite(facingX)) actor.setFacingX(facingX);
       // Freeze a walk-strip frame when there is no dedicated idle art.

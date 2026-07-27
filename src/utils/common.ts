@@ -45,9 +45,25 @@ export type ImageFitMode = "contain" | "fill";
 
 export type ObjectFitAnchor = "center" | "bottom-center";
 
+/**
+ * How character foot colliders are derived from the sprite box.
+ * - `auto` (default): alpha-trim opaque pixels, mapped into the same fitted
+ *   rect used for drawing (`imageFit` + bottom-center).
+ * - `box`: full entity width×height bottom slice (no alpha trim / letterbox).
+ * - `manual`: entity-box bottom slice using `footHeightRatio` / `footInsetRatio`
+ *   (or the built-in defaults).
+ */
+export type FootboxMode = "auto" | "box" | "manual";
+
 /** Normalize entity `imageFit`; unknown/omitted → contain. */
 export function resolveImageFit(value: unknown): ImageFitMode {
   return value === "fill" ? "fill" : "contain";
+}
+
+/** Normalize entity `footboxMode`; unknown/omitted → auto. */
+export function resolveFootboxMode(value: unknown): FootboxMode {
+  if (value === "box" || value === "manual") return value;
+  return "auto";
 }
 
 /**
@@ -85,6 +101,78 @@ export function fitRectInBox(
   const y =
     anchor === "bottom-center" ? boxY + (boxH - h) : boxY + (boxH - h) * 0.5;
   return { x, y, w, h };
+}
+
+/** Actor draw / footbox share this fit: contain + bottom-center. */
+export function fitSpriteInEntityBox(
+  boxX: number,
+  boxY: number,
+  boxW: number,
+  boxH: number,
+  contentAspect: number,
+  imageFit: ImageFitMode = "contain",
+): { x: number; y: number; w: number; h: number } {
+  return fitRectInBox(
+    boxX,
+    boxY,
+    boxW,
+    boxH,
+    contentAspect,
+    imageFit,
+    "bottom-center",
+  );
+}
+
+/** Map frame-normalized trim ratios into a fitted sprite rect (optional flip). */
+export function mapTrimToFittedRect(
+  fitted: { x: number; y: number; w: number; h: number },
+  trim: { left: number; right: number; top?: number; bottom: number },
+  facingX = 1,
+): Rect {
+  const left = facingX < 0 ? 1 - trim.right : trim.left;
+  const right = facingX < 0 ? 1 - trim.left : trim.right;
+  const top = trim.top ?? 0;
+  const bottom = trim.bottom;
+  return {
+    x1: fitted.x + left * fitted.w,
+    y1: fitted.y + top * fitted.h,
+    x2: fitted.x + right * fitted.w,
+    y2: fitted.y + bottom * fitted.h,
+  };
+}
+
+/**
+ * Entity top-left from a feet anchor, using the same fitted sprite space as draw.
+ * `centerRatio` / `bottomRatio` are 0–1 within the source frame (not the entity box).
+ */
+export function topLeftFromFeetWithSpriteFit(options: {
+  feetX: number;
+  feetY: number;
+  entityW: number;
+  entityH: number;
+  contentAspect: number;
+  imageFit?: ImageFitMode | unknown;
+  centerRatio?: number;
+  bottomRatio?: number;
+}): { x: number; y: number } {
+  const fitted = fitSpriteInEntityBox(
+    0,
+    0,
+    options.entityW,
+    options.entityH,
+    options.contentAspect,
+    resolveImageFit(options.imageFit),
+  );
+  const centerRatio = Number.isFinite(options.centerRatio)
+    ? Number(options.centerRatio)
+    : 0.5;
+  const bottomRatio = Number.isFinite(options.bottomRatio)
+    ? Number(options.bottomRatio)
+    : 1;
+  return {
+    x: options.feetX - fitted.x - centerRatio * fitted.w,
+    y: options.feetY - fitted.y - bottomRatio * fitted.h,
+  };
 }
 
 export function offsetRect(rect: Rect, dx: number, dy: number): Rect {

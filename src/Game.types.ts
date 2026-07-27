@@ -18,6 +18,15 @@ export type ComponentBag = Record<string, unknown>;
  */
 export type ImageFit = "contain" | "fill";
 
+/**
+ * How character foot colliders / feet anchors are derived.
+ * - `auto` (default): sample opaque pixels and map them into the fitted sprite
+ *   rect (same space as `imageFit` draw).
+ * - `box`: full entity-box bottom slice (no alpha trim).
+ * - `manual`: entity-box bottom slice using `footHeightRatio` / `footInsetRatio`.
+ */
+export type FootboxMode = "auto" | "box" | "manual";
+
 /** Current generated-data contract understood by this engine. */
 export const GENERATED_ASSET_CONTRACT_VERSION = 1 as const;
 export type GeneratedAssetContractVersion =
@@ -766,7 +775,11 @@ export interface GameAPI {
    * - Static image: `sprite` or `imageUrl`
    * - Common placement/sizing: `x`, `y`, `width`, `height`, `renderY`
    * - `imageFit`: `"contain"` (default) or `"fill"` — how the sprite fills width×height
-   *
+   * - `footboxMode`: `"auto"` (default, alpha-trim in fitted sprite space), `"box"`
+   *   (full entity bottom), or `"manual"` (entity bottom using `footHeightRatio` /
+   *   `footInsetRatio`)
+   * - `footHeightRatio` / `footInsetRatio`: optional overrides for the foot slice
+   *   (fractions of content/entity size; mainly for `"manual"` / `"box"`)
    * @example
    * game.defineArchetype("npc", {
    *   spriteSheets: [{
