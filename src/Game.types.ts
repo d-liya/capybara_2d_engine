@@ -414,10 +414,16 @@ export interface GameMapMaskEntry {
   collisionPolygons?: GameMapCollisionPoint[][];
   backgroundImage?: string;
   obstacleImage?: string;
+  /** 0–1 source crop within `obstacleImage` for enclosure side strips. */
+  obstacleImageCrop?: { x: number; y: number; w: number; h: number };
   spriteSheetUrl?: string;
   frame_count?: number;
   spriteSheetType?: string;
   type?: string;
+  /** Keep collision but skip monolithic Y-sorted obstacle draw. */
+  collisionOnly?: boolean;
+  /** Y-sort draw strip only — no movement collision. */
+  ySortOnly?: boolean;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */

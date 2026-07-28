@@ -89,11 +89,25 @@ interface MapObjectData {
   backgroundImage?: string;
   /** Obstacle-only sprite — drawn in the Y-sorted render queue. */
   obstacleImage?: string;
+  /**
+   * Optional source crop within `obstacleImage` as 0–1 fractions
+   * `{ x, y, w, h }` of the natural image (enclosure side strips).
+   */
+  obstacleImageCrop?: { x: number; y: number; w: number; h: number };
   /** @deprecated Use obstacleImage instead. */
   croppedImageUrl?: string;
   /** When set, a map spritesheet VFX replaces static mask images. */
   spriteSheetUrl?: string;
   type?: string;
+  /**
+   * Keep collision / polygons but skip Y-sort drawing (full fence replaced by
+   * per-side draw strips).
+   */
+  collisionOnly?: boolean;
+  /**
+   * Y-sort draw strip only — no movement collision (enclosure side pieces).
+   */
+  ySortOnly?: boolean;
 }
 
 export interface MapObjectOptions {
@@ -153,6 +167,12 @@ export default class MapObject {
   private _visualSuppressed: boolean;
   private _backgroundImage: HTMLImageElement | null;
   private _obstacleImage: HTMLImageElement | null;
+  private _obstacleImageCrop: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null;
 
   /** When false, obstacle art is drawn only in drawBackground (not the Y-sort queue). */
   get participatesInYSort(): boolean {
@@ -198,19 +218,44 @@ export default class MapObject {
     const hasExplicitCollider = explicitColliders.length > 0;
     const isGroundPatch = this.type === "ground_patch";
     const isBoundary = this.type.toLowerCase() === "boundary";
+    const collisionOnly = data.collisionOnly === true;
+    const ySortOnly = data.ySortOnly === true;
     this._usesImplicitBoundsCollider =
-      !isGroundPatch && !isBoundary && this._polygonsLocal.length === 0;
+      !isGroundPatch &&
+      !isBoundary &&
+      this._polygonsLocal.length === 0 &&
+      !hasExplicitCollider &&
+      !collisionOnly &&
+      !ySortOnly;
 
     // Bed/soil decals paint behind the Y-sort queue so spawned crop tiles and
     // actors depth-sort with each other without fighting the combined bed sprite.
     this._obstacleInBackground = isGroundPatch;
-    this._participatesInYSortBase = !isGroundPatch;
+    this._participatesInYSortBase = !isGroundPatch && !collisionOnly;
     this._suppressStaticVisuals =
       options.suppressStaticVisuals === true ||
       Boolean(data.spriteSheetUrl?.trim());
-    this._suppressObstacleVisual = options.suppressObstacleVisual === true;
+    this._suppressObstacleVisual =
+      options.suppressObstacleVisual === true || collisionOnly;
     this._collisionDisabled = false;
     this._visualSuppressed = false;
+
+    const crop = data.obstacleImageCrop;
+    this._obstacleImageCrop =
+      crop &&
+      Number.isFinite(crop.x) &&
+      Number.isFinite(crop.y) &&
+      Number.isFinite(crop.w) &&
+      Number.isFinite(crop.h) &&
+      crop.w > 0 &&
+      crop.h > 0
+        ? {
+            x: Number(crop.x),
+            y: Number(crop.y),
+            w: Number(crop.w),
+            h: Number(crop.h),
+          }
+        : null;
 
     const obstacleUrl = data.obstacleImage ?? data.croppedImageUrl ?? "";
     const backgroundUrl = data.backgroundImage?.trim() ?? "";
@@ -493,8 +538,23 @@ export default class MapObject {
     const drawY = snapCanvasValue(y);
     const drawX2 = snapCanvasValue(x2);
     const drawY2 = snapCanvasValue(y2);
+    const dw = drawX2 - drawX;
+    const dh = drawY2 - drawY;
+    if (!(Math.abs(dw) > 0.5) || !(Math.abs(dh) > 0.5)) return;
 
-    ctx.drawImage(image, drawX, drawY, drawX2 - drawX, drawY2 - drawY);
+    const crop = this._obstacleImageCrop;
+    if (crop) {
+      const nw = image.naturalWidth;
+      const nh = image.naturalHeight;
+      const sx = Math.max(0, Math.min(nw, crop.x * nw));
+      const sy = Math.max(0, Math.min(nh, crop.y * nh));
+      const sw = Math.max(1, Math.min(nw - sx, crop.w * nw));
+      const sh = Math.max(1, Math.min(nh - sy, crop.h * nh));
+      ctx.drawImage(image, sx, sy, sw, sh, drawX, drawY, dw, dh);
+      return;
+    }
+
+    ctx.drawImage(image, drawX, drawY, dw, dh);
   }
 
   drawDebug(

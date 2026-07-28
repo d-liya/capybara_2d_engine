@@ -59,11 +59,17 @@ interface MapMaskEntry {
   collisionPolygons?: Array<Array<{ x: number; y: number }>>;
   backgroundImage?: string;
   obstacleImage?: string;
+  /** 0–1 source crop within obstacleImage for enclosure side strips. */
+  obstacleImageCrop?: { x: number; y: number; w: number; h: number };
   spriteSheetUrl?: string;
   frame_count?: number;
   /** background (loop) or gameplay (triggered). Defaults to background. */
   spriteSheetType?: string;
   type?: string;
+  /** Collision without Y-sorted obstacle draw (full fence → side strips). */
+  collisionOnly?: boolean;
+  /** Y-sort draw strip only — no movement collision. */
+  ySortOnly?: boolean;
 }
 
 interface PlacementEntry {
@@ -1247,10 +1253,7 @@ export default class GameMap {
   }
 
   /** Floating sky-layer sprites — drawn after the world Y-sort queue. */
-  drawAtmosphere(
-    ctx: CanvasRenderingContext2D,
-    now = performance.now(),
-  ): void {
+  drawAtmosphere(ctx: CanvasRenderingContext2D, now = performance.now()): void {
     const worldNormW = this.worldNormWidth;
     const worldNormH = this.worldNormHeight;
     const worldPixelW = this.worldPixelWidth;

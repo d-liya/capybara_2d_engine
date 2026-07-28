@@ -162,9 +162,11 @@ export function isDirectionalCharacter(
   );
 }
 
-function frameSizeFromDirectional(
-  sheet: GeneratedDirectionalSheet,
-): { frameCount: number; width: number; height: number } {
+function frameSizeFromDirectional(sheet: GeneratedDirectionalSheet): {
+  frameCount: number;
+  width: number;
+  height: number;
+} {
   const meta = sheet.metadata ?? {};
   const frameCount = Math.max(1, Number(meta.frame_count) || 1);
   const frameW =
@@ -185,14 +187,8 @@ function pushDirectionalSheet(
   facing: string,
   entry: GeneratedDirectionalSheet,
 ): void {
-  const clipName = String(clip)
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-  const facingName = String(facing)
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
+  const clipName = String(clip).trim().toLowerCase().replace(/\s+/g, "_");
+  const facingName = String(facing).trim().toLowerCase().replace(/\s+/g, "_");
   if (!clipName || !facingName || !entry.url?.trim()) return;
   const { frameCount, width, height } = frameSizeFromDirectional(entry);
   sheets.push({
@@ -217,7 +213,8 @@ export function multiClipDirectionalToSpriteSheets(
     if (!byFacing || typeof byFacing !== "object") continue;
     for (const facing of FACING_KEYS) {
       const entry = byFacing[facing];
-      if (isSheetEntry(entry)) pushDirectionalSheet(sheets, clip, facing, entry);
+      if (isSheetEntry(entry))
+        pushDirectionalSheet(sheets, clip, facing, entry);
     }
   }
   return sheets;
@@ -230,10 +227,11 @@ export function multiClipDirectionalToSpriteSheets(
 export function legacyDirectionalToSpriteSheets(
   character: GeneratedDirectionalCharacter,
 ): EntitySpriteSheet[] {
-  const moveName = String(character.animation ?? "walk")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_") || "walk";
+  const moveName =
+    String(character.animation ?? "walk")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_") || "walk";
   // Normalize "walking" stays "walking" so names match generator output;
   // Actor accepts both walk_* and walking_*.
   const sheets: EntitySpriteSheet[] = [];
@@ -305,6 +303,10 @@ export interface GeneratedMapSprite {
   collision_polygons?: GeneratedCollisionPoint[][];
   /** Optional AABB collider in normalized space. */
   collision_bbox?: Box2D;
+  /** Normalized visual footprint `[y1,x1,y2,x2]` when authored. */
+  bbox?: Box2D;
+  /** Normalized sprite footprint `[y1,x1,y2,x2]` when authored. */
+  sprite_bbox?: Box2D;
 }
 
 /** Walkable region — supports legacy `box_2d` and v2 `bbox`. */
@@ -315,6 +317,11 @@ export interface GeneratedWalkableBox {
   description?: string;
   floor_id?: number | string;
   id?: string;
+  enclosure_type?: string;
+  gate_openings?: Array<{
+    gate_bbox?: Box2D;
+    description?: string;
+  }>;
 }
 
 /**
@@ -486,6 +493,395 @@ function normalizeWalkableBoxes(
 function spriteOverlayUrl(sprite: GeneratedMapSprite): string | undefined {
   const url = sprite.spriteUrl;
   return typeof url === "string" && url.trim() ? url.trim() : undefined;
+}
+
+type MaskEntry = NonNullable<PanelContent["masks"]>[number];
+
+type NormRect = { x1: number; y1: number; x2: number; y2: number };
+
+function boxToRect(box: Box2D): NormRect {
+  return {
+    y1: Number(box[0]),
+    x1: Number(box[1]),
+    y2: Number(box[2]),
+    x2: Number(box[3]),
+  };
+}
+
+function rectArea(r: NormRect): number {
+  return Math.max(0, r.x2 - r.x1) * Math.max(0, r.y2 - r.y1);
+}
+
+function rectIntersection(a: NormRect, b: NormRect): NormRect | null {
+  const x1 = Math.max(a.x1, b.x1);
+  const y1 = Math.max(a.y1, b.y1);
+  const x2 = Math.min(a.x2, b.x2);
+  const y2 = Math.min(a.y2, b.y2);
+  if (!(x2 > x1) || !(y2 > y1)) return null;
+  return { x1, y1, x2, y2 };
+}
+
+function rectIoU(a: NormRect, b: NormRect): number {
+  const inter = rectIntersection(a, b);
+  if (!inter) return 0;
+  const interArea = rectArea(inter);
+  const union = rectArea(a) + rectArea(b) - interArea;
+  return union > 0 ? interArea / union : 0;
+}
+
+function spriteNormRect(sprite: GeneratedMapSprite): NormRect | null {
+  const box = sprite.bbox ?? sprite.sprite_bbox ?? sprite.collision_bbox;
+  if (!isFiniteBox(box)) return null;
+  return boxToRect(box);
+}
+
+function walkableNormRect(wb: GeneratedWalkableBox): NormRect | null {
+  const box = wb.box_2d ?? wb.bbox;
+  if (!isFiniteBox(box)) return null;
+  return boxToRect(box);
+}
+
+const ENCLOSURE_IOU_MIN = 0.12;
+const RAIL_FRAC_MIN = 0.03;
+const RAIL_FRAC_MAX = 0.12;
+const RAIL_ABS_MIN = 4;
+
+function clampRail(raw: number, outerSpan: number, fallback: number): number {
+  if (Number.isFinite(raw) && raw > 0) {
+    return Math.min(
+      outerSpan * RAIL_FRAC_MAX,
+      Math.max(RAIL_ABS_MIN, outerSpan * RAIL_FRAC_MIN, raw),
+    );
+  }
+  return fallback;
+}
+
+function pixelCropForStrip(
+  parent: GeneratedPixelBBox,
+  outer: NormRect,
+  strip: NormRect,
+): GeneratedPixelBBox {
+  const ow = Math.max(1e-6, outer.x2 - outer.x1);
+  const oh = Math.max(1e-6, outer.y2 - outer.y1);
+  const rx1 = (strip.x1 - outer.x1) / ow;
+  const ry1 = (strip.y1 - outer.y1) / oh;
+  const rx2 = (strip.x2 - outer.x1) / ow;
+  const ry2 = (strip.y2 - outer.y1) / oh;
+  return {
+    x: parent.x + rx1 * parent.w,
+    y: parent.y + ry1 * parent.h,
+    w: Math.max(1, (rx2 - rx1) * parent.w),
+    h: Math.max(1, (ry2 - ry1) * parent.h),
+  };
+}
+
+function imageCropForStrip(
+  outer: NormRect,
+  strip: NormRect,
+): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  const ow = Math.max(1e-6, outer.x2 - outer.x1);
+  const oh = Math.max(1e-6, outer.y2 - outer.y1);
+  return {
+    x: (strip.x1 - outer.x1) / ow,
+    y: (strip.y1 - outer.y1) / oh,
+    w: (strip.x2 - strip.x1) / ow,
+    h: (strip.y2 - strip.y1) / oh,
+  };
+}
+
+type EnclosureSide = "north" | "south" | "west" | "east";
+
+function gateTouchesSides(
+  gate: NormRect,
+  outer: NormRect,
+  rails: { top: number; bottom: number; left: number; right: number },
+): EnclosureSide[] {
+  const candidates: Array<{ side: EnclosureSide; rect: NormRect }> = [
+    {
+      side: "north",
+      rect: {
+        x1: outer.x1,
+        y1: outer.y1,
+        x2: outer.x2,
+        y2: outer.y1 + rails.top,
+      },
+    },
+    {
+      side: "south",
+      rect: {
+        x1: outer.x1,
+        y1: outer.y2 - rails.bottom,
+        x2: outer.x2,
+        y2: outer.y2,
+      },
+    },
+    {
+      side: "west",
+      rect: {
+        x1: outer.x1,
+        y1: outer.y1 + rails.top,
+        x2: outer.x1 + rails.left,
+        y2: outer.y2 - rails.bottom,
+      },
+    },
+    {
+      side: "east",
+      rect: {
+        x1: outer.x2 - rails.right,
+        y1: outer.y1 + rails.top,
+        x2: outer.x2,
+        y2: outer.y2 - rails.bottom,
+      },
+    },
+  ];
+  return candidates
+    .filter((c) => {
+      const inter = rectIntersection(gate, c.rect);
+      return inter != null && rectArea(inter) > 1;
+    })
+    .map((c) => c.side);
+}
+
+function subtractInterval(
+  start: number,
+  end: number,
+  cutStart: number,
+  cutEnd: number,
+): Array<{ start: number; end: number }> {
+  if (!(end > start)) return [];
+  if (!(cutEnd > cutStart) || cutEnd <= start || cutStart >= end) {
+    return [{ start, end }];
+  }
+  const out: Array<{ start: number; end: number }> = [];
+  if (cutStart > start) out.push({ start, end: Math.min(end, cutStart) });
+  if (cutEnd < end) out.push({ start: Math.max(start, cutEnd), end });
+  return out.filter((s) => s.end - s.start > 1);
+}
+
+/**
+ * Drive from every walkable box: when a fence/walkable_area sprite overlaps it
+ * strongly, replace the single Y-sorted cut-out with four side strips (plus a
+ * collision-only parent). Open yards with no matching fence are unchanged.
+ */
+function expandEnclosureFenceMasks(
+  masks: MaskEntry[],
+  sprites: GeneratedMapSprite[] | undefined,
+  walkableBoxes: GeneratedWalkableBox[] | undefined,
+): MaskEntry[] {
+  if (!masks.length || !sprites?.length || !walkableBoxes?.length) {
+    return masks;
+  }
+
+  const claimed = new Set<string>();
+  const stripMasks: MaskEntry[] = [];
+  const collisionOnlyLabels = new Set<string>();
+
+  for (const wb of walkableBoxes) {
+    const inner = walkableNormRect(wb);
+    if (!inner) continue;
+
+    let best: {
+      sprite: GeneratedMapSprite;
+      outer: NormRect;
+      iou: number;
+    } | null = null;
+
+    for (const sprite of sprites) {
+      const label = sprite.label?.trim();
+      if (!label || claimed.has(label)) continue;
+      const category = (sprite.category ?? "walkable_area")
+        .trim()
+        .toLowerCase();
+      if (category !== "walkable_area") continue;
+      if (!spriteOverlayUrl(sprite)) continue;
+      const outer = spriteNormRect(sprite);
+      if (!outer) continue;
+      const iou = rectIoU(inner, outer);
+      if (iou < ENCLOSURE_IOU_MIN) continue;
+      if (!best || iou > best.iou) {
+        best = { sprite, outer, iou };
+      }
+    }
+
+    if (!best) continue;
+
+    const { sprite, outer } = best;
+    const label = sprite.label.trim();
+    const pixel = sprite.pixel_bbox;
+    const overlay = spriteOverlayUrl(sprite);
+    if (
+      !pixel ||
+      !overlay ||
+      !(pixel.w > 0) ||
+      !(pixel.h > 0) ||
+      !(outer.x2 > outer.x1) ||
+      !(outer.y2 > outer.y1)
+    ) {
+      continue;
+    }
+
+    const ow = outer.x2 - outer.x1;
+    const oh = outer.y2 - outer.y1;
+    const fallback = Math.max(
+      RAIL_ABS_MIN,
+      Math.min(ow, oh) * ((RAIL_FRAC_MIN + RAIL_FRAC_MAX) * 0.5),
+    );
+    const rails = {
+      top: clampRail(inner.y1 - outer.y1, oh, fallback),
+      bottom: clampRail(outer.y2 - inner.y2, oh, fallback),
+      left: clampRail(inner.x1 - outer.x1, ow, fallback),
+      right: clampRail(outer.x2 - inner.x2, ow, fallback),
+    };
+
+    // Keep rails from eating the whole box.
+    const maxTopBottom = Math.max(RAIL_ABS_MIN, oh * 0.45);
+    const maxLeftRight = Math.max(RAIL_ABS_MIN, ow * 0.45);
+    rails.top = Math.min(rails.top, maxTopBottom);
+    rails.bottom = Math.min(rails.bottom, maxTopBottom);
+    rails.left = Math.min(rails.left, maxLeftRight);
+    rails.right = Math.min(rails.right, maxLeftRight);
+
+    const gates: Array<{ rect: NormRect; side: EnclosureSide }> = [];
+    for (const opening of wb.gate_openings ?? []) {
+      if (!isFiniteBox(opening.gate_bbox)) continue;
+      const gate = boxToRect(opening.gate_bbox);
+      for (const side of gateTouchesSides(gate, outer, rails)) {
+        gates.push({ rect: gate, side });
+      }
+    }
+
+    const pushStrip = (
+      side: EnclosureSide,
+      strip: NormRect,
+      suffix: string,
+    ) => {
+      if (!(strip.x2 > strip.x1 + 0.5) || !(strip.y2 > strip.y1 + 0.5)) return;
+      stripMasks.push({
+        label: `${label}__${side}${suffix}`,
+        name: `${label}__${side}${suffix}`,
+        type: sprite.category?.trim() || "walkable_area",
+        pixel_bbox: pixelCropForStrip(pixel, outer, strip),
+        obstacleImage: overlay,
+        obstacleImageCrop: imageCropForStrip(outer, strip),
+        collider: [],
+        // Draw / Y-sort only — original fence polygons stay on the parent.
+        ySortOnly: true,
+      } as MaskEntry);
+    };
+
+    // North / south: full width.
+    {
+      let northSegments = [{ start: outer.x1, end: outer.x2 }];
+      for (const g of gates.filter((g) => g.side === "north")) {
+        northSegments = northSegments.flatMap((seg) =>
+          subtractInterval(seg.start, seg.end, g.rect.x1, g.rect.x2),
+        );
+      }
+      northSegments.forEach((seg, i) => {
+        pushStrip(
+          "north",
+          {
+            x1: seg.start,
+            y1: outer.y1,
+            x2: seg.end,
+            y2: outer.y1 + rails.top,
+          },
+          northSegments.length > 1 ? `_${i}` : "",
+        );
+      });
+    }
+    {
+      let southSegments = [{ start: outer.x1, end: outer.x2 }];
+      for (const g of gates.filter((g) => g.side === "south")) {
+        southSegments = southSegments.flatMap((seg) =>
+          subtractInterval(seg.start, seg.end, g.rect.x1, g.rect.x2),
+        );
+      }
+      southSegments.forEach((seg, i) => {
+        pushStrip(
+          "south",
+          {
+            x1: seg.start,
+            y1: outer.y2 - rails.bottom,
+            x2: seg.end,
+            y2: outer.y2,
+          },
+          southSegments.length > 1 ? `_${i}` : "",
+        );
+      });
+    }
+
+    // West / east: middle band only (corners owned by N/S).
+    const midY1 = outer.y1 + rails.top;
+    const midY2 = outer.y2 - rails.bottom;
+    {
+      let westSegments = [{ start: midY1, end: midY2 }];
+      for (const g of gates.filter((g) => g.side === "west")) {
+        westSegments = westSegments.flatMap((seg) =>
+          subtractInterval(seg.start, seg.end, g.rect.y1, g.rect.y2),
+        );
+      }
+      westSegments.forEach((seg, i) => {
+        pushStrip(
+          "west",
+          {
+            x1: outer.x1,
+            y1: seg.start,
+            x2: outer.x1 + rails.left,
+            y2: seg.end,
+          },
+          westSegments.length > 1 ? `_${i}` : "",
+        );
+      });
+    }
+    {
+      let eastSegments = [{ start: midY1, end: midY2 }];
+      for (const g of gates.filter((g) => g.side === "east")) {
+        eastSegments = eastSegments.flatMap((seg) =>
+          subtractInterval(seg.start, seg.end, g.rect.y1, g.rect.y2),
+        );
+      }
+      eastSegments.forEach((seg, i) => {
+        pushStrip(
+          "east",
+          {
+            x1: outer.x2 - rails.right,
+            y1: seg.start,
+            x2: outer.x2,
+            y2: seg.end,
+          },
+          eastSegments.length > 1 ? `_${i}` : "",
+        );
+      });
+    }
+
+    claimed.add(label);
+    collisionOnlyLabels.add(label);
+  }
+
+  if (!collisionOnlyLabels.size) return masks;
+
+  const out: MaskEntry[] = [];
+  for (const mask of masks) {
+    const key = mask.label?.trim();
+    if (key && collisionOnlyLabels.has(key)) {
+      out.push({
+        ...mask,
+        collisionOnly: true,
+        // Keep polygons/colliders; drop the monolithic Y-sorted draw.
+        obstacleImage: undefined,
+      } as MaskEntry);
+      continue;
+    }
+    out.push(mask);
+  }
+  out.push(...stripMasks);
+  return out;
 }
 
 /**
@@ -735,8 +1131,7 @@ function normalizeMapOverlays(
         const mode = (state as { mode?: unknown }).mode;
         return {
           name,
-          label:
-            typeof state.label === "string" ? state.label : undefined,
+          label: typeof state.label === "string" ? state.label : undefined,
           description:
             typeof state.description === "string"
               ? state.description
@@ -751,14 +1146,10 @@ function normalizeMapOverlays(
           ...(frameCount != null
             ? { frameCount: Math.max(1, frameCount) }
             : {}),
-          ...(mode === "gameplay" || mode === "background"
-            ? { mode }
-            : {}),
-          ...((state as { clearsCollision?: unknown }).clearsCollision ===
-          true
+          ...(mode === "gameplay" || mode === "background" ? { mode } : {}),
+          ...((state as { clearsCollision?: unknown }).clearsCollision === true
             ? { clearsCollision: true }
-            : (state as { clearsCollision?: unknown }).clearsCollision ===
-                false
+            : (state as { clearsCollision?: unknown }).clearsCollision === false
               ? { clearsCollision: false }
               : {}),
           collider: state.collider,
@@ -771,9 +1162,7 @@ function normalizeMapOverlays(
 
     if (!states.length) continue;
 
-    const kind = normalizeMapOverlayKind(
-      (raw as { kind?: unknown }).kind,
-    );
+    const kind = normalizeMapOverlayKind((raw as { kind?: unknown }).kind);
     const current =
       (typeof (raw as { currentState?: unknown }).currentState === "string" &&
         (raw as { currentState: string }).currentState.trim()) ||
@@ -798,13 +1187,13 @@ function normalizeMapOverlays(
         typeof raw.linkedObstacleLabel === "string"
           ? raw.linkedObstacleLabel
           : undefined,
-      ...(((): Record<string, unknown> => {
+      ...((): Record<string, unknown> => {
         const mode = (raw as { placementMode?: unknown }).placementMode;
         if (mode === "replace" || mode === "overlay") {
           return { placementMode: mode };
         }
         return {};
-      })()),
+      })(),
       ...(kind ? { kind } : {}),
       ...(layout ? { layout } : {}),
       currentMapStateLabel: current,
@@ -817,12 +1206,8 @@ function normalizeMapOverlays(
       (raw as { gridDimensions: unknown[] }).gridDimensions.length === 2
         ? {
             gridDimensions: [
-              Number(
-                (raw as { gridDimensions: number[] }).gridDimensions[0],
-              ),
-              Number(
-                (raw as { gridDimensions: number[] }).gridDimensions[1],
-              ),
+              Number((raw as { gridDimensions: number[] }).gridDimensions[0]),
+              Number((raw as { gridDimensions: number[] }).gridDimensions[1]),
             ] as [number, number],
           }
         : {}),
@@ -928,7 +1313,11 @@ export function toMapData(
   map: GeneratedMap,
   options: ToMapDataOptions = {},
 ): GameMapData {
-  const spriteMasks = spritesToMasks(map.sprites);
+  const spriteMasks = expandEnclosureFenceMasks(
+    spritesToMasks(map.sprites),
+    map.sprites,
+    map.walkableBoxes,
+  );
   // Prefer explicit masks; if only v2 sprites exist, use those as masks.
   const masks = (map.masks?.length ? map.masks : spriteMasks) ?? [];
   // When both exist, append sprites that are not already represented by label.
@@ -955,9 +1344,7 @@ export function toMapData(
 
   return {
     name: map.name,
-    ...(generatedAssetContractVersion
-      ? { generatedAssetContractVersion }
-      : {}),
+    ...(generatedAssetContractVersion ? { generatedAssetContractVersion } : {}),
     characterPlacements: map.characterPlacements ?? [],
     atmospherePlacements: map.atmospherePlacements ?? [],
     panel: {
