@@ -32,14 +32,14 @@ npm run build
 - **`src/systems/`** — Per-frame gameplay logic (e.g., footstep audio, AI waves, combat). Systems receive `(dt, game)` and run each frame.
 - **`src/archetypes/`** — Reusable entity defaults (body/render prefabs).
 - **`src/widgets/`** — DOM HUD plugins mounted via `game.useWidget()`.
-- **`src/data/`** — Generated JSON content and TypeScript handles (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`, synced exports in `generated.ts`; stable barrel in `index.ts`).
+- **`src/data/`** — Generated JSON content and TypeScript handles (`map_*.json`, `char_*.json`, `prop_*.json`, `huds.json`, `common.json`, `capybara-assets.json`, synced exports in `generated.ts`; stable barrel in `index.ts`).
 - **`src/sdk/`** — Capybara SDK facade for save/load, auth, multiplayer. Import from `src/sdk/index.ts`.
 
 ### Data Flow
 
-1. **Generated assets** live in `src/data/` as JSON files with TypeScript exports
+1. **Generated assets** live in `src/data/` as JSON (revision ownership in `capybara-assets.json`)
 2. **Adapters** in `src/data/adapters.ts` convert flat JSON to engine shapes: `toMapData()`, `mergeMapSidecars()` / `mergeMapSprites()`, `toArchetype()`, `toPlayerSprite()`. Map v2 cut-out sprites live in `map_*.sprites.json` and placements in `map_*.placements.json`; both are merged before `toMapData`.
-3. **Scenes** import generated handles and adapters, call `createGame()`, register archetypes/systems/widgets, spawn entities
+3. **Hosted / synced projects**: `src/scenes/generatedWorld.ts` calls `bootstrapWorldFromAssets` — map load, archetypes, `characterPlacements`, BGM, atmosphere, default interact are already live. Extend via `configureGameplay` / systems / widgets.
 4. **Systems** run per-frame logic via the GameAPI facade
 
 ## Key Architectural Rules
@@ -48,116 +48,80 @@ npm run build
 
 This project uses **documentation-driven development**. When working with generated assets or engine patterns:
 
-1. **`src/data/` JSON** — Source of truth for generated maps, characters, props, audio, animation names, and placement (`map_*.json`, `map_*.sprites.json`, `map_*.placements.json`, `char_*.json`, `prop_*.json`, `common.json`; handles exported from `generated.ts` / `props.ts`, re-exported by `index.ts`). Prefer lean `map_*.json`; open sprite/placement sidecars when you need polygons or placement lists.
-2. **`src/scenes/SCENES.md`** — Scene composition facts (resources, archetypes, systems, inputs, widgets)
-3. **`docs/recipes/`** — Optional implementation patterns (combat, inventory, NPCs, etc.)
-4. **DO NOT** reverse-engineer `src/core/` or SDK internals — build from the docs and facades
+1. **`src/data/capybara-assets.json`** — Revision + ownership SoT for the synced projection. Read it first to know which generated files exist.
+2. **`src/data/` JSON** — Generated maps, characters, props, audio, overlays, placements (`map_*.json`, `map_*.sprites.json`, `map_*.placements.json`, `char_*.json`, `prop_*.json`, `huds.json`, `common.json`; handles from `generated.ts` / `props.ts`, re-exported by `index.ts`). Prefer lean `map_*.json`; open sidecars for polygons / placement lists. `assets.md` is optional placement hints.
+3. **`src/scenes/SCENES.md`** — Scene composition facts (bootstrap, configureGameplay, inputs, widgets)
+4. **`docs/recipes/`** — Optional implementation patterns (combat, inventory, NPCs, etc.)
+5. Build from the docs and public facades (`src/Game.ts`, `src/sdk/`)
 
 ### Coordinate System
 
 - **Normalized coordinates**: 0-1000 per map
 - **Entity `x`, `y`**: Always **top-left** corner
-- **Spawning methods**:
+- **Spawning methods** (for entities you invent in custom gameplay):
   - `spawnAtFeet(archetype, feetX, feetY, props)` — For characters (feetX = feet center, feetY = bottom edge)
   - `spawnCentered(archetype, centerX, centerY, props)` — For static props (arguments are center; entity stores top-left)
   - `placeProp(archetype, placement, props)` — For generated placement boxes (top-left + size)
-- **Map travel**: Each map is a self-contained space. Prefer `game.transitionMap(toMapData(...))` for doors / room swaps (fades by default). Use instant `game.loadMap(...)` only when you already own the transition.
+- **Map travel**: Each map is a self-contained space. Prefer `game.transitionMap(toMapData(...))` for doors / room swaps (fades by default). Use instant `game.loadMap(...)` when you already own the transition.
 
 ### Asset Integration
 
-When generating new assets (maps, characters, props, audio):
+Maps and Jobs write Postgres; sync compiles a full projection into `src/data` and regenerates `generatedWorld.ts`. After sync:
 
-1. **Generation alone is incomplete** — assets must be wired into the game
-2. Register new JSON in `src/data/generated.ts` / `generated-props.ts` / `common.json` and export handles (`index.ts` / `props.ts` stay stable)
-3. Import those handles in scenes using `src/data/` adapters
-4. For common assets (HUD, reference art, music, SFX), add to `src/data/common.json` as `{ name, url }`
-
-**Map edit UI sync (Capybara builder → this repo):** erase / state / VFX / grid patches arrive already compiled into `map_*.json` as unified `mapOverlays` (`kind`: `erase` | `state` | `vfx` | `grid`). Placed characters/HUDs appear in `map_*.placements.json` (`characterPlacements` / `hudPlacements`) and in `src/data/assets.md`.
-
-- Do **not** paste overlay image URLs or recreate patches by hand.
-- Wire gameplay only: `game.setMapOverlayState(id, state)`, `game.triggerMapEffect(...)` for gameplay VFX, and `spawnAtFeet` / `toArchetype` for `characterPlacements`.
-- Replace-mode VFX (`placementMode: "replace"`) may include a paired erase underlay with `clearsCollision: false` — that hides baked pixels under the sheet **without** clearing the collider. The engine also suppresses linked mask static art via `linkedObstacleLabel`.
+- `bootstrapWorldFromAssets` loads the map, defines character archetypes, spawns `characterPlacements` (player vs NPC), starts BGM, registers atmosphere, and binds default interact (state overlays / gameplay VFX / enterables).
+- Manifest-owned JSON, `generated.ts` / `generated-props.ts`, and `generatedWorld.ts` are read-only — import handles from `src/data/index.ts`.
+- Extend gameplay: `configureGameplay`, systems, custom widgets, overlay triggers (`setMapOverlayState`, `triggerMapEffect`), dialogue, combat, quests, inventory.
+- Overlays arrive as unified `mapOverlays` on lean `map_*.json` (`kind`: `erase` | `state` | `vfx` | `grid`).
+- HUD catalog + widget TS: `huds.json` + `src/widgets/`. Placements may also list `hudPlacements` when authored.
+- Replace-mode VFX may include a paired erase underlay with `clearsCollision: false` (hide pixels, keep collider) plus `linkedObstacleLabel`.
 - See `.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md`.
 
 ### Player Entity Pattern
 
-- Player is an entity, not a constructor argument
-- Spawn player archetype in the scene, then call `game.setControlledEntity(playerId)`
-- This keeps RPG and tower-defense style scenes unified
+- Player is an entity (not a constructor argument)
+- Bootstrap already spawns the player from Maps role and calls `setControlledEntity`
 
 ### Mobile-first (required)
 
 Treat phone browsers as a first-class target whenever you add gameplay:
 
-1. **Never ship keyboard-only intent.** Bind discrete actions with `bindInputAction`, handle them with `onInputAction`, and expose the same names on touch via `createGame({ touchControls: { actions: [...] } })` or `dispatchInputAction`.
-2. **Movement is shared.** WASD and the default floating touch joystick both drive `setMovementInput` / the controlled entity. Do not invent a separate touch movement system.
-3. **Pad the camera for HUD chrome.** Use `cameraEdgePadding` (and optional `followZoom` / `cameraFollowLerp` / `maxViewportScale`) so edge controls do not cover walkable corners. Default touch controls use a floating left-side joystick plus bottom-right actions (`zIndex` 100–299).
+1. Bind discrete actions with `bindInputAction`, handle them with `onInputAction`, and expose the same names on touch via `createGame({ touchControls: { actions: [...] } })` or `dispatchInputAction`.
+2. **Movement is shared.** WASD and the default floating touch joystick both drive `setMovementInput` / the controlled entity.
+3. **Pad the camera for HUD chrome.** Use `cameraEdgePadding` (and optional `followZoom` / `cameraFollowLerp` / `maxViewportScale`) so edge controls leave walkable corners clear. Default touch controls use a floating left-side joystick plus bottom-right actions (`zIndex` 100–299).
 4. **High-res maps.** The canvas uses a DPR-aware backing store; prefer `image-rendering: auto` for photographic maps. See `docs/recipes/mobile-touch-controls.md`.
 
 ### Scene Creation Pattern
+
+Prefer `createMainScene` + `generatedWorld` / `bootstrapWorldFromAssets` and put custom logic in `configureGameplay` (see `src/scenes/SCENES.md`). Use `spawnAtFeet` for entities you invent in custom gameplay.
 
 Scenes should:
 
 - Return synchronously (no top-level `async`)
 - Accept optional `onAudioReady` hook from loading gate for browser-gated playback (music, `AudioContext.resume()`)
-- Also unlock looping BGM on first `keydown`/`pointerdown` — in local/dev `onContinue` is a no-op
-- Register resources, archetypes, systems, inputs, widgets in scene setup
+- Unlock looping BGM on first `keydown`/`pointerdown` when needed — in local/dev `onContinue` is a no-op
+- Register systems, inputs, and custom widgets in `configureGameplay` / scene setup
 - Start SDK/save-load as async tasks that update resources when complete
 - Configure touch action buttons to match keyboard bindings (or pass `touchControls: false` only for non-interactive tools)
 
-Example:
+Example — extend gameplay after bootstrap:
 
 ```typescript
-import { createGame, getAudio } from "../Game";
-import { mapMain, toMapData, charPlayer, toArchetype } from "../data";
+import type { GameAPI } from "../Game";
 
-export function createMainScene({
-  onAudioReady,
-}: {
-  onAudioReady?: (start: () => void) => void;
-}) {
-  const game = createGame({
-    canvasId: "game",
-    map: toMapData(mapMain),
-    cameraEdgePadding: 120,
-    touchControls: {
-      actions: [{ action: "interact", label: "E" }],
-    },
-  });
-
+export function configureGameplay(game: GameAPI) {
   game.bindInputAction("interact", ["KeyE"]);
   game.onInputAction("interact", ({ phase }) => {
     if (phase !== "down") return;
     game.emit("player:interact");
   });
 
-  // Register resources, archetypes, systems, inputs, widgets
-  game.defineArchetype("player", toArchetype(charPlayer, { speed: 55 }));
-  const playerId = game.spawnAtFeet("player", 500, 820);
-  game.setControlledEntity(playerId);
-
-
-  // Browser-gated audio: production gate + first-input fallback (required in local/dev)
-  let musicStarted = false;
-  const startMusic = () => {
-    if (musicStarted) return;
-    const music = getAudio("music_main");
-    if (!music) return;
-    musicStarted = true;
-    music.loop = true;
-    music.volume = 0.05;
-    void music.play().catch(() => {
-      musicStarted = false;
-    });
-  };
-  onAudioReady?.(startMusic);
-  window.addEventListener("pointerdown", startMusic, {
-    once: true,
-    passive: true,
+  game.registerSystem("quest", (_dt, g) => {
+    // custom quest / dialogue / combat on top of the bootstrapped world
   });
-  window.addEventListener("keydown", startMusic, { once: true });
 }
 ```
+
+For entity lifecycle helpers (`spawnAtFeet`, `patch`, `query`) used on extras you invent, see Common Patterns below.
 
 ## Common Patterns
 
@@ -331,7 +295,6 @@ Do not cast type to unknow to bypass typescript error
 | ----------------- | ------------------------------------------------------------------ |
 | `AGENTS.md`       | Shared instructions (this file) — source of truth for all agents   |
 | `CLAUDE.md`       | Claude entry — imports this file via `@AGENTS.md`                  |
-| `.claude/skills/` | Project skills for Claude Code                                     |
-| `.agents/skills/` | Same skills for Codex / other harnesses (real copy, not a symlink) |
+| `.agents/skills/` | Engine skill pack (`capybara-game-developer`)                      |
 
-Keep `.claude/skills/` and `.agents/skills/` in sync when editing a skill. Load **`capybara-game-developer`** before asset generation or gameplay work.
+Read **`AGENTS.md`** first. Open `.agents/skills/capybara-game-developer/` for integration recipes and API contracts. Assets arrive via Maps / Jobs sync — extend gameplay on the bootstrap-already-live world.

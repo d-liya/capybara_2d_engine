@@ -100,6 +100,8 @@ Use **art-vs-code**: the `prompt` describes stable visuals; `gamePlay` describes
 
 ---
 
-### After generation
+### After Maps / Jobs sync
 
-Prompting ends when the tool call succeeds. Next, **wire** the new assets into the engine — register handles, mount maps/characters/props/audio/HUD scaffolds, update the scene. Follow [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md). Do not leave generated files unwired unless the user asked for generation only.
+Art is authored in Maps / Jobs and lands in `src/data` via sync. `bootstrapWorldFromAssets` loads the world; extend gameplay from there. Follow [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
+
+Use the prompting notes above when helping the user write Maps / Jobs prompts; generation happens in the UI.
