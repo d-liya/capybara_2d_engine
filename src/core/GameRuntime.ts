@@ -245,6 +245,7 @@ export default class GameRuntime {
       this.cameraController.panelPixelHeight = map.panelPixelHeight;
       this.cameraController.worldPixelWidth = map.worldPixelWidth;
       this.cameraController.worldPixelHeight = map.worldPixelHeight;
+      this._syncActorWorldSpace();
       this._resizeCanvas();
     });
     this.widgets = new WidgetManager<GameRuntime>(this.canvas, "hud-root", {
@@ -310,6 +311,7 @@ export default class GameRuntime {
       this.cameraController.panelPixelHeight = newMap.panelPixelHeight;
       this.cameraController.worldPixelWidth = newMap.worldPixelWidth;
       this.cameraController.worldPixelHeight = newMap.worldPixelHeight;
+      this._syncActorWorldSpace();
       this._resizeCanvas();
     });
 
@@ -317,6 +319,7 @@ export default class GameRuntime {
     this._entityNavigation.clear();
     this._hoverTarget = null;
     this.keys = createEmptyMovementInput();
+    this._syncActorWorldSpace();
 
     const spawn = options.spawn;
     if (this._controlledEntityId && spawn) {
@@ -1649,6 +1652,19 @@ export default class GameRuntime {
     return this.map?.panelPixelHeight ?? DEFAULT_MAP_HEIGHT_PX;
   }
 
+  /** Keep actor footbox fit aligned with the current map's pixel axes. */
+  private _syncActorWorldSpace(): void {
+    if (!this.map) return;
+    for (const actor of this._entityActors.values()) {
+      actor.setWorldSpace(
+        this.map.worldNormWidth,
+        this.map.worldNormHeight,
+        this.map.worldPixelWidth,
+        this.map.worldPixelHeight,
+      );
+    }
+  }
+
   private _getPrimarySpriteSheetMeta(
     entity: ComponentBag,
   ): { url: string; frameCount: number } | null {
@@ -1851,6 +1867,8 @@ export default class GameRuntime {
       imageFit: entity.imageFit,
       centerRatio,
       bottomRatio,
+      scaleX: this.map.worldPixelWidth / this.map.worldNormWidth,
+      scaleY: this.map.worldPixelHeight / this.map.worldNormHeight,
     });
   }
 
@@ -2218,6 +2236,12 @@ export default class GameRuntime {
       actor.setSize(
         this._inferEntityWidth(entity),
         this._inferEntityHeight(entity),
+      );
+      actor.setWorldSpace(
+        this.map.worldNormWidth,
+        this.map.worldNormHeight,
+        this.map.worldPixelWidth,
+        this.map.worldPixelHeight,
       );
       actor.setImageFit(entity.imageFit);
       actor.setFootboxMode(entity.footboxMode);

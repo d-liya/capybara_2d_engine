@@ -103,6 +103,28 @@ export function fitRectInBox(
   return { x, y, w, h };
 }
 
+/**
+ * Adjust source-frame aspect for fitting in world-norm space so the result
+ * matches pixel-space `contain` on non-square maps (X/Y pixels-per-norm differ).
+ * Pass identity scales (or omit) when `boxW`/`boxH` are already in pixels.
+ */
+export function worldSpaceContentAspect(
+  contentAspect: number,
+  scaleX?: number,
+  scaleY?: number,
+): number {
+  if (
+    !(contentAspect > 0) ||
+    !Number.isFinite(scaleX) ||
+    !Number.isFinite(scaleY) ||
+    !(scaleX! > 0) ||
+    !(scaleY! > 0)
+  ) {
+    return contentAspect;
+  }
+  return contentAspect * (scaleY! / scaleX!);
+}
+
 /** Actor draw / footbox share this fit: contain + bottom-center. */
 export function fitSpriteInEntityBox(
   boxX: number,
@@ -111,13 +133,18 @@ export function fitSpriteInEntityBox(
   boxH: number,
   contentAspect: number,
   imageFit: ImageFitMode = "contain",
+  axisScale?: { scaleX?: number; scaleY?: number },
 ): { x: number; y: number; w: number; h: number } {
   return fitRectInBox(
     boxX,
     boxY,
     boxW,
     boxH,
-    contentAspect,
+    worldSpaceContentAspect(
+      contentAspect,
+      axisScale?.scaleX,
+      axisScale?.scaleY,
+    ),
     imageFit,
     "bottom-center",
   );
@@ -144,6 +171,7 @@ export function mapTrimToFittedRect(
 /**
  * Entity top-left from a feet anchor, using the same fitted sprite space as draw.
  * `centerRatio` / `bottomRatio` are 0–1 within the source frame (not the entity box).
+ * Pass `scaleX` / `scaleY` (pixels per norm unit) when placing in world-norm space.
  */
 export function topLeftFromFeetWithSpriteFit(options: {
   feetX: number;
@@ -154,6 +182,8 @@ export function topLeftFromFeetWithSpriteFit(options: {
   imageFit?: ImageFitMode | unknown;
   centerRatio?: number;
   bottomRatio?: number;
+  scaleX?: number;
+  scaleY?: number;
 }): { x: number; y: number } {
   const fitted = fitSpriteInEntityBox(
     0,
@@ -162,6 +192,7 @@ export function topLeftFromFeetWithSpriteFit(options: {
     options.entityH,
     options.contentAspect,
     resolveImageFit(options.imageFit),
+    { scaleX: options.scaleX, scaleY: options.scaleY },
   );
   const centerRatio = Number.isFinite(options.centerRatio)
     ? Number(options.centerRatio)

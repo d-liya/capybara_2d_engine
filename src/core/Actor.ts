@@ -248,10 +248,16 @@ export default class Actor {
   /** Manual / fallback horizontal inset as a fraction of the reference width. */
   protected _footInsetRatio: number;
   /**
-   * First measured opaque trim — reused for collision so directional sheet
-   * swaps / facing flips do not reshape the footbox mid-stride.
+   * Fallback opaque trim from the first sheet that finishes loading — used
+   * only while the active animation's own trim is not ready yet.
    */
   protected _collisionTrim: SpriteTrim | null;
+  /** World-norm extent used with `_worldPixel*` for axis-correct sprite fit. */
+  protected _worldNormW: number;
+  protected _worldNormH: number;
+  /** World pixel extent matching `toPixel` / draw (may span multiple panels). */
+  protected _worldPixelW: number;
+  protected _worldPixelH: number;
 
   constructor(
     x: number,
@@ -294,6 +300,10 @@ export default class Actor {
     this._footHeightRatio = FOOT_H_RATIO;
     this._footInsetRatio = FOOT_INSET_RATIO;
     this._collisionTrim = null;
+    this._worldNormW = NORM;
+    this._worldNormH = NORM;
+    this._worldPixelW = DEFAULT_MAP_WIDTH_PX;
+    this._worldPixelH = DEFAULT_MAP_HEIGHT_PX;
     this._configureSpriteSheets(sprite, options.activeAnimation);
   }
 
@@ -359,6 +369,13 @@ export default class Actor {
       Number.isFinite(mapHeight) && mapHeight > 0
         ? mapHeight
         : DEFAULT_MAP_HEIGHT_PX;
+
+    // SpriteConfig mapWidth/Height are panel pixels; treat as world pixels for
+    // single-panel maps until GameRuntime sets the full world extent.
+    this._worldPixelW = baseMapWidth;
+    this._worldPixelH = baseMapHeight;
+    this._worldNormW = NORM;
+    this._worldNormH = NORM;
 
     this._w =
       Number.isFinite(widthPx) && widthPx > 0
@@ -549,6 +566,30 @@ export default class Actor {
     }
   }
 
+  /**
+   * Match `toPixel` / draw world scales so footbox fit agrees with the
+   * pixel-space sprite on non-square maps.
+   */
+  setWorldSpace(
+    worldNormW: number,
+    worldNormH: number,
+    worldPixelW: number,
+    worldPixelH: number,
+  ): void {
+    if (Number.isFinite(worldNormW) && worldNormW > 0) {
+      this._worldNormW = worldNormW;
+    }
+    if (Number.isFinite(worldNormH) && worldNormH > 0) {
+      this._worldNormH = worldNormH;
+    }
+    if (Number.isFinite(worldPixelW) && worldPixelW > 0) {
+      this._worldPixelW = worldPixelW;
+    }
+    if (Number.isFinite(worldPixelH) && worldPixelH > 0) {
+      this._worldPixelH = worldPixelH;
+    }
+  }
+
   setImageFit(fit: unknown): void {
     this._imageFit = resolveImageFit(fit);
   }
@@ -689,7 +730,8 @@ export default class Actor {
 
   /**
    * World-space rect where the sprite is actually drawn inside the entity box
-   * (`imageFit` + bottom-center). Falls back to the full entity box when the
+   * (`imageFit` + bottom-center). Uses axis scales so this matches pixel-space
+   * drawing on non-square maps. Falls back to the full entity box when the
    * sheet aspect is not known yet.
    */
   _getFittedSpriteRect(
@@ -705,7 +747,18 @@ export default class Actor {
     if (aspect == null) {
       return { x, y, w: this._w, h: this._h };
     }
-    return fitSpriteInEntityBox(x, y, this._w, this._h, aspect, this._imageFit);
+    return fitSpriteInEntityBox(
+      x,
+      y,
+      this._w,
+      this._h,
+      aspect,
+      this._imageFit,
+      {
+        scaleX: this._worldPixelW / this._worldNormW,
+        scaleY: this._worldPixelH / this._worldNormH,
+      },
+    );
   }
 
   _footAt(x: number, y: number): Rect {
@@ -724,12 +777,12 @@ export default class Actor {
       };
     }
 
-    // auto: alpha-trim for feet Y, but keep a facing-stable horizontal box.
-    // Draw flips around the fitted rect center — mirroring trim with facingX
-    // would shove the collider sideways into walls on turn-around.
+    // auto: alpha-trim from the *active* sheet so side facings get a narrow
+    // footbox. Center on the fitted flip axis — do not mirror asymmetric trim
+    // with facingX (that shoves the collider sideways on turn-around).
     const fitted = this._getFittedSpriteRect(x, y);
     const anim = this._animations?.[this._activeAnimation];
-    const trim = this._collisionTrim ?? anim?.trim;
+    const trim = anim?.trim ?? this._collisionTrim;
     const bottom = trim
       ? fitted.y + trim.bottom * fitted.h
       : fitted.y + fitted.h;
@@ -929,7 +982,7 @@ export default class Actor {
     }
 
     const fitted = this._getFittedSpriteRect(this.x, this.y);
-    const trim = this._collisionTrim ?? anim.trim;
+    const trim = anim?.trim ?? this._collisionTrim;
     const bottom = trim
       ? fitted.y + trim.bottom * fitted.h
       : fitted.y + fitted.h;
@@ -1019,7 +1072,7 @@ export default class Actor {
     worldPixelH?: number,
   ): void {
     const anim = this._animations[this._activeAnimation];
-    const trim = this._collisionTrim ?? anim?.trim;
+    const trim = anim?.trim ?? this._collisionTrim;
     const foot = this._footAt(this.x, this.y);
     const feetCenterX = (foot.x1 + foot.x2) / 2;
 
@@ -1263,9 +1316,9 @@ export default class Actor {
 
     const fitted = this._getFittedSpriteRect(this.x, this.y);
     const anim = this._animations[this._activeAnimation];
-    const trim = this._collisionTrim ?? anim?.trim;
-    // Cyan = opaque art bounds (unflipped). Yellow footbox is centered on the
-    // fitted flip axis and does not move when facing changes.
+    const trim = anim?.trim ?? this._collisionTrim;
+    // Cyan = opaque art bounds for the active sheet (unflipped). Yellow
+    // footbox is centered on the fitted flip axis.
     const bounds = trim
       ? mapTrimToFittedRect(fitted, trim, 1)
       : {
