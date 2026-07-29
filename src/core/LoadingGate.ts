@@ -1,8 +1,16 @@
-const ANIMATION_DURATION_MS = 5000;
+/** Fallback gate length when there are no map assets to probe. */
+const DEFAULT_GATE_MS = 1600;
+/** Floor so a warm cache / fast CDN still gets a readable brand wipe. */
+const MIN_GATE_MS = 1600;
+/** Ceiling so a hung image request cannot stall forever. */
+const MAX_GATE_MS = 5000;
+/** Extra beat after the probe image loads before showing Continue. */
+const GATE_DELTA_MS = 280;
 const LOGO_CROSSFADE_MS = 420;
 const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
+const IMAGE_URL_RE = /\.(png|jpe?g|gif|bmp|webp|svg)(\?|#|$)/i;
 /**
  * One splash per browser tab session — skip when a mobile WebView remounts
  * the page after switching apps (same tab session, navigation type "navigate").
@@ -223,7 +231,7 @@ function injectLoadingStyles(): void {
       height: 100%;
       width: 0%;
       overflow: hidden;
-      transition: width ${ANIMATION_DURATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: width ${MAX_GATE_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .cpy-loading-status {
@@ -306,7 +314,7 @@ function injectLoadingStyles(): void {
       height: 100%;
       width: 0%;
       background-color: #fff;
-      transition: width ${ANIMATION_DURATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: width ${MAX_GATE_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     @keyframes cpy-loading-fade-in {
@@ -475,6 +483,77 @@ function nextFrame(): Promise<void> {
   return new Promise((resolve) => {
     requestAnimationFrame(() => resolve());
   });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function looksLikeMapData(value: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(value.walkableBoxes) ||
+    Array.isArray(value.masks) ||
+    Array.isArray(value.sprites) ||
+    Array.isArray(value.mapOverlays) ||
+    Array.isArray(value.characterPlacements) ||
+    (typeof value.url === "string" && typeof value.name === "string")
+  );
+}
+
+/** Prefer the first map-shaped entry's top-level `url` (background image). */
+function findFirstMapImageUrl(dataFiles: unknown[]): string | null {
+  for (const data of dataFiles) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) continue;
+    const obj = data as Record<string, unknown>;
+    if (!looksLikeMapData(obj)) continue;
+    const url = obj.url;
+    if (typeof url !== "string" || url.length === 0) continue;
+    if (IMAGE_URL_RE.test(url) || url.startsWith("http") || url.startsWith("/")) {
+      return url;
+    }
+  }
+  return null;
+}
+
+function loadImageProbe(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) resolve();
+  });
+}
+
+/**
+ * Default gate length, or probe the first map background to approximate
+ * connection speed and dismiss shortly after that image is ready.
+ */
+async function resolveGateDurationMs(dataFiles: unknown[]): Promise<number> {
+  if (!Array.isArray(dataFiles) || dataFiles.length === 0) {
+    return DEFAULT_GATE_MS;
+  }
+
+  const url = findFirstMapImageUrl(dataFiles);
+  if (!url) {
+    return DEFAULT_GATE_MS;
+  }
+
+  const started = performance.now();
+  try {
+    await loadImageProbe(url);
+  } catch {
+    return DEFAULT_GATE_MS;
+  }
+
+  const elapsed = performance.now() - started;
+  return clamp(elapsed + GATE_DELTA_MS, MIN_GATE_MS, MAX_GATE_MS);
 }
 
 export const LOADING_GATE_CONTINUE_EVENT = "capybara:loading-gate-continue";
@@ -651,9 +730,27 @@ export function createCoreLoadingGate(
     revealMask.style.width = "100%";
   }, 50);
 
-  setTimeout(() => {
-    void showTitleAndContinue();
-  }, ANIMATION_DURATION_MS);
+  const dataFiles = Array.isArray(options.dataFiles)
+    ? (options.dataFiles as unknown[])
+    : [];
+  const gateStarted = performance.now();
+
+  void (async () => {
+    const targetMs = await resolveGateDurationMs(dataFiles);
+    const elapsed = performance.now() - gateStarted;
+    const remaining = Math.max(0, targetMs - elapsed);
+
+    // Finish the wipe on the remaining budget (or snap if already due).
+    const finishMs = Math.max(80, remaining);
+    const wipeEasing = "cubic-bezier(0.4, 0, 0.2, 1)";
+    progressLine.style.transition = `width ${finishMs}ms ${wipeEasing}`;
+    revealMask.style.transition = `width ${finishMs}ms ${wipeEasing}`;
+    progressLine.style.width = "100%";
+    revealMask.style.width = "100%";
+
+    await sleep(remaining);
+    await showTitleAndContinue();
+  })();
 
   return {
     onContinue: (listener) => {

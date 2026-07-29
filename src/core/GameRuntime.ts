@@ -348,7 +348,6 @@ export default class GameRuntime {
         }
 
         this.patchEntity(this._controlledEntityId, { x, y });
-        this._ensureEntityOnWalkable(this._controlledEntityId);
 
         if (anchor === "feet") {
           const spriteMeta = this._getPrimarySpriteSheetMeta(entity);
@@ -463,9 +462,8 @@ export default class GameRuntime {
     this._entities.set(id, entity);
     this._entitySpawnTimes.set(id, performance.now());
     this._bindEntityRenderState(id, entity);
-    if (this._entityActors.has(id)) {
-      this._ensureEntityOnWalkable(id);
-    }
+    // Honor authored spawn/placement feet even on collision — do not snap
+    // to nearest walkable on spawn (Maps character placements, etc.).
     return id;
   }
 

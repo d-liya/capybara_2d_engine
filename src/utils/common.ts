@@ -519,7 +519,7 @@ export type {
 
 export function createLoadingGate(
   canvas: HTMLCanvasElement | null,
-  options: Record<string, unknown> = {},
+  options: { dataFiles?: unknown[] } & Record<string, unknown> = {},
 ): LoadingGate {
   return createCoreLoadingGate(canvas, options);
 }
