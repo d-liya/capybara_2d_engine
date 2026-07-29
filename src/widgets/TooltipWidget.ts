@@ -8,10 +8,8 @@ function resolveTooltipTitle(target: HoverTarget): string {
   return target.label || (typeof tooltip === "string" ? tooltip : "");
 }
 
-function resolveTooltipBody(target: HoverTarget): string {
-  const tooltip = target.tooltip;
-  if (tooltip && typeof tooltip !== "string" && tooltip.body)
-    return tooltip.body;
+function resolveTooltipBody(_target: HoverTarget): string {
+  // Labels only — hide description/body text from hover tooltips.
   return "";
 }
 

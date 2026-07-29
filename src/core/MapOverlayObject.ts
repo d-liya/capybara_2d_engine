@@ -165,12 +165,7 @@ export function computeDetachedGridCellsFromAnchor(
     for (let col = 0; col < c; col++) {
       const cellXmin = xmin + col * stepX;
       const cellYmin = ymin + row * stepY;
-      cells.push([
-        cellYmin,
-        cellXmin,
-        cellYmin + cellH,
-        cellXmin + cellW,
-      ]);
+      cells.push([cellYmin, cellXmin, cellYmin + cellH, cellXmin + cellW]);
     }
   }
   return cells;
@@ -203,12 +198,20 @@ export function stateHasLocalCollision(
   state: MapOverlayStateEntry | null | undefined,
 ): boolean {
   if (!state) return false;
-  if (typeof state.spriteUrl === "string" && state.spriteUrl.trim()) return true;
-  if (Array.isArray(state.collision_polygons) && state.collision_polygons.length > 0)
+  if (typeof state.spriteUrl === "string" && state.spriteUrl.trim())
     return true;
-  if (state.collision_type === "solid_volume" || state.collision_type === "passable_gap")
+  if (
+    Array.isArray(state.collision_polygons) &&
+    state.collision_polygons.length > 0
+  )
     return true;
-  if (Array.isArray(state.sprite_bbox) && state.sprite_bbox.length >= 4) return true;
+  if (
+    state.collision_type === "solid_volume" ||
+    state.collision_type === "passable_gap"
+  )
+    return true;
+  if (Array.isArray(state.sprite_bbox) && state.sprite_bbox.length >= 4)
+    return true;
   return false;
 }
 
@@ -224,7 +227,6 @@ function normalizeOverlayPolygons(
     )
     .filter((poly) => poly.length >= 3);
 }
-
 
 export default class MapOverlayObject {
   readonly id: string;
@@ -417,10 +419,13 @@ export default class MapOverlayObject {
   }
 
   overlaps(rect: Rect): boolean {
-    if (!this._blocksMovement) return false;
+    // Authored post/volume geometry always blocks, even when Maps sets
+    // blocksMovement:false on an "open" visual (that flag means "don't use the
+    // full box_2d", not "ignore collision_polygons").
     if (this._polygons.length > 0) {
       return this._polygons.some((poly) => rectOverlapsPolygon(rect, poly));
     }
+    if (!this._blocksMovement) return false;
     return this._colliders.some((collider) => rectsOverlap(collider, rect));
   }
 
@@ -451,7 +456,10 @@ export default class MapOverlayObject {
   }
 
   getHoverTargetAt(x: number, y: number): HoverTarget | null {
-    if (isMapOverlayOffState(this.currentStateName) || !this._cellRects.length) {
+    if (
+      isMapOverlayOffState(this.currentStateName) ||
+      !this._cellRects.length
+    ) {
       return null;
     }
     const point = {
@@ -490,8 +498,8 @@ export default class MapOverlayObject {
     worldPixelH?: number,
   ): void {
     if (isMapOverlayOffState(this.currentStateName)) return;
-    // Flat erase-style patch when silhouette owns Y-sort; otherwise legacy
-    // background-layer states still draw here.
+    // Visual layer: state `url` covers the baked map. The linked default cut-out
+    // must be suppressed separately so it does not redraw on top in Y-sort.
     if (this._usesFlatPatch) {
       this._drawImageIntoRects(
         ctx,
@@ -525,19 +533,10 @@ export default class MapOverlayObject {
     worldPixelH?: number,
   ): void {
     if (!this.participatesInYSort) return;
-    if (this._usesFlatPatch) {
-      // Silhouette cut-out for depth sorting (characters walk in front/behind).
-      this._drawImageIntoRects(
-        ctx,
-        this._sortImage,
-        this._spriteRects.length ? this._spriteRects : this._cellRects,
-        worldNormW,
-        worldNormH,
-        worldPixelW,
-        worldPixelH,
-      );
-      return;
-    }
+    // Flat-patch replace states keep `url` on the visual layer only (see
+    // drawBackground). `spriteUrl` is footprint/collision metadata — drawing it
+    // here doubles the gate art. Non-flat states still Y-sort their image.
+    if (this._usesFlatPatch) return;
     this._drawImageIntoRects(
       ctx,
       this._sortImage,
@@ -686,9 +685,10 @@ export default class MapOverlayObject {
     this._usesFlatPatch = Boolean(silhouetteUrl);
 
     if (this._usesFlatPatch) {
-      const spriteBox = Array.isArray(state.sprite_bbox) && state.sprite_bbox.length >= 4
-        ? [...state.sprite_bbox]
-        : authoredBox;
+      const spriteBox =
+        Array.isArray(state.sprite_bbox) && state.sprite_bbox.length >= 4
+          ? [...state.sprite_bbox]
+          : authoredBox;
       const spriteCells = this._resolveCellBoxes(spriteBox);
       this._spriteRects = spriteCells.map((box) => {
         let rect = parseBox2d(box);
@@ -731,7 +731,11 @@ export default class MapOverlayObject {
         for (const poly of localPolys) {
           let points = poly.map((p) => ({ ...p }));
           if (this._normOffset) {
-            points = offsetPolygon(points, this._normOffset.x, this._normOffset.y);
+            points = offsetPolygon(
+              points,
+              this._normOffset.x,
+              this._normOffset.y,
+            );
           }
           if (dx !== 0 || dy !== 0) {
             points = offsetPolygon(points, dx, dy);
@@ -745,6 +749,17 @@ export default class MapOverlayObject {
 
     this._blocksMovement =
       state.blocksMovement ?? this._defaultBlocksMovement ?? false;
+    // passable_gap / solid_volume ship post/volume geometry. If authoring sets
+    // blocksMovement:false, _syncOverlayLocalCollisionOverrides still clears the
+    // linked mask collider — leaving a fully walk-through hole. Keep geometry live.
+    if (
+      !this._blocksMovement &&
+      (state.collision_type === "passable_gap" ||
+        state.collision_type === "solid_volume") &&
+      (this._polygons.length > 0 || this._colliders.length > 0)
+    ) {
+      this._blocksMovement = true;
+    }
     if (
       this._blocksMovement &&
       this._colliders.length === 0 &&
@@ -757,7 +772,24 @@ export default class MapOverlayObject {
       this._spriteRects.length > 0
         ? this._spriteRects[this._spriteRects.length - 1]!.y2
         : undefined;
+    // Bottom footprint fraction (Maps obstacle-edit) — sort at the top of that
+    // band so tall open leaves occlude correctly without needing feet past y2.
+    const footprintPct = Number(state.footprint_height_pct);
+    let footprintRenderY: number | undefined;
+    if (
+      Number.isFinite(footprintPct) &&
+      footprintPct > 0 &&
+      footprintPct < 100 &&
+      this._spriteRects.length > 0
+    ) {
+      const spr = this._spriteRects[this._spriteRects.length - 1]!;
+      const h = spr.y2 - spr.y1;
+      if (h > 0) {
+        footprintRenderY = spr.y2 - h * (footprintPct / 100);
+      }
+    }
     this.renderY =
+      footprintRenderY ??
       this._linkedRenderY ??
       silhouetteBottom ??
       (this._colliders.length > 0
@@ -767,9 +799,11 @@ export default class MapOverlayObject {
       ? state.renderLayer
       : this._defaultRenderLayer;
     this.renderLayer = toSortableLayer(this._stateRenderLayer);
-    // Silhouette always Y-sorts; otherwise honor authored renderLayer.
-    this.participatesInYSort =
-      this._usesFlatPatch || this._stateRenderLayer !== "background";
+    // Flat-patch replace: `url` lives on the visual/background layer only.
+    // `spriteUrl` is collision/footprint metadata — do not Y-sort-draw it.
+    this.participatesInYSort = this._usesFlatPatch
+      ? false
+      : this._stateRenderLayer !== "background";
 
     if (this._usesFlatPatch) {
       this._setPatchImage(state.url);

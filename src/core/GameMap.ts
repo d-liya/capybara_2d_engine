@@ -267,6 +267,25 @@ function overlayLinkLabels(overlay: MapOverlayEntry): string[] {
   return labels.filter((value): value is string => Boolean(value));
 }
 
+/** Active/current state on a raw overlay entry (pre MapOverlayObject). */
+function overlayEntryActiveState(overlay: MapOverlayEntry) {
+  const requested =
+    overlay.currentMapStateLabel ??
+    overlay.currentState ??
+    overlay.states?.[0]?.name;
+  if (isMapOverlayOffState(requested)) return null;
+  return (
+    overlay.states?.find((state) => state.name === requested) ??
+    overlay.states?.[0] ??
+    null
+  );
+}
+
+function overlayEntryOwnsLocalCollision(overlay: MapOverlayEntry): boolean {
+  if (!structuralOverlayReplacesObstacle(overlay)) return false;
+  return stateHasLocalCollision(overlayEntryActiveState(overlay));
+}
+
 function overlayLinksToMask(
   overlay: MapOverlayEntry,
   mask: MapMaskEntry,
@@ -410,7 +429,7 @@ export default class GameMap {
 
       const spriteSheetData = panel.spriteSheets ?? [];
       const mapOverlayData = panel.mapOverlays ?? [];
-      /** Masks whose static art is replaced by a linked spritesheet (placementMode: replace). */
+      /** Masks whose static art is replaced by a linked spritesheet / state overlay. */
       const replaceLinkedMaskKeys = new Set<string>();
       for (const sheet of spriteSheetData) {
         const key = sheet.linkedColliderLabel?.trim();
@@ -418,12 +437,16 @@ export default class GameMap {
         const mode = sheet.placementMode ?? "replace";
         if (mode === "replace") replaceLinkedMaskKeys.add(key);
       }
-      // Edit-UI VFX overlays with placementMode replace (paired erase keeps collider).
       for (const overlay of mapOverlayData) {
-        if ((overlay.kind ?? "state") !== "vfx") continue;
-        const mode = overlay.placementMode ?? "overlay";
+        const kind = overlay.kind ?? "state";
+        const mode =
+          overlay.placementMode ?? (kind === "vfx" ? "overlay" : "replace");
         if (mode !== "replace") continue;
-        const key = overlay.linkedObstacleLabel?.trim();
+        const key =
+          overlay.linkedObstacleLabel?.trim() ||
+          (kind === "state" || kind === "grid"
+            ? overlay.anchorLabel?.trim()
+            : undefined);
         if (key) replaceLinkedMaskKeys.add(key);
       }
 
@@ -437,11 +460,18 @@ export default class GameMap {
           mask,
           mapOverlayData,
         );
+        const replaceOwnsCollision =
+          replacedByCloseMapOverlay &&
+          mapOverlayData.some(
+            (overlay) =>
+              overlayLinksToMask(overlay, mask) &&
+              overlayEntryOwnsLocalCollision(overlay),
+          );
         const suppressStaticVisuals =
           Boolean(mask.spriteSheetUrl?.trim()) ||
           keys.some((key) => replaceLinkedMaskKeys.has(key));
         const suppressObstacleVisual = replacedByCloseMapOverlay;
-        return new MapObject(mask, normOffset, {
+        const obj = new MapObject(mask, normOffset, {
           suppressStaticVisuals,
           suppressObstacleVisual,
           // Only convert pixel_bbox immediately when panel size was caller-forced.
@@ -453,6 +483,12 @@ export default class GameMap {
             ? this.panelPixelHeight
             : undefined,
         });
+        // Replace overlays with local collision must own walkability as soon as
+        // they hide the cut-out — don't wait on background image decode.
+        if (replaceOwnsCollision) {
+          obj.claimCollisionForOverlay();
+        }
+        return obj;
       });
       this._objects.push(...panelObjects);
 
@@ -823,7 +859,14 @@ export default class GameMap {
         normOffset,
       );
     } else {
-      // Still attempt erase collisions with whatever bounds exist.
+      // Image missing/failed — still transfer collision to replace overlays by label.
+      this._applyStateOverlayObstacleSuppression(
+        mapOverlays,
+        panelObjects,
+        normOffset,
+      );
+      this._syncOverlayMaskLinks(mapOverlays, panelObjects, normOffset);
+      this._syncOverlayLocalCollisionOverrides(panelObjects);
       this._applyEraseOverlayCollisions(
         eraseOverlays,
         panelObjects,
@@ -857,9 +900,9 @@ export default class GameMap {
     for (const obj of panelObjects) {
       if (obj.type.toLowerCase() === "boundary") continue;
       const maskRect = obj.getBounds();
-      if (maskRect.x2 <= maskRect.x1 || maskRect.y2 <= maskRect.y1) continue;
+      const hasBounds = maskRect.x2 > maskRect.x1 && maskRect.y2 > maskRect.y1;
 
-      const shouldSuppress = structural.some((overlay) => {
+      const owner = structural.find((overlay) => {
         const labels = overlayLinkLabels(overlay);
         if (
           labels.some(
@@ -868,7 +911,7 @@ export default class GameMap {
         ) {
           return true;
         }
-
+        if (!hasBounds) return false;
         return (overlay.states ?? []).some((state) => {
           if (!Array.isArray(state.box_2d) || state.box_2d.length < 4) {
             return false;
@@ -881,8 +924,12 @@ export default class GameMap {
         });
       });
 
-      if (shouldSuppress) {
-        obj.suppressObstacleVisual();
+      if (!owner) continue;
+      obj.suppressObstacleVisual();
+      // Keep collision ownership in lockstep with visual replace. Otherwise the
+      // closed-gate collider still blocks after the open patch is showing.
+      if (overlayEntryOwnsLocalCollision(owner)) {
+        obj.claimCollisionForOverlay();
       }
     }
   }
@@ -1008,6 +1055,10 @@ export default class GameMap {
    * When a state/grid overlay has local collision (silhouette / polygons),
    * the overlay owns walkability and the linked map sprite stops blocking.
    * Turning the overlay off (`initial`) releases the claim.
+   *
+   * Prefer the resolved link (`linkedMaskKey` / `linkedObstacleLabel`) — that is
+   * the behind-obstacle the overlay replaces. Only fall back to bbox overlap
+   * when no link resolved, so neighboring generated sprites keep their collision.
    */
   private _syncOverlayLocalCollisionOverrides(panelObjects: MapObject[]): void {
     for (const obj of panelObjects) {
@@ -1026,8 +1077,10 @@ export default class GameMap {
         const linked =
           Boolean(linkKey) &&
           (obj.label.trim() === linkKey || obj.name.trim() === linkKey);
-        const overlapping = rectsOverlap(obj.getBounds(), overlayBounds);
-        if (linked || overlapping) {
+        const shouldOverride = linkKey
+          ? linked
+          : rectsOverlap(obj.getBounds(), overlayBounds);
+        if (shouldOverride) {
           obj.claimCollisionForOverlay();
           // Local collision also owns the silhouette visual.
           obj.suppressObstacleVisual();

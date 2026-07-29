@@ -178,7 +178,11 @@ export default class MapObject {
 
   /** When false, obstacle art is drawn only in drawBackground (not the Y-sort queue). */
   get participatesInYSort(): boolean {
-    return this._participatesInYSortBase && !this._visualSuppressed;
+    return (
+      this._participatesInYSortBase &&
+      !this._visualSuppressed &&
+      !this._suppressObstacleVisual
+    );
   }
 
   constructor(
