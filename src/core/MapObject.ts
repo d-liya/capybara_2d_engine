@@ -164,6 +164,8 @@ export default class MapObject {
   private _suppressObstacleVisual: boolean;
   /** Cleared by `kind: "erase"` mapOverlays that cover this sprite. */
   private _collisionDisabled: boolean;
+  /** State/grid overlay with local collision temporarily owns walkability. */
+  private _overlayOwnsCollision: boolean;
   private _visualSuppressed: boolean;
   private _backgroundImage: HTMLImageElement | null;
   private _obstacleImage: HTMLImageElement | null;
@@ -238,6 +240,7 @@ export default class MapObject {
     this._suppressObstacleVisual =
       options.suppressObstacleVisual === true || collisionOnly;
     this._collisionDisabled = false;
+    this._overlayOwnsCollision = false;
     this._visualSuppressed = false;
 
     const crop = data.obstacleImageCrop;
@@ -351,6 +354,19 @@ export default class MapObject {
     this._colliders = [];
   }
 
+  /**
+   * State/grid overlay with local collision owns walkability for this cut-out.
+   * Visual may already be suppressed via `suppressObstacleVisual`.
+   */
+  claimCollisionForOverlay(): void {
+    this._overlayOwnsCollision = true;
+  }
+
+  /** Restore map-sprite collision when the overlay is off / has no local delta. */
+  releaseCollisionForOverlay(): void {
+    this._overlayOwnsCollision = false;
+  }
+
   /** @deprecated Use `applyEraseOverwrite`. */
   applyRemoveOverwrite(): void {
     this.applyEraseOverwrite();
@@ -415,7 +431,7 @@ export default class MapObject {
   // ── Collision ────────────────────────────────────────────────────────────
 
   overlaps(rect: Rect): boolean {
-    if (this._collisionDisabled) return false;
+    if (this._collisionDisabled || this._overlayOwnsCollision) return false;
     if (this._polygons.length > 0) {
       return this._polygons.some((poly) => rectOverlapsPolygon(rect, poly));
     }

@@ -1,11 +1,14 @@
 import {
   loadImage,
+  offsetPolygon,
   offsetRect,
   parseBox2d,
+  rectOverlapsPolygon,
   rectsOverlap,
   snapCanvasValue,
   toPixel,
   NORM,
+  type Point,
   type Rect,
 } from "../utils/common";
 import type { HoverTarget, TooltipContent } from "./HoverTypes";
@@ -30,6 +33,11 @@ export interface MapOverlayStateEntry {
   name: string;
   label?: string;
   description?: string;
+  /**
+   * Visual patch URL. When `spriteUrl` is also set (obstacle-edit local
+   * collision), this draws as a flat map-layer patch like `kind: "erase"`.
+   * Otherwise it is the Y-sorted / background state image (legacy).
+   */
   url: string;
   /** Per-state placement `[ymin, xmin, ymax, xmax]` — size may differ per stage. */
   box_2d: number[];
@@ -41,6 +49,21 @@ export interface MapOverlayStateEntry {
   colliders?: MapOverlayColliderEntry[];
   blocksMovement?: boolean;
   renderLayer?: MapOverlayRenderLayer;
+  /**
+   * Isolated silhouette sprite for Y-sorting (obstacle-edit local collision).
+   * When present, `url` is the flat erase-style patch and this image participates
+   * in the Y-sort queue at `sprite_bbox` (or `box_2d`).
+   */
+  spriteUrl?: string;
+  /** Full visual silhouette bbox `[ymin,xmin,ymax,xmax]` for Y-sort draw. */
+  sprite_bbox?: number[];
+  collision_type?: "solid_volume" | "passable_gap";
+  footprint_height_pct?: number;
+  /**
+   * Silhouette collision polygons in full-map 0–1000 coords.
+   * Prefer these over AABB `collider` for walkability.
+   */
+  collision_polygons?: Array<Array<{ x: number; y: number }>>;
 }
 
 export interface MapOverlayEntry {
@@ -175,6 +198,34 @@ export function isMapOverlayOffState(name: string | null | undefined): boolean {
   return n === "" || n === "initial" || n === "none";
 }
 
+/** True when this state carries obstacle-edit local collision / silhouette data. */
+export function stateHasLocalCollision(
+  state: MapOverlayStateEntry | null | undefined,
+): boolean {
+  if (!state) return false;
+  if (typeof state.spriteUrl === "string" && state.spriteUrl.trim()) return true;
+  if (Array.isArray(state.collision_polygons) && state.collision_polygons.length > 0)
+    return true;
+  if (state.collision_type === "solid_volume" || state.collision_type === "passable_gap")
+    return true;
+  if (Array.isArray(state.sprite_bbox) && state.sprite_bbox.length >= 4) return true;
+  return false;
+}
+
+function normalizeOverlayPolygons(
+  raw: Array<Array<{ x: number; y: number }>> | undefined,
+): Point[][] {
+  if (!raw?.length) return [];
+  return raw
+    .map((poly) =>
+      (poly ?? [])
+        .map((p) => ({ x: Number(p.x), y: Number(p.y) }))
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)),
+    )
+    .filter((poly) => poly.length >= 3);
+}
+
+
 export default class MapOverlayObject {
   readonly id: string;
   readonly anchorLabel?: string;
@@ -208,10 +259,17 @@ export default class MapOverlayObject {
   /** World-norm cell boxes for the active draw (cell 0 = active state box). */
   private _cellRects: Rect[];
   private _colliders: Rect[];
+  private _polygons: Point[][];
   private _blocksMovement: boolean;
   private _stateRenderLayer: MapOverlayRenderLayer;
-  private _image: HTMLImageElement | null;
-  private _imageUrl: string;
+  /** Flat map-layer patch (`url`) — drawn like erase when silhouette exists. */
+  private _patchImage: HTMLImageElement | null;
+  private _patchImageUrl: string;
+  /** Y-sorted silhouette (`spriteUrl`), or legacy state image when no silhouette. */
+  private _sortImage: HTMLImageElement | null;
+  private _sortImageUrl: string;
+  private _spriteRects: Rect[];
+  private _usesFlatPatch: boolean;
 
   constructor(
     data: MapOverlayEntry,
@@ -287,10 +345,15 @@ export default class MapOverlayObject {
     this._box2d = [...fallbackBox];
     this._cellRects = [];
     this._colliders = [];
+    this._polygons = [];
     this._blocksMovement = false;
     this._stateRenderLayer = this._defaultRenderLayer;
-    this._image = null;
-    this._imageUrl = "";
+    this._patchImage = null;
+    this._patchImageUrl = "";
+    this._sortImage = null;
+    this._sortImageUrl = "";
+    this._spriteRects = [];
+    this._usesFlatPatch = false;
 
     // Honor map default: "initial" / "none" → draw nothing. Otherwise show
     // that state (tiled across the full grid when kind is grid).
@@ -330,6 +393,11 @@ export default class MapOverlayObject {
     return this._blocksMovement;
   }
 
+  /** Active state carries silhouette / local collision override data. */
+  get hasLocalCollision(): boolean {
+    return stateHasLocalCollision(this.currentState);
+  }
+
   get currentState(): MapOverlayStateEntry | null {
     return (
       this.states.find((state) => state.name === this.currentStateName) ?? null
@@ -350,6 +418,9 @@ export default class MapOverlayObject {
 
   overlaps(rect: Rect): boolean {
     if (!this._blocksMovement) return false;
+    if (this._polygons.length > 0) {
+      return this._polygons.some((poly) => rectOverlapsPolygon(rect, poly));
+    }
     return this._colliders.some((collider) => rectsOverlap(collider, rect));
   }
 
@@ -418,8 +489,31 @@ export default class MapOverlayObject {
     worldPixelW?: number,
     worldPixelH?: number,
   ): void {
+    if (isMapOverlayOffState(this.currentStateName)) return;
+    // Flat erase-style patch when silhouette owns Y-sort; otherwise legacy
+    // background-layer states still draw here.
+    if (this._usesFlatPatch) {
+      this._drawImageIntoRects(
+        ctx,
+        this._patchImage,
+        this._cellRects,
+        worldNormW,
+        worldNormH,
+        worldPixelW,
+        worldPixelH,
+      );
+      return;
+    }
     if (this._stateRenderLayer !== "background") return;
-    this._draw(ctx, worldNormW, worldNormH, worldPixelW, worldPixelH);
+    this._drawImageIntoRects(
+      ctx,
+      this._sortImage,
+      this._cellRects,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
   }
 
   draw(
@@ -431,7 +525,28 @@ export default class MapOverlayObject {
     worldPixelH?: number,
   ): void {
     if (!this.participatesInYSort) return;
-    this._draw(ctx, worldNormW, worldNormH, worldPixelW, worldPixelH);
+    if (this._usesFlatPatch) {
+      // Silhouette cut-out for depth sorting (characters walk in front/behind).
+      this._drawImageIntoRects(
+        ctx,
+        this._sortImage,
+        this._spriteRects.length ? this._spriteRects : this._cellRects,
+        worldNormW,
+        worldNormH,
+        worldPixelW,
+        worldPixelH,
+      );
+      return;
+    }
+    this._drawImageIntoRects(
+      ctx,
+      this._sortImage,
+      this._cellRects,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
   }
 
   drawDebug(
@@ -517,10 +632,15 @@ export default class MapOverlayObject {
   private _clearVisualState(offName: string): void {
     this.currentStateName = offName;
     this._cellRects = [];
+    this._spriteRects = [];
     this._colliders = [];
+    this._polygons = [];
     this._blocksMovement = false;
-    this._image = null;
-    this._imageUrl = "";
+    this._usesFlatPatch = false;
+    this._patchImage = null;
+    this._patchImageUrl = "";
+    this._sortImage = null;
+    this._sortImageUrl = "";
     this._stateRenderLayer = this._defaultRenderLayer;
     this.renderLayer = toSortableLayer(this._defaultRenderLayer);
     this.participatesInYSort = this._defaultRenderLayer !== "background";
@@ -561,9 +681,29 @@ export default class MapOverlayObject {
     this._bounds = unionRects(this._cellRects) ?? cell0;
     this._box2d = [cell0.y1, cell0.x1, cell0.y2, cell0.x2];
 
+    const silhouetteUrl =
+      typeof state.spriteUrl === "string" ? state.spriteUrl.trim() : "";
+    this._usesFlatPatch = Boolean(silhouetteUrl);
+
+    if (this._usesFlatPatch) {
+      const spriteBox = Array.isArray(state.sprite_bbox) && state.sprite_bbox.length >= 4
+        ? [...state.sprite_bbox]
+        : authoredBox;
+      const spriteCells = this._resolveCellBoxes(spriteBox);
+      this._spriteRects = spriteCells.map((box) => {
+        let rect = parseBox2d(box);
+        if (this._normOffset) {
+          rect = offsetRect(rect, this._normOffset.x, this._normOffset.y);
+        }
+        return rect;
+      });
+    } else {
+      this._spriteRects = [];
+    }
+
     const colliders = state.collider ?? state.colliders ?? [];
     if (colliders.length > 0 && this._cellRects.length > 0) {
-      // Authoring colliders are relative to cell 0 — tile them across cells.
+      // Authoring colliders are in full-map 0–1000 space — tile across cells.
       const cell0World = this._cellRects[0]!;
       this._colliders = [];
       for (const cellRect of this._cellRects) {
@@ -581,14 +721,45 @@ export default class MapOverlayObject {
       this._colliders = [];
     }
 
+    const localPolys = normalizeOverlayPolygons(state.collision_polygons);
+    if (localPolys.length > 0 && this._cellRects.length > 0) {
+      const cell0World = this._cellRects[0]!;
+      this._polygons = [];
+      for (const cellRect of this._cellRects) {
+        const dx = cellRect.x1 - cell0World.x1;
+        const dy = cellRect.y1 - cell0World.y1;
+        for (const poly of localPolys) {
+          let points = poly.map((p) => ({ ...p }));
+          if (this._normOffset) {
+            points = offsetPolygon(points, this._normOffset.x, this._normOffset.y);
+          }
+          if (dx !== 0 || dy !== 0) {
+            points = offsetPolygon(points, dx, dy);
+          }
+          this._polygons.push(points);
+        }
+      }
+    } else {
+      this._polygons = [];
+    }
+
     this._blocksMovement =
       state.blocksMovement ?? this._defaultBlocksMovement ?? false;
-    if (this._blocksMovement && this._colliders.length === 0) {
+    if (
+      this._blocksMovement &&
+      this._colliders.length === 0 &&
+      this._polygons.length === 0
+    ) {
       this._colliders = [...this._cellRects];
     }
 
+    const silhouetteBottom =
+      this._spriteRects.length > 0
+        ? this._spriteRects[this._spriteRects.length - 1]!.y2
+        : undefined;
     this.renderY =
       this._linkedRenderY ??
+      silhouetteBottom ??
       (this._colliders.length > 0
         ? this._colliders[this._colliders.length - 1]!.y2
         : this._bounds.y2);
@@ -596,39 +767,62 @@ export default class MapOverlayObject {
       ? state.renderLayer
       : this._defaultRenderLayer;
     this.renderLayer = toSortableLayer(this._stateRenderLayer);
-    this.participatesInYSort = this._stateRenderLayer !== "background";
+    // Silhouette always Y-sorts; otherwise honor authored renderLayer.
+    this.participatesInYSort =
+      this._usesFlatPatch || this._stateRenderLayer !== "background";
 
-    this._setImage(state.url);
+    if (this._usesFlatPatch) {
+      this._setPatchImage(state.url);
+      this._setSortImage(silhouetteUrl);
+    } else {
+      this._patchImage = null;
+      this._patchImageUrl = "";
+      this._setSortImage(state.url);
+    }
   }
 
-  private _setImage(url: string): void {
-    this._imageUrl = url;
-    this._image = null;
-    loadImage(url)
+  private _setPatchImage(url: string): void {
+    const trimmed = url.trim();
+    this._patchImageUrl = trimmed;
+    this._patchImage = null;
+    if (!trimmed) return;
+    loadImage(trimmed)
       .then((image) => {
-        if (this._imageUrl === url) {
-          this._image = image;
-        }
+        if (this._patchImageUrl === trimmed) this._patchImage = image;
       })
       .catch(() => {
-        if (this._imageUrl === url) {
-          this._image = null;
-        }
+        if (this._patchImageUrl === trimmed) this._patchImage = null;
       });
   }
 
-  private _draw(
+  private _setSortImage(url: string): void {
+    const trimmed = url.trim();
+    this._sortImageUrl = trimmed;
+    this._sortImage = null;
+    if (!trimmed) return;
+    loadImage(trimmed)
+      .then((image) => {
+        if (this._sortImageUrl === trimmed) this._sortImage = image;
+      })
+      .catch(() => {
+        if (this._sortImageUrl === trimmed) this._sortImage = null;
+      });
+  }
+
+  private _drawImageIntoRects(
     ctx: CanvasRenderingContext2D,
+    image: HTMLImageElement | null,
+    rects: Rect[],
     worldNormW: number,
     worldNormH: number,
     worldPixelW?: number,
     worldPixelH?: number,
   ): void {
     if (isMapOverlayOffState(this.currentStateName)) return;
-    if (!this._image?.complete || !this._image.naturalWidth) return;
-    if (!this._cellRects.length) return;
+    if (!image?.complete || !image.naturalWidth) return;
+    if (!rects.length) return;
 
-    for (const cell of this._cellRects) {
+    for (const cell of rects) {
       const { x, y } = toPixel(
         cell.x1,
         cell.y1,
@@ -651,13 +845,7 @@ export default class MapOverlayObject {
       const drawX2 = snapCanvasValue(x2);
       const drawY2 = snapCanvasValue(y2);
 
-      ctx.drawImage(
-        this._image,
-        drawX,
-        drawY,
-        drawX2 - drawX,
-        drawY2 - drawY,
-      );
+      ctx.drawImage(image, drawX, drawY, drawX2 - drawX, drawY2 - drawY);
     }
   }
 }

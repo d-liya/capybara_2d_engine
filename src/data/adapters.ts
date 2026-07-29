@@ -1156,6 +1156,66 @@ function normalizeMapOverlays(
           colliders: state.colliders,
           blocksMovement: state.blocksMovement,
           renderLayer: state.renderLayer,
+          ...(((): Record<string, unknown> => {
+            const s = state as Record<string, unknown>;
+            const out: Record<string, unknown> = {};
+            if (typeof s.spriteUrl === "string" && s.spriteUrl.trim()) {
+              out.spriteUrl = s.spriteUrl.trim();
+            }
+            if (
+              Array.isArray(s.sprite_bbox) &&
+              s.sprite_bbox.length >= 4 &&
+              s.sprite_bbox
+                .slice(0, 4)
+                .every((n: unknown) => Number.isFinite(Number(n)))
+            ) {
+              out.sprite_bbox = [
+                Number(s.sprite_bbox[0]),
+                Number(s.sprite_bbox[1]),
+                Number(s.sprite_bbox[2]),
+                Number(s.sprite_bbox[3]),
+              ];
+            }
+            if (
+              s.collision_type === "solid_volume" ||
+              s.collision_type === "passable_gap"
+            ) {
+              out.collision_type = s.collision_type;
+            }
+            if (
+              typeof s.footprint_height_pct === "number" &&
+              Number.isFinite(s.footprint_height_pct)
+            ) {
+              out.footprint_height_pct = s.footprint_height_pct;
+            }
+            if (Array.isArray(s.collision_polygons)) {
+              const polys = s.collision_polygons
+                .map((poly: unknown) => {
+                  if (!Array.isArray(poly)) return null;
+                  const pts = poly
+                    .map((p: unknown) => {
+                      if (!p || typeof p !== "object") return null;
+                      const o = p as { x?: unknown; y?: unknown };
+                      const x = Number(o.x);
+                      const y = Number(o.y);
+                      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+                      return { x, y };
+                    })
+                    .filter(
+                      (p: { x: number; y: number } | null): p is { x: number; y: number } =>
+                        p != null,
+                    );
+                  return pts.length >= 3 ? pts : null;
+                })
+                .filter(
+                  (
+                    p: Array<{ x: number; y: number }> | null,
+                  ): p is Array<{ x: number; y: number }> => p != null,
+                );
+              if (polys.length) out.collision_polygons = polys;
+            }
+            return out;
+          })()),
         };
       })
       .filter((state): state is NonNullable<typeof state> => state != null);

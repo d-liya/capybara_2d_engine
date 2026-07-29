@@ -482,6 +482,12 @@ export interface GameMapPanelContent {
       colliders?: Array<{ box_2d: number[]; label?: string }>;
       blocksMovement?: boolean;
       renderLayer?: "background" | "ground" | "occluder" | "prop";
+      /** Silhouette for Y-sort when `url` is a flat erase-style patch. */
+      spriteUrl?: string;
+      sprite_bbox?: number[];
+      collision_type?: "solid_volume" | "passable_gap";
+      footprint_height_pct?: number;
+      collision_polygons?: Array<Array<{ x: number; y: number }>>;
     }>;
     gridDimensions?: [number, number];
     /**

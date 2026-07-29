@@ -1,6 +1,10 @@
 import MapObject from "./MapObject";
 import MapEffectObject from "./MapEffectObject";
-import MapOverlayObject, { type MapOverlayEntry } from "./MapOverlayObject";
+import MapOverlayObject, {
+  isMapOverlayOffState,
+  stateHasLocalCollision,
+  type MapOverlayEntry,
+} from "./MapOverlayObject";
 import AtmosphereObject, { type AtmosphereEntry } from "./AtmosphereObject";
 import {
   loadImage,
@@ -810,6 +814,9 @@ export default class GameMap {
       // (authoring labels like "market stall" often differ from sprite labels).
       this._syncOverlayMaskLinks(mapOverlays, panelObjects, normOffset);
 
+      // Obstacle-edit local collision: overlay owns walkability; clear base sprite.
+      this._syncOverlayLocalCollisionOverrides(panelObjects);
+
       this._applyEraseOverlayCollisions(
         eraseOverlays,
         panelObjects,
@@ -992,6 +999,38 @@ export default class GameMap {
       for (const obj of panelObjects) {
         if (rectsOverlap(obj.getBounds(), bounds)) {
           obj.applyEraseOverwrite();
+        }
+      }
+    }
+  }
+
+  /**
+   * When a state/grid overlay has local collision (silhouette / polygons),
+   * the overlay owns walkability and the linked map sprite stops blocking.
+   * Turning the overlay off (`initial`) releases the claim.
+   */
+  private _syncOverlayLocalCollisionOverrides(panelObjects: MapObject[]): void {
+    for (const obj of panelObjects) {
+      obj.releaseCollisionForOverlay();
+    }
+
+    for (const overlay of this._overlays) {
+      if (isMapOverlayOffState(overlay.currentStateName)) continue;
+      if (!overlay.hasLocalCollision) continue;
+
+      const overlayBounds = overlay.getBounds();
+      const linkKey = overlay.linkedMaskKey?.trim();
+
+      for (const obj of panelObjects) {
+        if (obj.type.toLowerCase() === "boundary") continue;
+        const linked =
+          Boolean(linkKey) &&
+          (obj.label.trim() === linkKey || obj.name.trim() === linkKey);
+        const overlapping = rectsOverlap(obj.getBounds(), overlayBounds);
+        if (linked || overlapping) {
+          obj.claimCollisionForOverlay();
+          // Local collision also owns the silhouette visual.
+          obj.suppressObstacleVisual();
         }
       }
     }
@@ -1225,7 +1264,11 @@ export default class GameMap {
   setMapOverlayState(id: string, state: string): boolean {
     const overlay = this._overlays.find((candidate) => candidate.id === id);
     if (!overlay) return false;
-    return overlay.setState(state);
+    const changed = overlay.setState(state);
+    if (changed) {
+      this._syncOverlayLocalCollisionOverrides(this._objects);
+    }
+    return changed;
   }
 
   getHoverTargetsAt(x: number, y: number): HoverTarget[] {
