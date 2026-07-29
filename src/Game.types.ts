@@ -259,6 +259,8 @@ export interface MapOverlayTarget {
   blocksMovement: boolean;
   renderLayer: "background" | "ground" | "occluder" | "prop";
   gridDimensions?: [number, number];
+  gridSpacing?: [number, number];
+  /** Derived cell boxes for the active state (not authored). */
   cellBboxes?: number[][];
 }
 
@@ -482,6 +484,14 @@ export interface GameMapPanelContent {
       renderLayer?: "background" | "ground" | "occluder" | "prop";
     }>;
     gridDimensions?: [number, number];
+    /**
+     * Gap between detached grid cells `[gapX, gapY]` in 0–1000 space.
+     * Runtime tiles from the active state's `box_2d` (no authored cellBboxes).
+     */
+    gridSpacing?: [number, number];
+    /**
+     * @deprecated Prefer gridDimensions + gridSpacing. Load fallback only.
+     */
     cellBboxes?: number[][];
     renderLayer?: "background" | "ground" | "occluder" | "prop";
     blocksMovement?: boolean;

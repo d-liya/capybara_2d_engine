@@ -100,6 +100,12 @@ Prefer **unified `mapOverlays`** on flat `map_*.json` (next to `walkableBoxes`).
 | `erase` | Static remove patch + clear overlapping sprite collision | Already applied at load |
 | `vfx` | Spritesheet loop or trigger (`states[0].mode`: `background` \| `gameplay`) | Autoplay, or `triggerMapEffect` |
 
+**Detached grids** (`kind: "grid"`, `layout: "detached_stages"`): each state has its own `box_2d` (stage art size may differ). Runtime follows `currentState` / `currentMapStateLabel`:
+- `"initial"` or `"none"` → draw nothing (base map only)
+- a real state name → draw that state's art across the full grid via `gridDimensions` + `gridSpacing` (Maps playground tiling)
+
+`ghostCellDisplay` is Maps-editor only and is not synced to the engine. Do not author or depend on `cellBboxes` (legacy load fallback only).
+
 Overlays from the builder are already on the lean map and placements are in `map_*.placements.json`. Wire interactions with the overlay APIs:
 
 ```ts

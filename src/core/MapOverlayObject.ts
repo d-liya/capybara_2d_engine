@@ -31,6 +31,7 @@ export interface MapOverlayStateEntry {
   label?: string;
   description?: string;
   url: string;
+  /** Per-state placement `[ymin, xmin, ymax, xmax]` — size may differ per stage. */
   box_2d: number[];
   frameCount?: number;
   frame_count?: number;
@@ -60,7 +61,17 @@ export interface MapOverlayEntry {
   currentMapStateLabel?: string;
   currentState?: string;
   states: MapOverlayStateEntry[];
+  /** `[cols, rows]` — detached grid only. */
   gridDimensions?: [number, number];
+  /**
+   * Gap between cells in 0–1000 map space `[gapX, gapY]`.
+   * Engine tiles from the active state's `box_2d` as cell 0 (playground style).
+   */
+  gridSpacing?: [number, number];
+  /**
+   * @deprecated Prefer `gridDimensions` + `gridSpacing`. Kept as a load fallback
+   * for older synced maps that still embed precomputed cells.
+   */
   cellBboxes?: number[][];
   /** Default for states that omit renderLayer. */
   renderLayer?: MapOverlayRenderLayer;
@@ -72,6 +83,10 @@ export interface MapOverlayTarget {
   id: string;
   anchorLabel?: string;
   gamePlay?: string;
+  /**
+   * Active state name, or `"initial"` / `"none"` when the overlay is off
+   * (base map only — nothing drawn).
+   */
   currentState: string;
   states: string[];
   box_2d: number[];
@@ -80,6 +95,8 @@ export interface MapOverlayTarget {
   blocksMovement: boolean;
   renderLayer: MapOverlayRenderLayer;
   gridDimensions?: [number, number];
+  gridSpacing?: [number, number];
+  /** Computed cell boxes for the active state (derived, not authored). */
   cellBboxes?: number[][];
 }
 
@@ -96,6 +113,68 @@ function isValidLayer(value: unknown): value is MapOverlayRenderLayer {
   );
 }
 
+/**
+ * Lay out grid cells from cell-0 `box_2d` + cols/rows + spacing.
+ * Same math as Maps playground `computeDetachedGridCellsFromAnchor`.
+ */
+export function computeDetachedGridCellsFromAnchor(
+  anchor: number[],
+  cols: number,
+  rows: number,
+  spacing: [number, number] = [0, 0],
+): number[][] {
+  if (!Array.isArray(anchor) || anchor.length < 4) return [];
+  const c = Math.max(1, Math.floor(cols));
+  const r = Math.max(1, Math.floor(rows));
+  const gapX = Math.floor(spacing[0] ?? 0);
+  const gapY = Math.floor(spacing[1] ?? 0);
+  const ymin = Number(anchor[0]);
+  const xmin = Number(anchor[1]);
+  const ymax = Number(anchor[2]);
+  const xmax = Number(anchor[3]);
+  if (![ymin, xmin, ymax, xmax].every(Number.isFinite)) return [];
+  const cellW = xmax - xmin;
+  const cellH = ymax - ymin;
+  const stepX = cellW + gapX;
+  const stepY = cellH + gapY;
+  const cells: number[][] = [];
+  for (let row = 0; row < r; row++) {
+    for (let col = 0; col < c; col++) {
+      const cellXmin = xmin + col * stepX;
+      const cellYmin = ymin + row * stepY;
+      cells.push([
+        cellYmin,
+        cellXmin,
+        cellYmin + cellH,
+        cellXmin + cellW,
+      ]);
+    }
+  }
+  return cells;
+}
+
+function unionRects(rects: Rect[]): Rect | null {
+  if (!rects.length) return null;
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const r of rects) {
+    x1 = Math.min(x1, r.x1);
+    y1 = Math.min(y1, r.y1);
+    x2 = Math.max(x2, r.x2);
+    y2 = Math.max(y2, r.y2);
+  }
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  return { x1, y1, x2, y2 };
+}
+
+/** Map default / editor "Initial" — overlay is off; draw nothing. */
+export function isMapOverlayOffState(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim().toLowerCase();
+  return n === "" || n === "initial" || n === "none";
+}
+
 export default class MapOverlayObject {
   readonly id: string;
   readonly anchorLabel?: string;
@@ -103,6 +182,7 @@ export default class MapOverlayObject {
   readonly states: MapOverlayStateEntry[];
   /** Authoring placement mode — `overlay` keeps base cut-out underneath. */
   readonly placementMode: "replace" | "overlay" | string;
+  readonly kind: MapOverlayKind;
   /**
    * Mask label/name this overlay sorts with. Set after mask bounds resolve so
    * `placementMode: "overlay"` patches draw immediately after the base cut-out.
@@ -117,12 +197,16 @@ export default class MapOverlayObject {
   private readonly _defaultRenderLayer: MapOverlayRenderLayer;
   private readonly _defaultBlocksMovement?: boolean;
   private readonly _gridDimensions?: [number, number];
-  private readonly _cellBboxes?: number[][];
+  private readonly _gridSpacing: [number, number];
+  /** Legacy fallback only — preferred path recomputes from state box + spacing. */
+  private readonly _legacyCellBboxes?: number[][];
   private readonly _normOffset?: { x: number; y: number };
   /** When set, linked parent inheritance locks Y-sort to the parent. */
   private _linkedRenderY?: number;
   private _bounds: Rect;
   private _box2d: number[];
+  /** World-norm cell boxes for the active draw (cell 0 = active state box). */
+  private _cellRects: Rect[];
   private _colliders: Rect[];
   private _blocksMovement: boolean;
   private _stateRenderLayer: MapOverlayRenderLayer;
@@ -137,18 +221,11 @@ export default class MapOverlayObject {
     this.id = data.id;
     this.anchorLabel = data.anchorLabel;
     this.gamePlay = data.gamePlay;
+    this.kind = data.kind ?? "state";
     this.placementMode =
-      data.placementMode ??
-      ((data.kind ?? "state") === "vfx" ? "overlay" : "replace");
-    this.states = (data.states ?? []).map((state, index) => {
-      const cell =
-        data.kind === "grid" &&
-        Array.isArray(data.cellBboxes?.[index]) &&
-        data.cellBboxes![index].length >= 4
-          ? data.cellBboxes![index]
-          : null;
-      return cell ? { ...state, box_2d: [...cell] } : state;
-    });
+      data.placementMode ?? (this.kind === "vfx" ? "overlay" : "replace");
+    // Keep each state's authored box_2d — do not remap via cellBboxes[index].
+    this.states = (data.states ?? []).map((state) => ({ ...state }));
     this._defaultRenderLayer = isValidLayer(data.renderLayer)
       ? data.renderLayer
       : "occluder";
@@ -158,10 +235,17 @@ export default class MapOverlayObject {
       data.gridDimensions.length === 2
     ) {
       this._gridDimensions = [
-        Number(data.gridDimensions[0]),
-        Number(data.gridDimensions[1]),
+        Math.max(1, Math.floor(Number(data.gridDimensions[0]))),
+        Math.max(1, Math.floor(Number(data.gridDimensions[1]))),
       ];
     }
+    this._gridSpacing =
+      Array.isArray(data.gridSpacing) && data.gridSpacing.length === 2
+        ? [
+            Math.floor(Number(data.gridSpacing[0]) || 0),
+            Math.floor(Number(data.gridSpacing[1]) || 0),
+          ]
+        : [0, 0];
     if (Array.isArray(data.cellBboxes)) {
       const cells: number[][] = [];
       for (const cell of data.cellBboxes) {
@@ -173,7 +257,7 @@ export default class MapOverlayObject {
           Number(cell[3]),
         ]);
       }
-      if (cells.length) this._cellBboxes = cells;
+      if (cells.length) this._legacyCellBboxes = cells;
     }
     this._normOffset = normOffset;
     this._linkedRenderY =
@@ -187,34 +271,43 @@ export default class MapOverlayObject {
       data.anchorLabel?.trim();
     if (initialLinkKey) this.linkedMaskKey = initialLinkKey;
 
-    const initialName =
-      data.currentMapStateLabel ??
-      data.currentState ??
-      this.states[0]?.name ??
-      "";
-    const initialState =
-      this.states.find((state) => state.name === initialName) ?? this.states[0];
-
-    if (!initialState) {
+    if (!this.states.length) {
       throw new Error(`Map overlay ${data.id} has no states`);
     }
 
-    this.currentStateName = initialState.name;
+    const requestedName =
+      data.currentMapStateLabel ?? data.currentState ?? this.states[0]!.name;
+    const fallbackBox = this.states[0]!.box_2d;
+
+    this.currentStateName = "";
     this.renderY = 0;
     this.renderLayer = toSortableLayer(this._defaultRenderLayer);
     this.participatesInYSort = this._defaultRenderLayer !== "background";
-    this._bounds = parseBox2d(initialState.box_2d);
-    this._box2d = [...initialState.box_2d];
+    this._bounds = parseBox2d(fallbackBox);
+    this._box2d = [...fallbackBox];
+    this._cellRects = [];
     this._colliders = [];
     this._blocksMovement = false;
     this._stateRenderLayer = this._defaultRenderLayer;
     this._image = null;
     this._imageUrl = "";
 
-    this._applyState(initialState);
+    // Honor map default: "initial" / "none" → draw nothing. Otherwise show
+    // that state (tiled across the full grid when kind is grid).
+    if (isMapOverlayOffState(requestedName)) {
+      this._clearVisualState(
+        (typeof requestedName === "string" && requestedName.trim()) ||
+          "initial",
+      );
+    } else {
+      const initialState =
+        this.states.find((state) => state.name === requestedName) ??
+        this.states[0]!;
+      this._applyState(initialState);
+    }
   }
 
-  /** Visual placement bounds in world-norm space. */
+  /** Visual placement bounds in world-norm space (union of visible grid cells). */
   getBounds(): Rect {
     return { ...this._bounds };
   }
@@ -244,10 +337,13 @@ export default class MapOverlayObject {
   }
 
   setState(stateName: string): boolean {
+    const previousState = this.currentStateName;
+    if (isMapOverlayOffState(stateName)) {
+      this._clearVisualState(stateName.trim() || "initial");
+      return previousState !== this.currentStateName;
+    }
     const nextState = this.states.find((state) => state.name === stateName);
     if (!nextState) return false;
-
-    const previousState = this.currentStateName;
     this._applyState(nextState);
     return previousState !== this.currentStateName;
   }
@@ -258,6 +354,12 @@ export default class MapOverlayObject {
   }
 
   getTarget(): MapOverlayTarget {
+    const cells = this._cellRects.map((rect) => [
+      rect.y1,
+      rect.x1,
+      rect.y2,
+      rect.x2,
+    ]);
     return {
       id: this.id,
       anchorLabel: this.anchorLabel,
@@ -270,18 +372,25 @@ export default class MapOverlayObject {
       blocksMovement: this._blocksMovement,
       renderLayer: this._stateRenderLayer,
       ...(this._gridDimensions ? { gridDimensions: this._gridDimensions } : {}),
-      ...(this._cellBboxes?.length ? { cellBboxes: this._cellBboxes } : {}),
+      ...(this.kind === "grid" || this._gridDimensions
+        ? { gridSpacing: [...this._gridSpacing] as [number, number] }
+        : {}),
+      ...(cells.length ? { cellBboxes: cells } : {}),
     };
   }
 
   getHoverTargetAt(x: number, y: number): HoverTarget | null {
+    if (isMapOverlayOffState(this.currentStateName) || !this._cellRects.length) {
+      return null;
+    }
     const point = {
       x1: x - 0.001,
       y1: y - 0.001,
       x2: x + 0.001,
       y2: y + 0.001,
     };
-    if (!rectsOverlap(this._bounds, point)) return null;
+    const hit = this._cellRects.some((cell) => rectsOverlap(cell, point));
+    if (!hit && !rectsOverlap(this._bounds, point)) return null;
 
     const state = this.currentState;
     const title = this.anchorLabel ?? this.id;
@@ -378,43 +487,110 @@ export default class MapOverlayObject {
     ctx.restore();
   }
 
+  private _resolveCellBoxes(stateBox: number[]): number[][] {
+    if (this._gridDimensions) {
+      return computeDetachedGridCellsFromAnchor(
+        stateBox,
+        this._gridDimensions[0],
+        this._gridDimensions[1],
+        this._gridSpacing,
+      );
+    }
+    if (this._legacyCellBboxes?.length) {
+      // Legacy: keep cell 0 size/pos from the active state; offset siblings.
+      const primary = this._legacyCellBboxes[0]!;
+      const dy = Number(stateBox[0]) - Number(primary[0]);
+      const dx = Number(stateBox[1]) - Number(primary[1]);
+      const h = Number(stateBox[2]) - Number(stateBox[0]);
+      const w = Number(stateBox[3]) - Number(stateBox[1]);
+      return this._legacyCellBboxes.map((cell, index) => {
+        if (index === 0) return [...stateBox];
+        const y = Number(cell[0]) + dy;
+        const x = Number(cell[1]) + dx;
+        return [y, x, y + h, x + w];
+      });
+    }
+    return [stateBox];
+  }
+
+  /** Hide overlay art — map default "initial" / "none". */
+  private _clearVisualState(offName: string): void {
+    this.currentStateName = offName;
+    this._cellRects = [];
+    this._colliders = [];
+    this._blocksMovement = false;
+    this._image = null;
+    this._imageUrl = "";
+    this._stateRenderLayer = this._defaultRenderLayer;
+    this.renderLayer = toSortableLayer(this._defaultRenderLayer);
+    this.participatesInYSort = this._defaultRenderLayer !== "background";
+
+    const anchor = this.states[0]?.box_2d;
+    if (anchor) {
+      let cell0 = parseBox2d(anchor);
+      if (this._normOffset) {
+        cell0 = offsetRect(cell0, this._normOffset.x, this._normOffset.y);
+      }
+      this._bounds = cell0;
+      this._box2d = [cell0.y1, cell0.x1, cell0.y2, cell0.x2];
+      this.renderY = this._linkedRenderY ?? cell0.y2;
+    }
+  }
+
   private _applyState(state: MapOverlayStateEntry): void {
     this.currentStateName = state.name;
-    this._box2d = [...state.box_2d];
-    this._bounds = parseBox2d(state.box_2d);
+
+    const authoredBox = [...state.box_2d];
+    // When on, draw the active state across the full grid (ghostCellDisplay is
+    // Maps-editor only — not used at runtime).
+    const cellBoxes = this._resolveCellBoxes(authoredBox);
+
+    this._cellRects = cellBoxes.map((box) => {
+      let rect = parseBox2d(box);
+      if (this._normOffset) {
+        rect = offsetRect(rect, this._normOffset.x, this._normOffset.y);
+      }
+      return rect;
+    });
+
+    // Public box_2d stays the active state's authored cell-0 placement.
+    let cell0 = parseBox2d(authoredBox);
     if (this._normOffset) {
-      this._bounds = offsetRect(
-        this._bounds,
-        this._normOffset.x,
-        this._normOffset.y,
-      );
-      this._box2d = [
-        this._bounds.y1,
-        this._bounds.x1,
-        this._bounds.y2,
-        this._bounds.x2,
-      ];
+      cell0 = offsetRect(cell0, this._normOffset.x, this._normOffset.y);
     }
+    this._bounds = unionRects(this._cellRects) ?? cell0;
+    this._box2d = [cell0.y1, cell0.x1, cell0.y2, cell0.x2];
 
     const colliders = state.collider ?? state.colliders ?? [];
-    this._colliders = colliders
-      .map((entry) => parseBox2d(entry.box_2d))
-      .map((rect) =>
-        this._normOffset
-          ? offsetRect(rect, this._normOffset.x, this._normOffset.y)
-          : rect,
-      );
+    if (colliders.length > 0 && this._cellRects.length > 0) {
+      // Authoring colliders are relative to cell 0 — tile them across cells.
+      const cell0World = this._cellRects[0]!;
+      this._colliders = [];
+      for (const cellRect of this._cellRects) {
+        const dx = cellRect.x1 - cell0World.x1;
+        const dy = cellRect.y1 - cell0World.y1;
+        for (const entry of colliders) {
+          let rect = parseBox2d(entry.box_2d);
+          if (this._normOffset) {
+            rect = offsetRect(rect, this._normOffset.x, this._normOffset.y);
+          }
+          this._colliders.push(offsetRect(rect, dx, dy));
+        }
+      }
+    } else {
+      this._colliders = [];
+    }
 
     this._blocksMovement =
       state.blocksMovement ?? this._defaultBlocksMovement ?? false;
     if (this._blocksMovement && this._colliders.length === 0) {
-      this._colliders = [this._bounds];
+      this._colliders = [...this._cellRects];
     }
 
     this.renderY =
       this._linkedRenderY ??
       (this._colliders.length > 0
-        ? this._colliders[this._colliders.length - 1].y2
+        ? this._colliders[this._colliders.length - 1]!.y2
         : this._bounds.y2);
     this._stateRenderLayer = isValidLayer(state.renderLayer)
       ? state.renderLayer
@@ -448,30 +624,40 @@ export default class MapOverlayObject {
     worldPixelW?: number,
     worldPixelH?: number,
   ): void {
+    if (isMapOverlayOffState(this.currentStateName)) return;
     if (!this._image?.complete || !this._image.naturalWidth) return;
+    if (!this._cellRects.length) return;
 
-    const { x, y } = toPixel(
-      this._bounds.x1,
-      this._bounds.y1,
-      worldNormW,
-      worldNormH,
-      worldPixelW,
-      worldPixelH,
-    );
-    const { x: x2, y: y2 } = toPixel(
-      this._bounds.x2,
-      this._bounds.y2,
-      worldNormW,
-      worldNormH,
-      worldPixelW,
-      worldPixelH,
-    );
+    for (const cell of this._cellRects) {
+      const { x, y } = toPixel(
+        cell.x1,
+        cell.y1,
+        worldNormW,
+        worldNormH,
+        worldPixelW,
+        worldPixelH,
+      );
+      const { x: x2, y: y2 } = toPixel(
+        cell.x2,
+        cell.y2,
+        worldNormW,
+        worldNormH,
+        worldPixelW,
+        worldPixelH,
+      );
 
-    const drawX = snapCanvasValue(x);
-    const drawY = snapCanvasValue(y);
-    const drawX2 = snapCanvasValue(x2);
-    const drawY2 = snapCanvasValue(y2);
+      const drawX = snapCanvasValue(x);
+      const drawY = snapCanvasValue(y);
+      const drawX2 = snapCanvasValue(x2);
+      const drawY2 = snapCanvasValue(y2);
 
-    ctx.drawImage(this._image, drawX, drawY, drawX2 - drawX, drawY2 - drawY);
+      ctx.drawImage(
+        this._image,
+        drawX,
+        drawY,
+        drawX2 - drawX,
+        drawY2 - drawY,
+      );
+    }
   }
 }

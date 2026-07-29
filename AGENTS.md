@@ -71,7 +71,7 @@ Maps and Jobs write Postgres; sync compiles a full projection into `src/data` an
 - `bootstrapWorldFromAssets` loads the map, defines character archetypes, spawns `characterPlacements` (player vs NPC), starts BGM, registers atmosphere, and binds default interact (state overlays / gameplay VFX / enterables).
 - Manifest-owned JSON, `generated.ts` / `generated-props.ts`, and `generatedWorld.ts` are read-only — import handles from `src/data/index.ts`.
 - Extend gameplay: `configureGameplay`, systems, custom widgets, overlay triggers (`setMapOverlayState`, `triggerMapEffect`), dialogue, combat, quests, inventory.
-- Overlays arrive as unified `mapOverlays` on lean `map_*.json` (`kind`: `erase` | `state` | `vfx` | `grid`).
+- Overlays arrive as unified `mapOverlays` on lean `map_*.json` (`kind`: `erase` | `state` | `vfx` | `grid`). Grid overlays follow `currentState` (`initial`/`none` = off; else tile that state via `gridDimensions` / `gridSpacing`).
 - HUD catalog + widget TS: `huds.json` + `src/widgets/`. Placements may also list `hudPlacements` when authored.
 - Replace-mode VFX may include a paired erase underlay with `clearsCollision: false` (hide pixels, keep collider) plus `linkedObstacleLabel`.
 - See `.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md`.

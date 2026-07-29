@@ -1212,6 +1212,24 @@ function normalizeMapOverlays(
           }
         : {}),
       ...((): Record<string, unknown> => {
+        const spacing = (raw as { gridSpacing?: unknown }).gridSpacing;
+        if (
+          Array.isArray(spacing) &&
+          spacing.length === 2 &&
+          Number.isFinite(Number(spacing[0])) &&
+          Number.isFinite(Number(spacing[1]))
+        ) {
+          return {
+            gridSpacing: [
+              Math.floor(Number(spacing[0])),
+              Math.floor(Number(spacing[1])),
+            ] as [number, number],
+          };
+        }
+        return {};
+      })(),
+      ...((): Record<string, unknown> => {
+        // Legacy fallback for older synced maps — prefer gridDimensions+spacing.
         const cellBboxes = normalizeCellBboxes(
           (raw as { cellBboxes?: unknown }).cellBboxes,
         );

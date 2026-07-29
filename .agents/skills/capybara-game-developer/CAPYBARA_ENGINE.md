@@ -416,7 +416,9 @@ Generated map overlay states:
 
 For the overlay vs spawned-prop decision and wiring checklist, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
 
-`mapOverlays` are authored in the generated map JSON, not as spawned props in scene code. Use them for stateful map-baked props such as doors, safes, gates, barricades, or border/background props that need to swap images. Each overlay has an `id`, an initial `currentMapStateLabel`, and a list of `states` with image URLs and `box_2d` draw bounds:
+`mapOverlays` are authored in the generated map JSON, not as spawned props in scene code. Use them for stateful map-baked props such as doors, safes, gates, barricades, or border/background props that need to swap images. Each overlay has an `id`, an initial `currentMapStateLabel`, and a list of `states` with image URLs and `box_2d` draw bounds.
+
+Detached crop/plot grids use `kind: "grid"` with per-state `box_2d`, `gridDimensions` `[cols, rows]`, and `gridSpacing` `[gapX, gapY]`. Runtime uses `currentState`: `"initial"` / `"none"` draws nothing; a real state name tiles that art across the full grid. `ghostCellDisplay` is editor-only.
 
 ```jsonc
 {
