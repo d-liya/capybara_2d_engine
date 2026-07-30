@@ -162,9 +162,9 @@ export function playAudio(
 
   const loop =
     options.loop ??
-    entry.role === "bgm" ||
-    entry.role === "ambience" ||
-    entry.looping === true;
+    (entry.role === "bgm" ||
+      entry.role === "ambience" ||
+      entry.looping === true);
   const playback = loop
     ? element
     : (element.cloneNode(true) as HTMLAudioElement);
