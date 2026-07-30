@@ -153,6 +153,12 @@ const OVERLAY_MASK_REPLACE_EDGE_TOLERANCE = 18;
 const OVERLAY_MASK_REPLACE_IOU_THRESHOLD = 0.82;
 /** Tight change patches often sit fully inside the mask silhouette. */
 const OVERLAY_MASK_REPLACE_CONTAINMENT_THRESHOLD = 0.72;
+/**
+ * Fraction of a sprite's bounds that must lie under an erase patch before we
+ * clear that sprite's collision. Neighbors that only clip the erase edge
+ * (e.g. a wheelbarrow against a crop plot) stay solid.
+ */
+const ERASE_COLLISION_COVERAGE_THRESHOLD = 0.65;
 
 function rectArea(rect: Rect): number {
   return Math.max(0, rect.x2 - rect.x1) * Math.max(0, rect.y2 - rect.y1);
@@ -1030,7 +1036,12 @@ export default class GameMap {
     }
   }
 
-  /** Clear sprite collision under unified `kind: "erase"` mapOverlays. */
+  /**
+   * Clear sprite collision under unified `kind: "erase"` mapOverlays.
+   * Uses coverage (intersection / sprite area), not label matching — authored
+   * labels are unreliable, and AABB overlap alone would wipe neighbors that
+   * only clip the erase edge.
+   */
   private _applyEraseOverlayCollisions(
     eraseOverlays: MapOverlayEntry[],
     panelObjects: MapObject[],
@@ -1044,8 +1055,16 @@ export default class GameMap {
       const bounds = normOffset
         ? offsetRect(rawBounds, normOffset.x, normOffset.y)
         : rawBounds;
+      if (rectArea(bounds) <= 0) continue;
+
       for (const obj of panelObjects) {
-        if (rectsOverlap(obj.getBounds(), bounds)) {
+        if (obj.type.toLowerCase() === "boundary") continue;
+        const objBounds = obj.getBounds();
+        const objArea = rectArea(objBounds);
+        if (objArea <= 0) continue;
+        const intersection = rectIntersectionArea(objBounds, bounds);
+        if (intersection <= 0) continue;
+        if (intersection / objArea >= ERASE_COLLISION_COVERAGE_THRESHOLD) {
           obj.applyEraseOverwrite();
         }
       }
