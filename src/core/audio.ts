@@ -22,12 +22,103 @@ const cache = new Map<string, HTMLAudioElement>();
 const activeByChannel = new Map<AudioChannel, Set<HTMLAudioElement>>();
 const activeByName = new Map<string, Set<HTMLAudioElement>>();
 
+/** Default gain when callers omit `volume` (and the catalog has none). */
+const DEFAULT_VOLUME_BY_ROLE: Partial<Record<CommonAssetRole, number>> = {
+  bgm: 0.05,
+  ambience: 1,
+  sfx: 1,
+  voice: 1,
+  dialogue: 1,
+};
+
+/**
+ * Soft edge length for looping clips. Fades the start up and the end down so
+ * imperfect loop points don't click when HTMLAudio wraps.
+ */
+const LOOP_EDGE_FADE_SEC = 2.5;
+
+type LoopEdgeFade = {
+  targetVolume: number;
+  rafId: number;
+};
+
+const loopEdgeFades = new WeakMap<HTMLAudioElement, LoopEdgeFade>();
+
 function isAudioEntry(entry: CommonAssetEntry): boolean {
   return Boolean(
     entry.name &&
       entry.url &&
       (entry.role || AUDIO_URL_PATTERN.test(entry.url)),
   );
+}
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function smoothstep(t: number): number {
+  const x = clamp01(t);
+  return x * x * (3 - 2 * x);
+}
+
+function resolveTargetVolume(
+  entry: CommonAssetEntry,
+  options: AudioPlayOptions,
+): number {
+  const roleDefault =
+    (entry.role && DEFAULT_VOLUME_BY_ROLE[entry.role]) ?? 1;
+  const raw =
+    typeof options.volume === "number"
+      ? options.volume
+      : typeof entry.volume === "number"
+        ? entry.volume
+        : roleDefault;
+  return clamp01(raw);
+}
+
+function stopLoopEdgeFade(playback: HTMLAudioElement): void {
+  const state = loopEdgeFades.get(playback);
+  if (!state) return;
+  cancelAnimationFrame(state.rafId);
+  loopEdgeFades.delete(playback);
+}
+
+/**
+ * While a clip loops, scale gain by position: quiet at the head/tail, full in
+ * the middle. Caps fade length so short clips still reach the target volume.
+ */
+function loopEdgeFactor(playback: HTMLAudioElement): number {
+  const duration = playback.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return 0;
+  const fade = Math.min(LOOP_EDGE_FADE_SEC, duration * 0.25);
+  if (fade <= 0) return 1;
+  const t = playback.currentTime;
+  if (t < fade) return smoothstep(t / fade);
+  if (t > duration - fade) return smoothstep((duration - t) / fade);
+  return 1;
+}
+
+function startLoopEdgeFade(
+  playback: HTMLAudioElement,
+  targetVolume: number,
+): void {
+  stopLoopEdgeFade(playback);
+
+  const tick = () => {
+    const state = loopEdgeFades.get(playback);
+    if (!state) return;
+
+    if (!playback.paused) {
+      playback.volume = clamp01(state.targetVolume * loopEdgeFactor(playback));
+    }
+
+    state.rafId = requestAnimationFrame(tick);
+  };
+
+  const state: LoopEdgeFade = { targetVolume, rafId: 0 };
+  loopEdgeFades.set(playback, state);
+  playback.volume = clamp01(targetVolume * loopEdgeFactor(playback));
+  state.rafId = requestAnimationFrame(tick);
 }
 
 function trackActive(
@@ -46,12 +137,14 @@ function trackActive(
   const untrack = () => {
     byChannel.delete(playback);
     byName.delete(playback);
+    stopLoopEdgeFade(playback);
   };
   playback.addEventListener("ended", untrack, { once: true });
   playback.addEventListener("pause", untrack, { once: true });
 }
 
 function stopElement(element: HTMLAudioElement): void {
+  stopLoopEdgeFade(element);
   element.pause();
   element.currentTime = 0;
 }
@@ -169,13 +262,19 @@ export function playAudio(
     ? element
     : (element.cloneNode(true) as HTMLAudioElement);
   playback.loop = loop;
-  playback.volume = Math.min(1, Math.max(0, options.volume ?? 1));
+  const targetVolume = resolveTargetVolume(entry, options);
   if (options.restart || (!loop && playback.currentTime > 0)) {
     playback.currentTime = 0;
   }
 
   const channel = channelFor(entry, options.channel);
   trackActive(name, channel, playback);
+  if (loop) {
+    startLoopEdgeFade(playback, targetVolume);
+  } else {
+    stopLoopEdgeFade(playback);
+    playback.volume = targetVolume;
+  }
   playback.play().catch(() => {});
   return playback;
 }

@@ -503,7 +503,8 @@ function pickStartMap(opts: BootstrapWorldOptions): BootstrapMapEntry {
 
 const DEFAULT_BGM_VOLUME = 0.05;
 const DEFAULT_SFX_VOLUME = 0.5;
-const DEFAULT_AMBIENCE_VOLUME = 0.15;
+/** Ambience beds sit at full gain; BGM stays quiet underneath. */
+const DEFAULT_AMBIENCE_VOLUME = 1;
 
 type CommonAudioClip = NonNullable<
   BootstrapWorldOptions["commonAudio"]
@@ -579,16 +580,8 @@ function playClip(
   opts: { loop: boolean; defaultVolume: number },
 ): void {
   const volume = clampVolume(clip.volume, opts.defaultVolume);
-  const audio = getAudio(clip.name);
-  if (audio) {
-    audio.loop = opts.loop;
-    audio.volume = volume;
-    void audio.play().catch(() => {
-      playAudio(clip.name, { loop: opts.loop, volume });
-    });
-  } else {
-    playAudio(clip.name, { loop: opts.loop, volume });
-  }
+  // Always go through playAudio so loop edge fades / role defaults apply.
+  playAudio(clip.name, { loop: opts.loop, volume });
 }
 
 function clearMapLocal(game: GameAPI): void {
