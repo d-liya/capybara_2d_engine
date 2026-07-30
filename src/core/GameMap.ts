@@ -410,6 +410,7 @@ export default class GameMap {
     this._atmosphere = (mapData.atmospherePlacements ?? [])
       .filter(
         (entry) =>
+          entry.enabled !== false &&
           Array.isArray(entry.box_2d) &&
           entry.box_2d.length >= 4 &&
           Boolean(entry.spriteSheetUrl?.trim() || entry.url?.trim()),

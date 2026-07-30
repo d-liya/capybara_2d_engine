@@ -32,7 +32,7 @@ export const GENERATED_ASSET_CONTRACT_VERSION = 1 as const;
 export type GeneratedAssetContractVersion =
   typeof GENERATED_ASSET_CONTRACT_VERSION;
 
-export type AudioAssetKind = "bgm" | "sfx" | "voice";
+export type AudioAssetKind = "bgm" | "sfx" | "ambience" | "voice";
 
 /** One generated audio asset. Unknown extra generator metadata is preserved. */
 export interface GeneratedAudioAsset {
@@ -44,11 +44,14 @@ export interface GeneratedAudioAsset {
   /** Legacy generator alias for `kind`; `tts`/`dialogue` normalize to `voice`. */
   role?: AudioAssetKind | "tts" | "dialogue";
   loop?: boolean;
+  looping?: boolean;
   volume?: number;
   channel?: string;
   durationMs?: number;
   transcript?: string;
   characterId?: string;
+  autoplay?: boolean;
+  parentAssetId?: string;
   [key: string]: unknown;
 }
 
@@ -113,6 +116,14 @@ export interface GeneratedAtmospherePlacement {
   frameCount?: number;
   frameWidth?: number;
   frameHeight?: number;
+  layer?: "far" | "near";
+  motion?: "drift" | "orbit" | "rise_loop";
+  speedX?: number;
+  speedY?: number;
+  wrap?: boolean;
+  amplitude?: number;
+  lifetimeSec?: number;
+  enabled?: boolean;
 }
 
 /** Spawn-ready feet anchor derived from a generated character placement. */

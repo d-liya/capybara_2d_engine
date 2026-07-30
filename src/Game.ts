@@ -76,7 +76,8 @@ function normalizeCommonRole(
   entry: GeneratedAudioAsset,
 ): CommonAssetRole | undefined {
   const raw = entry.kind ?? entry.role;
-  if (raw === "bgm" || raw === "sfx" || raw === "voice") return raw;
+  if (raw === "bgm" || raw === "sfx" || raw === "ambience" || raw === "voice")
+    return raw;
   if (raw === "dialogue" || raw === "tts") return "dialogue";
   return undefined;
 }
@@ -103,6 +104,11 @@ function generatedAudioToCommon(entry: GeneratedAudioAsset): CommonAssetEntry {
       typeof merged.transcript === "string" ? merged.transcript : undefined,
     durationMs:
       typeof merged.durationMs === "number" ? merged.durationMs : undefined,
+    volume: typeof merged.volume === "number" ? merged.volume : undefined,
+    autoplay:
+      typeof merged.autoplay === "boolean" ? merged.autoplay : undefined,
+    looping:
+      typeof merged.looping === "boolean" ? merged.looping : undefined,
   };
 }
 
@@ -235,7 +241,7 @@ export function createGame(config: GameConfig): GameAPI {
           ? "bgm"
           : entry?.role === "voice" || entry?.role === "dialogue"
             ? "voice"
-            : entry?.role === "sfx"
+            : entry?.role === "sfx" || entry?.role === "ambience"
               ? "sfx"
               : "audio");
       const handle: AudioPlaybackHandle = {

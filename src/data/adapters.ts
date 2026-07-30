@@ -396,6 +396,14 @@ export interface GeneratedAtmospherePlacement {
   frameCount?: number;
   frameWidth?: number;
   frameHeight?: number;
+  layer?: "far" | "near";
+  motion?: "drift" | "orbit" | "rise_loop";
+  speedX?: number;
+  speedY?: number;
+  wrap?: boolean;
+  amplitude?: number;
+  lifetimeSec?: number;
+  enabled?: boolean;
 }
 
 /** Sidecar file shape: `map_<id>.placements.json`. */

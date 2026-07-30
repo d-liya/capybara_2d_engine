@@ -320,6 +320,8 @@ export type BootstrapWorldOptions = {
     volume?: number;
     /** Start on map enter when true. */
     autoplay?: boolean;
+    /** Loop when true (ambience beds). */
+    looping?: boolean;
   }>;
   cameraEdgePadding?: number;
   /**
@@ -501,6 +503,7 @@ function pickStartMap(opts: BootstrapWorldOptions): BootstrapMapEntry {
 
 const DEFAULT_BGM_VOLUME = 0.05;
 const DEFAULT_SFX_VOLUME = 0.5;
+const DEFAULT_AMBIENCE_VOLUME = 0.15;
 
 type CommonAudioClip = NonNullable<
   BootstrapWorldOptions["commonAudio"]
@@ -526,7 +529,7 @@ function audioBelongsToMap(
 function findMapAudio(
   commonAudio: BootstrapWorldOptions["commonAudio"],
   mapAssetId: string | null | undefined,
-  role: "bgm" | "sfx",
+  role: "bgm" | "sfx" | "ambience",
 ): CommonAudioClip[] {
   if (!commonAudio?.length) return [];
   return commonAudio.filter(
@@ -1299,6 +1302,7 @@ export function bootstrapWorldFromAssets(
         const role =
           a.role === "bgm" ||
           a.role === "sfx" ||
+          a.role === "ambience" ||
           a.role === "voice" ||
           a.role === "dialogue" ||
           a.role === "tts"
@@ -1327,6 +1331,7 @@ export function bootstrapWorldFromAssets(
           parentAssetId: a.parentAssetId,
           volume: a.volume,
           autoplay: a.autoplay,
+          looping: a.looping,
         };
       }),
     });
@@ -1421,6 +1426,17 @@ export function bootstrapWorldFromAssets(
 
     if (nextBgm && nextBgm.autoplay !== false) {
       playClip(nextBgm, { loop: true, defaultVolume: DEFAULT_BGM_VOLUME });
+    }
+
+    for (const bed of findMapAudio(opts.commonAudio, mapAssetId, "ambience")) {
+      if (bed.autoplay !== true) {
+        stopNamedAudio(bed.name);
+        continue;
+      }
+      playClip(bed, {
+        loop: bed.looping !== false,
+        defaultVolume: DEFAULT_AMBIENCE_VOLUME,
+      });
     }
 
     for (const sfx of findMapAudio(opts.commonAudio, mapAssetId, "sfx")) {

@@ -143,7 +143,7 @@ function channelFor(
     ? "bgm"
     : entry.role === "voice" || entry.role === "dialogue"
       ? "voice"
-      : entry.role === "sfx"
+      : entry.role === "sfx" || entry.role === "ambience"
         ? "sfx"
         : "audio";
 }
@@ -160,7 +160,11 @@ export function playAudio(
   const element = getAudio(name);
   if (!element || !entry) return null;
 
-  const loop = options.loop ?? entry.role === "bgm";
+  const loop =
+    options.loop ??
+    entry.role === "bgm" ||
+    entry.role === "ambience" ||
+    entry.looping === true;
   const playback = loop
     ? element
     : (element.cloneNode(true) as HTMLAudioElement);

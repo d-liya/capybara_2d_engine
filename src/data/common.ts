@@ -1,6 +1,6 @@
 import common from "./common.json";
 
-export type CommonAssetRole = "bgm" | "sfx" | "voice" | "dialogue";
+export type CommonAssetRole = "bgm" | "sfx" | "ambience" | "voice" | "dialogue";
 
 export interface CommonAssetEntry {
   name: string;
@@ -12,6 +12,9 @@ export interface CommonAssetEntry {
   parentAssetId?: string;
   transcript?: string;
   durationMs?: number;
+  volume?: number;
+  autoplay?: boolean;
+  looping?: boolean;
 }
 
 export const commonAssets = common as CommonAssetEntry[];
