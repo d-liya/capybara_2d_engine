@@ -1,7 +1,7 @@
 /**
  * Public Game facade TypeScript contract.
  *
- * Pair with docs/CAPYBARA_ENGINE.md for behavior and src/Game.ts for the
+ * Pair with `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md` for behavior and src/Game.ts for the
  * runtime entrypoint. Bundle this file with Game.ts for one-pass agent tasks.
  *
  * PathPoint is the reference example. Sibling types below follow the same

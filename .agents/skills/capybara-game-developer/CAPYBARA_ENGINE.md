@@ -11,17 +11,15 @@ Treat the repo as four layers:
    - spawn/patch/query entities
    - register resources, systems, inputs, and widgets
    - resolve generated assets/audio
-2. **SDK facade** — `src/sdk/index.ts` plus `docs/SDK_FACADE.md`
-   - auth/session
-   - save/load
-   - save/load
-3. **Generated assets** — `src/data/` JSON (`map_*.json`, `char_*.json`, `prop_*.json`, `common.json`) plus `src/scenes/SCENES.md`
-   - current map handles, map VFX/spritesheets, characters, animations, props, widgets, audio, placement targets
-   - active/recommended scene composition
-4. **Gameplay modules** — `src/types`, `src/archetypes`, `src/systems`, `src/inputs`, `src/widgets`, `src/scenes`
+2. **SDK facade** — `src/sdk/index.ts` plus [SDK_FACADE.md](SDK_FACADE.md)
+   - auth/session, save/load, storage, multiplayer
+3. **Generated assets** — `src/data/capybara-assets.json` + lean `map_*.json` / `.sprites.json` / `.placements.json` / `char_*.json` / `prop_*.json` / `huds.json` / `common.json`, with handles from `generated.ts` re-exported by `src/data/index.ts`
+   - after sync, `generatedWorld.ts` → `bootstrapWorldFromAssets` already loads the start map, defines archetypes, spawns `characterPlacements`, starts BGM, loads atmosphere from placements, and binds default interact
+   - active scene composition: `src/scenes/SCENES.md`
+4. **Gameplay modules** — `src/types`, `src/archetypes`, `src/systems`, `src/inputs`, `src/widgets`, `src/scenes` (`configureGameplay` in `mainScene.ts`)
    - game-specific behavior built on the facades above
 
-Avoid inspecting `src/core/` for normal gameplay work. Prefer lean map JSON over sprites sidecars unless you need polygons. Avoid SDK internals except `src/sdk/index.ts`.
+Avoid inspecting `src/core/` for normal gameplay work. Prefer lean map JSON; open sprites sidecars for polygons and placements sidecars for placement lists. Avoid SDK internals except `src/sdk/index.ts`.
 
 Keep game UI clean. Do not render developer/debug errors, stack traces, raw exception messages, or failed SDK response payloads into HUD/dialogue widgets. Log technical details to the browser console with `console.error(...)` / `console.warn(...)`; if the player needs feedback, show only neutral gameplay text such as "Something went wrong" or "Try again".
 
@@ -32,22 +30,27 @@ This section is the engine-side reference map once the task is clearly gameplay-
 For a gameplay feature, start with:
 
 ```txt
-src/data/index.ts              # exported handles
-src/data/map_*.json            # lean map layout / placement
+src/data/capybara-assets.json  # revision + ownership (absent until sync)
+src/data/index.ts              # exported handles + adapters
+src/data/map_*.json            # lean map layout / overlays
+src/data/map_*.placements.json # placement / characters / HUD / atmosphere
 src/data/char_*.json           # characters / animations
 src/data/prop_*.json           # prop groups / items
 src/data/common.json           # shared art / audio names
+src/scenes/generatedWorld.ts   # what bootstrap already wired
 src/scenes/SCENES.md
+src/scenes/mainScene.ts        # configureGameplay hook
 ```
 
 Then read only the targeted public reference that matches the task:
 
 ```txt
-docs/SDK_FACADE.md                 # auth, save/load
+.agents/skills/capybara-game-developer/SDK_FACADE.md  # auth, save/load
+.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md  # overlays, travel, HUD scaffolds
 docs/recipes/farming-sim.md        # day/season/crops/gold
 docs/recipes/map-placement.md      # generated map placement zones
 docs/recipes/inventory-tools.md    # hotbar/tool/cursor attachment
-docs/recipes/npc-dialogue.md       # nearby NPC dialogue; scripted default
+docs/recipes/npc-primitives.md     # NPC state, proximity, barks
 docs/recipes/save-load.md          # persistent game state
 docs/recipes/hud-widget.md         # generated HUD widget adaptation
 docs/recipes/season-atmosphere.md  # tint/overlay atmosphere
@@ -58,16 +61,17 @@ docs/recipes/world-pointer-input.md # click/touch aiming and world targeting
 docs/recipes/mobile-touch-controls.md # floating joystick + action buttons (keyboard parity)
 ```
 
-Use `src/Game.ts` as reference only when you need exact TypeScript signatures.
+Use `src/Game.types.ts` / `src/Game.ts` when you need exact TypeScript signatures.
 
 ## Manifest precedence
 
 If generated/current-context docs conflict:
 
-1. Generated JSON / exports in `src/data/` win for asset handles, character handles, animation names, prop groups/items, audio names, and placement target facts.
-2. `src/scenes/SCENES.md` wins for the currently active/recommended scene structure.
-3. Widget factory names come from exports under `src/widgets/`.
-4. After implementation, update `src/scenes/SCENES.md` to match reality.
+1. `src/data/capybara-assets.json` + generated JSON / exports in `src/data/` win for asset handles, character handles, animation names, prop groups/items, audio names, and placement target facts.
+2. `src/scenes/generatedWorld.ts` + `bootstrapWorldFromAssets` win for what is already live this revision.
+3. `src/scenes/SCENES.md` wins for the currently active/recommended scene structure.
+4. Widget factory names come from exports under `src/widgets/` (and `huds.json` for synced scaffolds).
+5. After implementation, update `src/scenes/SCENES.md` to match reality.
 
 Do not use stale example handles from recipes or scene manifests when `src/data/` lists different generated names.
 
@@ -75,15 +79,17 @@ Do not use stale example handles from recipes or scene manifests when `src/data/
 
 ### Scene orchestration
 
-Scenes live in `src/scenes/` and should orchestrate only:
+Prefer the synced path: `createMainScene` → `createGeneratedWorld` → `bootstrapWorldFromAssets`, then put custom logic in `configureGameplay` (`src/scenes/mainScene.ts`). Do not re-implement map load, character spawn, BGM, or default interact.
+
+When you must orchestrate a scene yourself (tools / tests / no synced maps), scenes should only:
 
 1. preload assets/audio if needed
-2. call `createGame(...)`
+2. call `createGame(...)` (or rely on bootstrap)
 3. register resources
 4. register archetypes
 5. register systems
 6. bind inputs
-7. spawn initial entities
+7. spawn entities bootstrap does not own
 8. mount widgets
 9. start any async SDK/save bootstrap without blocking scene return
 10. return the `GameAPI`
@@ -326,9 +332,9 @@ Generated map JSON is **flat**. Prefer a **lean map + sidecars** so agents can r
 | ---- | -------- |
 | `map_<id>.json` | `name`, `url`, `walkableBoxes`, `mapOverlays`, optional legacy `masks` / `spriteSheets` |
 | `map_<id>.sprites.json` | `{ "sprites": [ ... ] }` — cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
-| `map_<id>.placements.json` | `{ "placement", "characterPlacements", "hudPlacements" }` |
+| `map_<id>.placements.json` | `{ "placement", "characterPlacements", "hudPlacements", "atmospherePlacements" }` |
 
-Register with `mergeMapSidecars`, then pass the merged handle to `toMapData`:
+Register with `mergeMapSidecars` (sync does this in `generated.ts`), then pass the merged handle to `toMapData`:
 
 ```ts
 import mapMainBase from "./map_main.json";
@@ -340,6 +346,7 @@ export const mapMain = mergeMapSidecars(mapMainBase, {
 });
 ```
 
+`toMapData` copies `characterPlacements` and `atmospherePlacements` onto `GameMapData` (atmosphere is applied by the map runtime). `hudPlacements` stay on the merged `GeneratedMap` for gameplay to mount — they are not auto-mounted.
 Lean `map_*.json` shape:
 
 ```jsonc
@@ -463,11 +470,11 @@ Physical collision is optional per overlay state:
 
 Optional render placement can be set with `renderLayer: "background" | "ground" | "occluder" | "prop"` on the overlay or individual state. Default is `"occluder"`.
 
-Animations/facing (animation names come from character JSON in `src/data/`):
+Animations/facing (adapters emit sheet names `{clip}_{facing}`, e.g. `walk_front`, `idle_right` — copy exact names from character JSON):
 
 ```ts
-game.setEntityAnimation(playerId, "<character>_walk");
-game.setEntityAnimation(playerId, "<character>_default_animation");
+game.setEntityAnimation(playerId, "walk_front");
+game.setEntityAnimation(playerId, "idle_front");
 
 // Generated characters face viewer's right by default.
 game.setEntityFacingX(npcId, player.x < npc.x ? -1 : 1);
@@ -486,7 +493,7 @@ const npcId = game.spawnAtFeet("villager", 520, 760);
 game.setEntityDestination(npcId, { x: 780, y: 640 }, { speed: 30 });
 ```
 
-Typical destination speeds are lower than player speeds because large sprites/camera motion make movement feel faster than the raw number: use about `12`–`30` for slow NPC patrols, `40`–`80` for brisk NPCs/enemies, and `160`–`220` for player control.
+Typical destination speeds are lower than player speeds because large sprites/camera motion make movement feel faster than the raw number: use about `12`–`30` for slow NPC patrols, `40`–`80` for brisk NPCs/enemies. Synced player walk speed is height-derived and usually lands in roughly `55`–`95` (bootstrap defaults); hand-tuned players often sit higher.
 
 Useful calls:
 
@@ -503,7 +510,7 @@ Navigation emits:
 - `navigation:arrived`
 - `navigation:failed`
 
-While an entity is following a destination, the runtime switches to a walk/run spritesheet and updates facing from movement direction. When the entity arrives, is blocked, or `clearEntityDestination` is called, it switches back to the idle/default spritesheet. This is automatic when the entity's `spriteSheets` use conventional names (`walk`/`run` for movement, `default_animation`/`idle` for stopping). Check exact names in `src/data/` generated JSON; you do not need to call `setEntityAnimation` for basic destination movement.
+While an entity is following a destination, the runtime switches to a walk/run spritesheet and updates facing from movement direction. When the entity arrives, is blocked, or `clearEntityDestination` is called, it switches back to the idle/default spritesheet. This is automatic when the entity's `spriteSheets` use conventional names (`walk` / `walk_*` / `run` for movement, `idle` / `idle_*` / `default_animation` for stopping). Synced directional packs use `walk_front`, `idle_right`, etc. Check exact names in `src/data/` generated JSON; you do not need to call `setEntityAnimation` for basic destination movement.
 
 Defaults are intentionally simple: static map obstacles only, no crowd avoidance, no entity/entity pushing. Use `cellSize` to tune accuracy/performance; smaller values are more accurate but slower. If the target point is inside a collider, the runtime snaps to a nearby walkable cell by default.
 
@@ -516,7 +523,7 @@ For full patrol-loop code, including clearing stale `arrived` / failed navigatio
 - WASD and arrow keys move the controlled entity.
 - Movement uses the entity's `speed` component.
 - Speed is normalized map units per second, matching custom systems that move entities with `speed * dt`.
-- Typical player speed is `160`–`220`; default to about `190`.
+- Typical synced / bootstrap player speed is about `55`–`95` (height-derived). Hand-tuned arcade players may go higher; keep NPCs slower than the player unless they are chasers.
 - Collision uses generated map walkable/collider data.
 - Diagonal movement is supported by the runtime movement input.
 - Horizontal facing updates automatically while the controlled actor moves left/right.
@@ -683,7 +690,7 @@ export function playUiClickSfx() {
 }
 ```
 
-`playAudio(name)` only plays existing named audio assets and does not expose loop/volume options. Prefer `getAudio(...)` for BGM and procedural WebAudio for new gameplay/UI SFX.
+`playAudio(name, options?)` plays existing named audio assets and accepts `{ loop?, volume?, channel?, restart? }`. Prefer `playAudio(..., { loop: true, volume: 0.05 })` or `getAudio(...)` for BGM, `playDialogue(name)` for voiced lines, and procedural WebAudio for new gameplay/UI SFX when no asset exists.
 
 ### Feedback effects
 
@@ -707,7 +714,7 @@ Use `src/data/` character JSON animation names as the source of truth.
 
 ## SDK rules
 
-This engine guide only identifies when SDK capabilities are appropriate. For import paths, lazy initialization, auth/session behavior, save/load, storage, and multiplayer contracts, follow `docs/SDK_FACADE.md`.
+This engine guide only identifies when SDK capabilities are appropriate. For import paths, lazy initialization, auth/session behavior, save/load, storage, and multiplayer contracts, follow [SDK_FACADE.md](SDK_FACADE.md).
 
 ## If the public surface is insufficient
 

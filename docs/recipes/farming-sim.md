@@ -10,23 +10,23 @@ Use this for day/season/crop/gold loops.
 ## Read first
 
 - `src/data/` generated JSON
-- `docs/CAPYBARA_ENGINE.md`
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md`
 - `docs/recipes/map-placement.md`
 - `docs/recipes/inventory-tools.md`
 - `docs/recipes/save-load.md` only if persistence/autosave is requested
 
 `src/data/` prop/map JSON wins for actual generated prop names, crop lifecycle item names, and placement ids. Widget factory names come from `src/widgets/` exports.
 
-## Live reference (this repo)
+## Pattern reference
 
-`src/scenes/FarmScene.ts` + `src/systems/FarmingSystem.ts` implement a minimal loop:
+This recipe is a planning/implementation pattern — there is no `FarmScene.ts` / `FarmingSystem.ts` in the template. Build the loop in `configureGameplay` + `src/systems/` using placement grids from synced map JSON:
 
-- Two generated zones (`crop-field-1`, `crop-field-2`) subdivided with `placement.bounds` and `gridDimensions` (`[cols, rows]`, e.g. `[4, 3]` = 4 columns × 3 rows)
-- `P` / `H` keyboard actions plant and harvest the nearest empty/mature cell within range
+- Generated zones subdivided with `placement.bounds` and `gridDimensions` (`[cols, rows]`, e.g. `[4, 3]` = 4 columns × 3 rows)
+- Keyboard or touch actions plant and harvest the nearest empty/mature cell within range
 - Proximity from `game.getEntityFeet(...)`; crop overlays spawned with `spawnCentered` + `getPropItemUrl`
-- Automatic timed growth through 5 prop stages (0–4), not the full hoe/water/seed day loop below
+- Automatic timed growth through prop stages, or a fuller hoe/water/seed day loop below
 
-Use that code when wiring placement grids; use the sections below for fuller day/season/economy sims.
+Use the sections below for fuller day/season/economy sims.
 
 ## HUD visibility
 

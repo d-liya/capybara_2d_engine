@@ -9,7 +9,7 @@ Use this for action RPG attacks, shooters, bullet/projectile mechanics, simple e
 
 ## Read first
 
-- `docs/CAPYBARA_ENGINE.md`
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md`
 - `docs/recipes/shooter-game-design.md` for shooter/action-combat convention checklist
 - `src/data/` generated JSON for actual character, enemy, weapon, projectile, prop, HUD, and audio handles
 - `docs/recipes/world-pointer-input.md` if attacks aim at the pointer or use click/touch targeting

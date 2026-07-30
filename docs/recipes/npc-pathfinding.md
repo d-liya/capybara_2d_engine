@@ -83,7 +83,8 @@ if (path.status === "found") {
 The entity must have `spriteSheets` on its archetype with conventional names from `src/data/` generated JSON:
 
 - **Moving:** first sheet whose `name` contains `walk` or `run` (for example `char_marta_walk`)
-- **Stopped:** first sheet whose `name` contains `default_animation` or `idle` (for example `char_marta_default_animation`)
+- **Stopped:** first sheet whose `name` contains `default_animation` or `idle` (for example `idle_front`, or legacy `char_marta_default_animation`)
+- **Moving:** sheet whose `name` contains `walk` / `run` / `walking` (synced packs use `walk_front`, `walk_right`, …)
 
 The runtime switches to walk/run each frame while following the path and updates horizontal facing from movement direction (left is the same sheet mirrored).
 

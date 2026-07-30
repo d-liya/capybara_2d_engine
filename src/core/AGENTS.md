@@ -5,7 +5,7 @@ Do not read or edit files in this directory by default.
 Gameplay features should be implemented through:
 
 - `src/Game.ts` / `GameAPI`
-- `.claude/skills/capybara-game-developer/SKILL.md`
+- `.agents/skills/capybara-game-developer/SKILL.md`
 - `src/scenes/`
 - `src/archetypes/`
 - `src/systems/`

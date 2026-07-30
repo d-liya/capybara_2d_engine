@@ -28,7 +28,7 @@ npm run build
 - **`src/Game.ts`** — Public facade API (`createGame()`). This is the primary interface for all gameplay code.
 - **`src/main.ts`** — Bootstrap entrypoint. Preloads assets/audio, creates loading gate, delegates to scene creation.
 - **`src/core/`** — Runtime internals (camera, input, map, rendering, widgets manager). Do NOT import from here directly; use the GameAPI facade.
-- **`src/scenes/`** — Scene entrypoints and orchestration. Each scene calls `createGame()` and orchestrates resources, archetypes, systems, inputs, and widgets.
+- **`src/scenes/`** — Scene entrypoints. Prefer `createMainScene` → `createGeneratedWorld` → `bootstrapWorldFromAssets`, then extend via `configureGameplay` in `mainScene.ts`.
 - **`src/systems/`** — Per-frame gameplay logic (e.g., footstep audio, AI waves, combat). Systems receive `(dt, game)` and run each frame.
 - **`src/archetypes/`** — Reusable entity defaults (body/render prefabs).
 - **`src/widgets/`** — DOM HUD plugins mounted via `game.useWidget()`.
@@ -39,7 +39,7 @@ npm run build
 
 1. **Generated assets** live in `src/data/` as JSON (revision ownership in `capybara-assets.json`)
 2. **Adapters** in `src/data/adapters.ts` convert flat JSON to engine shapes: `toMapData()`, `mergeMapSidecars()` / `mergeMapSprites()`, `toArchetype()`, `toPlayerSprite()`. Map v2 cut-out sprites live in `map_*.sprites.json` and placements in `map_*.placements.json`; both are merged before `toMapData`.
-3. **Hosted / synced projects**: `src/scenes/generatedWorld.ts` calls `bootstrapWorldFromAssets` — map load, archetypes, `characterPlacements`, BGM, atmosphere, default interact are already live. Extend via `configureGameplay` / systems / widgets.
+3. **Hosted / synced projects**: `src/scenes/generatedWorld.ts` calls `bootstrapWorldFromAssets` — map load, archetypes, `characterPlacements`, BGM, atmosphere (via `toMapData` placements), and default interact are already live. Extend via `configureGameplay` / systems / widgets.
 4. **Systems** run per-frame logic via the GameAPI facade
 
 ## Key Architectural Rules
@@ -68,11 +68,11 @@ This project uses **documentation-driven development**. When working with genera
 
 Maps and Jobs write Postgres; sync compiles a full projection into `src/data` and regenerates `generatedWorld.ts`. After sync:
 
-- `bootstrapWorldFromAssets` loads the map, defines character archetypes, spawns `characterPlacements` (player vs NPC), starts BGM, registers atmosphere, and binds default interact (state overlays / gameplay VFX / enterables).
+- `bootstrapWorldFromAssets` loads the map, defines character archetypes, spawns `characterPlacements` (player vs NPC), starts map-scoped BGM, loads atmosphere from `atmospherePlacements`, and binds default interact (state overlays / gameplay VFX / enterables, including synthetic return exits when needed).
 - Manifest-owned JSON, `generated.ts` / `generated-props.ts`, and `generatedWorld.ts` are read-only — import handles from `src/data/index.ts`.
-- Extend gameplay: `configureGameplay`, systems, custom widgets, overlay triggers (`setMapOverlayState`, `triggerMapEffect`), dialogue, combat, quests, inventory.
+- Extend gameplay: `configureGameplay`, systems, custom widgets, overlay triggers (`setMapOverlayState`, `triggerMapEffect`), dialogue, combat, quests, inventory. Bootstrap does **not** auto-spawn `placement[]` props or mount `hudPlacements`.
 - Overlays arrive as unified `mapOverlays` on lean `map_*.json` (`kind`: `erase` | `state` | `vfx` | `grid`). Grid overlays follow `currentState` (`initial`/`none` = off; else tile that state via `gridDimensions` / `gridSpacing`).
-- HUD catalog + widget TS: `huds.json` + `src/widgets/`. Placements may also list `hudPlacements` when authored.
+- HUD catalog + widget TS: `huds.json` + `src/widgets/`. Placements may also list `hudPlacements` when authored — mount them in gameplay.
 - Replace-mode VFX may include a paired erase underlay with `clearsCollision: false` (hide pixels, keep collider) plus `linkedObstacleLabel`.
 - See `.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md`.
 
@@ -103,18 +103,12 @@ Scenes should:
 - Start SDK/save-load as async tasks that update resources when complete
 - Configure touch action buttons to match keyboard bindings (or pass `touchControls: false` only for non-interactive tools)
 
-Example — extend gameplay after bootstrap:
+Example — extend gameplay after bootstrap (do **not** re-bind `interact` unless you disable default interact or claim it via `onInteract`):
 
 ```typescript
 import type { GameAPI } from "../Game";
 
 export function configureGameplay(game: GameAPI) {
-  game.bindInputAction("interact", ["KeyE"]);
-  game.onInputAction("interact", ({ phase }) => {
-    if (phase !== "down") return;
-    game.emit("player:interact");
-  });
-
   game.registerSystem("quest", (_dt, g) => {
     // custom quest / dialogue / combat on top of the bootstrapped world
   });
@@ -162,8 +156,8 @@ const enemyId = game.spawnAtFeet("enemy", 300, 400, { health: 100 });
 // Update
 game.patch(enemyId, { health: 80 });
 
-// Query
-const enemies = game.query({ tags: ["enemy"] });
+// Query — predicate over components (returns EntityId[])
+const enemies = game.query((c) => c.kind === "enemy");
 
 // Destroy
 game.destroy(enemyId);
@@ -173,15 +167,23 @@ game.destroy(enemyId);
 
 ```typescript
 game.registerSystem("combat", (dt, game) => {
-  const player = game.getControlledEntity();
-  const enemies = game.query({ tags: ["enemy"] });
+  const playerId = game.getControlledEntity();
+  if (!playerId) return;
+  const player = game.get(playerId);
+  if (!player) return;
 
-  enemies.forEach((enemy) => {
-    const distance = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+  const enemyIds = game.query((c) => c.kind === "enemy");
+  for (const id of enemyIds) {
+    const enemy = game.get(id);
+    if (!enemy) continue;
+    const distance = Math.hypot(
+      Number(player.x) - Number(enemy.x),
+      Number(player.y) - Number(enemy.y),
+    );
     if (distance < 100) {
       // Combat logic
     }
-  });
+  }
 });
 ```
 
@@ -206,11 +208,11 @@ const data = await sdk.save.loadGameData();
 
 // Auth
 await sdk.auth.ensureGuestSession();
-const user = sdk.auth.getCurrentUser();
+const user = await sdk.auth.getCurrentUser();
 
 // Multiplayer
 await sdk.multiplayer.joinRoom("room-123", { playerName: "Alice" });
-const state = sdk.multiplayer.getRoomState();
+const state = await sdk.multiplayer.getRoomState();
 ```
 
 ## Recipes Reference
@@ -224,13 +226,17 @@ When implementing specific gameplay features, consult `docs/recipes/`:
 - `inventory-tools.md` — Inventory and tool systems
 - `rpg-quests-inventory.md` — RPG quest and inventory patterns
 - `npc-primitives.md` — NPC state, movement, bubbles, proximity, speech
-- `npc-dialogue.md` — Scripted dialogue and dialogue widgets
+- `npc-pathfinding.md` — Destinations and patrols
 - `hud-widget.md` — HUD widget creation patterns
 - `world-pointer-input.md` — Pointer/click input handling
 - `mobile-touch-controls.md` — Floating touch joystick + action buttons (keyboard parity)
 - `save-load.md` — Save/load persistence patterns
 - `map-placement.md` — Prop placement with generated placement boxes
 - `season-atmosphere.md` — Seasonal effects
+- `rpg-game-design.md` — RPG/adventure planning conventions
+- `shooter-game-design.md` — Shooter/action planning conventions
+
+Engine contracts live under `.agents/skills/capybara-game-developer/` (`ASSET_INTEGRATION.md`, `CAPYBARA_ENGINE.md`, `SDK_FACADE.md`) — not under `docs/`.
 
 ## Special Notes
 

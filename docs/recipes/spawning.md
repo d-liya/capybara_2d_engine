@@ -5,7 +5,7 @@ description: Spawn players, NPCs, props, pickups, and markers with correct coord
 
 # Recipe: Spawning Entities and Props
 
-Use this when placing players, NPCs, crop overlays, pickups, or markers. Read `docs/CAPYBARA_ENGINE.md` for the full API surface.
+Use this when placing players, NPCs, crop overlays, pickups, or markers. Read `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md` for the full API surface.
 
 ## Coordinate contract (critical)
 
@@ -194,4 +194,4 @@ For `4×4` zones, subdivide the placement box yourself (see `docs/recipes/map-pl
 ## Related docs
 
 - `docs/recipes/map-placement.md` — `getPlacementTargets`, box format, crop grid
-- `docs/CAPYBARA_ENGINE.md` — render ordering, hover, movement
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md` — render ordering, hover, movement

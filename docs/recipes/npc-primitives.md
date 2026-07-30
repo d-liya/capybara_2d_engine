@@ -38,7 +38,7 @@ export function defineNpcArchetypes(game: GameAPI): void {
       speed: 28,
       width: 100,
       height: 120,
-      activeAnimation: "char_guide_default_animation",
+      activeAnimation: "idle_front",
     }),
   );
 }
@@ -46,7 +46,7 @@ export function defineNpcArchetypes(game: GameAPI): void {
 
 ## One file per named NPC
 
-Put named character setup in `src/npcs/<name>.ts`. See `docs/recipes/npc-dialogue.md`.
+Put named character setup in `src/npcs/<name>.ts`. Script dialogue as resources + HUD widgets; there is no separate `npc-dialogue.md` recipe.
 
 ```ts
 import type { EntityId, GameAPI } from "../Game";

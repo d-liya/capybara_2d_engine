@@ -9,7 +9,7 @@ Use this for simple enemy behavior, patrol/chase/attack loops, spawn waves, surv
 
 ## Read first
 
-- `docs/CAPYBARA_ENGINE.md`
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md`
 - `src/data/` generated JSON for actual enemy/NPC character handles, animation names, prop assets, placement targets, and audio
 - `docs/recipes/combat-projectiles.md` if enemies or the player deal projectile/ranged damage
 - `docs/recipes/world-pointer-input.md` only if enemy targeting or commands use pointer input

@@ -3,7 +3,7 @@
 /**
  * Public SDK facade TypeScript contract.
  *
- * Pair with docs/SDK_FACADE.md for behavior and src/sdk/index.ts for the
+ * Pair with `.agents/skills/capybara-game-developer/SDK_FACADE.md` for behavior and src/sdk/index.ts for the
  * runtime entrypoint. Bundle this file with sdk/index.ts for one-pass agent tasks.
  *
  * User is the reference example. Sibling types below follow the same

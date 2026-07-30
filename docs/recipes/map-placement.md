@@ -137,7 +137,7 @@ if (distance < 150) {
 }
 ```
 
-See `src/systems/FarmingSystem.ts` for a working nearest-cell pattern over an expanded grid.
+See `docs/recipes/farming-sim.md` and `docs/recipes/spawning.md` for nearest-cell / growth-stage patterns over an expanded grid.
 
 ## Crop overlay sizing
 

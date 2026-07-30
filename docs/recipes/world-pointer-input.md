@@ -9,7 +9,7 @@ Use this for click/touch targeting, aiming, shooting, spell placement, drag-sele
 
 ## Read first
 
-- `docs/CAPYBARA_ENGINE.md`
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md`
 - `src/widgets/AGENTS.md` for widget hook details
 - `src/data/` generated JSON for actual crosshair, cursor, marker, HUD, or tool assets
 - `docs/recipes/combat-projectiles.md` if pointer input fires projectiles or attacks
