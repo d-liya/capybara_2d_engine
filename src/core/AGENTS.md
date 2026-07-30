@@ -17,4 +17,6 @@ Only inspect or modify core if the public `GameAPI` cannot express the feature o
 
 If core work seems necessary, first explain the missing primitive or bug.
 
+Visual style is not a core concern. Do not add bloom, blur, gradient, vignette, or post-process passes here to change how the game looks — the Painted Pixel art direction is enforced in generated art plus the HUD kit in `styles.css`. See `src/widgets/AGENTS.md`.
+
 Render draw order lives in `renderSort.ts`: map `ground_patch` → `ground`, other masks → `occluder`, spawned entities → `prop`. Document spawn coordinates in `docs/recipes/spawning.md` and `Game.ts` JSDoc, not only in core comments.

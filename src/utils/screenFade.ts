@@ -9,7 +9,7 @@ function getOverlay(): HTMLDivElement {
       "position:fixed",
       "inset:0",
       "z-index:9000",
-      "background:#000",
+      "background:var(--color-capy-ink, #150e21)",
       "opacity:0",
       "pointer-events:none",
     ].join(";");
@@ -38,7 +38,8 @@ function waitForOpacityTransition(
     };
 
     overlay.addEventListener("transitionend", onEnd);
-    overlay.style.transition = `opacity ${durationMs}ms ease-in-out`;
+    // Quantized fade, like a 16-bit hardware brightness ramp.
+    overlay.style.transition = `opacity ${durationMs}ms steps(8, end)`;
     requestAnimationFrame(() => {
       overlay.style.opacity = String(targetOpacity);
     });

@@ -210,7 +210,6 @@ export function createTouchControlsWidget(
       root.className = [
         "absolute inset-0 pointer-events-none select-none touch-none",
         FONT,
-        "text-white/80",
       ].join(" ");
       root.dataset.touchControls = "true";
 
@@ -223,8 +222,7 @@ export function createTouchControlsWidget(
       baseEl = document.createElement("div");
       baseEl.className = [
         "pointer-events-none absolute",
-        "rounded-full border border-white/25 bg-black/35",
-        "opacity-0 transition-opacity duration-75",
+        "capy-dial capy-fade rounded-full opacity-0",
       ].join(" ");
       baseEl.style.width = `${STICK_SIZE_PX}px`;
       baseEl.style.height = `${STICK_SIZE_PX}px`;
@@ -233,9 +231,8 @@ export function createTouchControlsWidget(
       knobEl = document.createElement("div");
       knobEl.className = [
         "absolute left-1/2 top-1/2",
-        "h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full",
-        "border border-white/35 bg-white/30",
-        "shadow-[0_0_12px_rgba(0,0,0,0.35)]",
+        "h-12 w-12 -translate-x-1/2 -translate-y-1/2",
+        "capy-key rounded-full",
       ].join(" ");
       baseEl.appendChild(knobEl);
       stickLayer.appendChild(baseEl);
@@ -298,10 +295,8 @@ export function createTouchControlsWidget(
           button.textContent = entry.label;
           button.className = [
             FONT,
-            "flex h-12 w-12 items-center justify-center rounded-full",
-            "border border-white/20 bg-black/40",
-            "text-[14px] text-white/80",
-            "active:bg-white/20 active:text-white",
+            "capy-key flex h-12 w-12 items-center justify-center rounded-full",
+            "text-[14px] font-black",
           ].join(" ");
           button.style.touchAction = "none";
 

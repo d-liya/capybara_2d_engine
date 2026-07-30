@@ -101,61 +101,29 @@ export function createMapTransitionPromptWidget(
         "absolute left-0 top-0 opacity-0 will-change-[transform,opacity]";
 
       const glowInner = document.createElement("div");
-      glowInner.className = "h-full w-full rounded-full";
-      glowInner.style.background =
-        "radial-gradient(ellipse at center," +
-        "rgba(255, 236, 170, 0.55) 0%," +
-        "rgba(255, 210, 120, 0.28) 38%," +
-        "rgba(255, 190, 90, 0.08) 68%," +
-        "rgba(255, 190, 90, 0) 100%)";
-      glowInner.style.boxShadow =
-        "0 0 28px 8px rgba(255, 220, 140, 0.22)," +
-        "0 0 60px 18px rgba(255, 200, 100, 0.10)";
-      glowInner.style.animation =
-        "map-enter-glow-pulse 1.8s ease-in-out infinite";
+      glowInner.className = "capy-glow-pool h-full w-full";
       glowEl.appendChild(glowInner);
 
       promptEl = document.createElement("div");
       promptEl.className = [
         "absolute left-0 top-0 flex max-w-[min(280px,calc(100vw-24px))] items-center gap-2",
-        "rounded-2xl border border-white/25 bg-black/50 px-3 py-2",
-        "font-['Geist Pixel',_sans-serif] text-white shadow-[0_10px_28px_rgba(0,0,0,0.35)]",
-        "ring-1 ring-amber-200/20 backdrop-blur-md",
+        "capy-panel capy-fade px-3 py-2",
+        "font-['Geist Pixel',_sans-serif]",
         "opacity-0 will-change-[transform,opacity]",
-        "transition-[opacity,transform] duration-200 ease-out",
       ].join(" ");
-      promptEl.style.transform = "translate3d(0, 8px, 0) scale(0.96)";
-      promptEl.style.transformOrigin = "bottom center";
 
       keyBadgeEl = document.createElement("span");
       keyBadgeEl.className = [
-        "inline-flex min-w-[1.6rem] items-center justify-center rounded-md",
-        "border border-white/35 bg-white/15 px-1.5 py-0.5",
-        "text-[11px] font-black tracking-wide text-amber-100",
-        "shadow-[inset_0_-1px_0_rgba(0,0,0,0.35)]",
+        "capy-key inline-flex min-w-[1.6rem] items-center justify-center",
+        "px-1.5 py-0.5 text-[11px] font-black tracking-wide",
       ].join(" ");
       keyBadgeEl.textContent = "E";
 
       textEl = document.createElement("span");
-      textEl.className =
-        "text-[13px] font-semibold leading-snug text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]";
+      textEl.className = "capy-text text-[13px] font-semibold leading-snug";
 
       promptEl.append(keyBadgeEl, textEl);
       root.append(glowEl, promptEl);
-
-      if (
-        typeof document !== "undefined" &&
-        !document.getElementById("map-enter-glow-keyframes")
-      ) {
-        const style = document.createElement("style");
-        style.id = "map-enter-glow-keyframes";
-        style.textContent = `
-@keyframes map-enter-glow-pulse {
-  0%, 100% { opacity: 0.72; transform: scale(1); filter: brightness(1); }
-  50% { opacity: 1; transform: scale(1.06); filter: brightness(1.12); }
-}`;
-        document.head.appendChild(style);
-      }
 
       return root;
     },
@@ -168,7 +136,6 @@ export function createMapTransitionPromptWidget(
       if (!state?.active || !state.bounds) {
         glowEl.style.opacity = "0";
         promptEl.style.opacity = "0";
-        promptEl.style.transform = "translate3d(0, 8px, 0) scale(0.96)";
         return;
       }
 
@@ -233,7 +200,7 @@ export function createMapTransitionPromptWidget(
         Math.max(margin, hudH - promptH - margin),
       );
 
-      promptEl.style.transform = `translate3d(${Math.round(promptX)}px, ${Math.round(promptY)}px, 0) scale(1)`;
+      promptEl.style.transform = `translate3d(${Math.round(promptX)}px, ${Math.round(promptY)}px, 0)`;
       promptEl.style.opacity = "1";
     },
   };

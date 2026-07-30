@@ -18,6 +18,64 @@ Before opening a generated widget, skim the factory export and comments in the `
 - HUD **shell visibility** uses the generic `ui` resource — ids are **defined by your game**, not by scaffold file names.
 - Do not hide widget roots with `display: none` or `api.state.isOpen`.
 - Use `blocksWorldInput` only for modals/menus/dialogue.
+- Every widget must follow the Painted Pixel art direction below. HUD that looks like a web app breaks the game more visibly than a bug.
+
+## Painted Pixel art direction (required)
+
+Map, character, prop and HUD art in this engine is generated in one style: **hand-painted 16-bit**, in the lineage of Sea of Stars (palette, light, emissive glow), Eastward (chunky painted surfaces, diegetic panels) and SNES 3/4 top-down JRPG window frames (Chrono Trigger, Secret of Mana).
+
+DOM HUD is the easiest place to break that style, because the defaults of web UI — translucency, blur, gradients, soft shadows, smooth easing — are exactly the things this style forbids. A frosted glass panel over painted pixel art reads as a debug overlay, not as part of the game.
+
+### Never use
+
+| Banned | Why | Use instead |
+|--------|-----|-------------|
+| `backdrop-blur-*`, `backdrop-saturate-*` | Frosted glass is not a material in this world | Opaque panel tone |
+| `bg-black/40`, `bg-white/15` and similar alpha washes | Translucent chrome, no committed color | `bg-capy-panel`, `bg-capy-slot` |
+| `linear-gradient`, `radial-gradient`, `bg-gradient-to-*` | Gradients replace flat tones with a ramp | 2-3 flat tones with hard edges |
+| Blurred `box-shadow` / `shadow-lg` / `shadow-[0_14px_34px_...]` | Soft ambient-occlusion halo | Hard offset shadow, `0` blur radius |
+| `drop-shadow-[0_1px_1px_...]`, blurred `text-shadow` | Soft glow around text | `1px 1px 0` hard text shadow |
+| Full-frame `bloom`, `filter: blur()`, vignette overlays | Atmospheric haze sheet | Local emissive bands inside a prop footprint |
+| `ease-out` / `ease-in-out` fades, `scale(0.96)` pop-ins | Smooth interpolation reads as modern app UI | `steps()` timing |
+| `rounded-2xl`, `rounded-full` on panels | Soft pill shapes | `var(--capy-radius)` (4px) chunky corners |
+| Pure-black or pure-white values | Off-palette, kills the color grade | `capy-ink`, `capy-parchment` |
+
+### Always do
+
+- **Diegetic materials.** Panels are planked wood, riveted iron, painted plaster, tooled leather, stone or parchment — never glass, chrome or plastic.
+- **2-3 flat tones per surface**, separated by hard edges: an ink contour, one lit rim on the light side, one shade rim on the dark side. No fourth tone, no ramp between them.
+- **One key light from the upper left.** Every rim and every cast shadow in the HUD agrees with it.
+- **Hue-shifted shadows.** Shadow tones shift cool (violet/blue), lit tones shift warm. A shadow is never just a darker version of the same hue.
+- **Hard-edged cast shadows** offset down-right with a `0` blur radius.
+- **Chunky scale.** Borders 2px, not hairlines. No detail smaller than a roof tile on the map: no 1px filigree, no thin bevels, no micro-ornament.
+- **Sparse accent.** The accent hue is ~10% of the HUD and marks only what the player should act on: the key badge, the active slot, the confirm button, a lit window. Do not accent every border.
+- **Stepped motion.** Reveals, pulses and pressed states quantize with `steps()`. Panels blink and snap; they do not glide.
+- **Emissive accents stay local.** A lit pool falls off inside its own footprint as 2-3 hard concentric bands.
+
+### Shared HUD kit
+
+Tokens and component classes live in `styles.css`. Prefer them over inventing per-widget colors, so every panel in the game shares one grade.
+
+| Class | Use |
+|-------|-----|
+| `capy-panel` | Standard raised panel: ink contour, lit + shade rims, hard cast shadow |
+| `capy-slot` | Recessed surface: inventory slots, bar tracks, wells |
+| `capy-dial` | Floating joystick ring (the only surface allowed flat alpha, since it covers walkable world) |
+| `capy-key` | Chunky keycap: key badges, action buttons. `capy-key-pressed` / `:active` drops it onto its shadow |
+| `capy-text` / `capy-text-dim` | Parchment text with a hard 1px ink shadow |
+| `capy-divider` | Two-tone hard rule |
+| `capy-fade` | Stepped opacity reveal (opacity only — see below) |
+| `capy-glow-pool` | Banded emissive floor pool with a quantized pulse |
+
+Color tokens are Tailwind theme colors, so `bg-capy-panel`, `text-capy-accent`, `border-capy-ink`, `after:bg-capy-rim` all work: `capy-ink`, `capy-shadow`, `capy-panel`, `capy-panel-lit`, `capy-panel-shade`, `capy-slot`, `capy-rim`, `capy-parchment`, `capy-parchment-dim`, `capy-accent`, `capy-accent-deep`.
+
+Tailwind utilities sit in a later layer than these components, so `capy-panel rounded-full` or `capy-key px-3` compose normally.
+
+**Matching a specific map.** When the synced map has a strong color script, override the `@theme` values in `styles.css` toward it — keep the tone *relationships* (ink darkest, one lit rim, one shade rim, warm parchment text, one vivid accent) and change only the hues. Do not hardcode a second palette inside a widget.
+
+**`capy-fade` transitions opacity only.** World-anchored widgets rewrite `transform` every frame to follow the camera; easing that transform makes the marker trail behind the world. Animate position with `transform` and nothing else.
+
+Reference implementations: `TooltipWidget.ts`, `NpcBubbleWidget.ts`, `MapTransitionPromptWidget.ts`, `TouchControlsWidget.ts`.
 
 ## Typed UI visibility (engine)
 

@@ -9,11 +9,12 @@ Use this when wiring or adapting generated HUD scaffolds.
 
 ## Read first
 
-- `src/widgets/AGENTS.md` — widget rules, hooks, text animation, input handling, and anatomy
+- `src/widgets/AGENTS.md` — widget rules, **Painted Pixel art direction**, hooks, text animation, input handling, and anatomy
 - Generated `Hud...` scaffolds under `src/widgets/` for factory export names and layout hotspots
 
 ## Recipe-specific notes
 
+- Build panels from the shared Painted Pixel kit in `styles.css` (`capy-panel`, `capy-slot`, `capy-key`, `capy-text`, `capy-divider`, `capy-fade`) so HUD matches the generated 16-bit art. No `backdrop-blur`, gradients, soft drop shadows, or smooth `ease-*` fades — see `src/widgets/AGENTS.md`.
 - Check which HUD panels stay open during normal gameplay (top bars, bottom hotbars, side panels, touch controls). If persistent edge chrome exists, set scene-level padding with `createGame({ cameraEdgePadding })` so world corners and the player are not covered.
 - Keep game UI clean: do not display developer/debug errors, stack traces, raw exception messages, or failed SDK response payloads in HUD widgets. Log technical details to the browser console and show only neutral player-facing fallback text when needed.
 - Keep modal HUDs above world-aligned helper widgets. Tutorial arrows, click pointers, crosshairs, crop markers, and nearby prompts should not use high `zIndex` values that cover dialogue, shops, inventory menus, or title/result screens. See `src/widgets/AGENTS.md` for the z-index bands.

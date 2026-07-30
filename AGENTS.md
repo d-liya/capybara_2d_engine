@@ -16,9 +16,6 @@ npm run dev
 
 # Type checking
 npm run typecheck
-
-# Production build (Vite → dist/)
-npm run build
 ```
 
 ## Architecture & Code Organization
@@ -89,6 +86,12 @@ Treat phone browsers as a first-class target whenever you add gameplay:
 2. **Movement is shared.** WASD and the default floating touch joystick both drive `setMovementInput` / the controlled entity.
 3. **Pad the camera for HUD chrome.** Use `cameraEdgePadding` (and optional `followZoom` / `cameraFollowLerp` / `maxViewportScale`) so edge controls leave walkable corners clear. Default touch controls use a floating left-side joystick plus bottom-right actions (`zIndex` 100–299).
 4. **High-res maps.** The canvas uses a DPR-aware backing store; prefer `image-rendering: auto` for photographic maps. See `docs/recipes/mobile-touch-controls.md`.
+
+### HUD art direction (required)
+
+Generated art is **hand-painted 16-bit** (Sea of Stars / Eastward / SNES JRPG lineage): flat 2-3 tone cel shading, hard-edged shadows, a committed limited palette, no micro-detail. HUD built with web defaults — translucent panels, `backdrop-blur`, gradients, soft drop shadows, smooth `ease-out` fades — breaks that style on sight.
+
+Use the shared kit in `styles.css` (`capy-panel`, `capy-slot`, `capy-key`, `capy-text`, `capy-fade`, `capy-glow-pool`, plus `capy-*` theme colors) instead of inventing per-widget colors, and read the **Painted Pixel art direction** section in `src/widgets/AGENTS.md` before writing any HUD.
 
 ### Scene Creation Pattern
 
@@ -284,6 +287,7 @@ game.dispatchInputAction("interact");
 ```
 
 Touch joystick movement uses `game.setMovementInput` / `clearMovementInput` (same path as WASD). Configure default on-screen buttons with `createGame({ touchControls: { actions: [...] } })`. See `docs/recipes/mobile-touch-controls.md`.
+
 ## Notes
 
 Do not cast type to unknow to bypass typescript error
@@ -297,10 +301,10 @@ Do not cast type to unknow to bypass typescript error
 
 ## Agent harness layout
 
-| Path              | Role                                                               |
-| ----------------- | ------------------------------------------------------------------ |
-| `AGENTS.md`       | Shared instructions (this file) — source of truth for all agents   |
-| `CLAUDE.md`       | Claude entry — imports this file via `@AGENTS.md`                  |
-| `.agents/skills/` | Engine skill pack (`capybara-game-developer`)                      |
+| Path              | Role                                                             |
+| ----------------- | ---------------------------------------------------------------- |
+| `AGENTS.md`       | Shared instructions (this file) — source of truth for all agents |
+| `CLAUDE.md`       | Claude entry — imports this file via `@AGENTS.md`                |
+| `.agents/skills/` | Engine skill pack (`capybara-game-developer`)                    |
 
 Read **`AGENTS.md`** first. Open `.agents/skills/capybara-game-developer/` for integration recipes and API contracts. Assets arrive via Maps / Jobs sync — extend gameplay on the bootstrap-already-live world.

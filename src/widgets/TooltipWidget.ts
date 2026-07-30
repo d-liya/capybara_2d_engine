@@ -83,7 +83,6 @@ export function createTooltipWidget(): Widget {
 
     if (!target) {
       cardEl.style.opacity = "0";
-      cardEl.style.transform = "translate3d(0, 6px, 0) scale(0.96)";
       return;
     }
 
@@ -91,7 +90,6 @@ export function createTooltipWidget(): Widget {
     const body = resolveTooltipBody(target);
     if (!title && !body) {
       cardEl.style.opacity = "0";
-      cardEl.style.transform = "translate3d(0, 6px, 0) scale(0.96)";
       return;
     }
 
@@ -136,7 +134,6 @@ export function createTooltipWidget(): Widget {
 
     root.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
     cardEl.style.opacity = "1";
-    cardEl.style.transform = "translate3d(0, 0, 0) scale(1)";
   };
 
   return {
@@ -148,26 +145,22 @@ export function createTooltipWidget(): Widget {
       root = document.createElement("div");
       root.className = [
         "absolute left-0 top-0 pointer-events-none max-w-[calc(100vw-24px)]",
-        "font-['Geist Pixel',_sans-serif] text-white will-change-transform",
+        "font-['Geist Pixel',_sans-serif] will-change-transform",
       ].join(" ");
       root.style.transform = "translate3d(0, 0, 0)";
 
       cardEl = document.createElement("div");
       cardEl.className = [
-        "rounded-[14px] border border-white/20 bg-black/40 px-3 py-2.5",
-        "ring-1 ring-white/10",
-        "opacity-0 will-change-[transform,opacity]",
-        "transition-[opacity,transform] duration-200 ease-out",
+        "capy-panel capy-fade px-3 py-2",
+        "opacity-0 will-change-[opacity]",
       ].join(" ");
-      cardEl.style.transform = "translate3d(0, 6px, 0) scale(0.96)";
-      cardEl.style.transformOrigin = "bottom center";
 
       titleEl = document.createElement("div");
-      titleEl.className =
-        "text-sm font-bold leading-tight text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]";
+      titleEl.className = "capy-text text-sm font-bold leading-tight";
 
       bodyEl = document.createElement("div");
-      bodyEl.className = "mt-1 text-xs font-medium leading-snug text-white/75";
+      bodyEl.className =
+        "capy-text-dim mt-1 text-xs font-medium leading-snug";
 
       cardEl.append(titleEl, bodyEl);
       root.append(cardEl);
