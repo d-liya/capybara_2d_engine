@@ -757,6 +757,8 @@ function spawnMapCharacters(
     // explicit Player role may fall back to the first NPC (spawned mapLocal),
     // and clearMapLocal would destroy it on the next transition — promote it.
     game.patch(toControl, { mapLocal: false, kind: "player" });
+    // Maps placements can sit on colliders; snap the player footbox to free ground.
+    game.ensureEntityOnWalkable(toControl);
   }
   return toControl;
 }

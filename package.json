@@ -8,7 +8,10 @@
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p . --noEmit",
-    "typecheck:watch": "tsc -p . --noEmit --watch"
+    "typecheck:watch": "tsc -p . --noEmit --watch",
+    "push": "node scripts/capybara-cli.mjs push",
+    "publish": "node scripts/capybara-cli.mjs publish",
+    "pull": "node scripts/capybara-cli.mjs pull"
   },
   "author": "Capybara Game Team",
   "license": "MIT",

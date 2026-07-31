@@ -330,15 +330,21 @@ export interface LoadMapOptions {
 }
 
 /**
- * Options for `game.transitionMap` — fades to black, runs mid-fade work, loads
- * the map, then fades back in.
+ * Options for `game.transitionMap` — soft dim, mid-fade work, load map, lift.
+ * Defaults are a light blink (not a full theatrical blackout) since enterables
+ * already show a Press E prompt.
  */
 export interface TransitionMapOptions extends LoadMapOptions {
-  /** Fade duration in ms (default 400). */
+  /** One-way fade duration in ms (default 140). */
   fadeMs?: number;
   /**
-   * Runs while the screen is fully black. Call `swap()` to apply `loadMap`
-   * (with `spawn`). Clear map-local entities before `swap()`; respawn after.
+   * Peak overlay opacity while the map swaps (0–1, default 0.45).
+   * Use `1` for a full black cut when you want a heavier beat.
+   */
+  peakOpacity?: number;
+  /**
+   * Runs at peak dim. Call `swap()` to apply `loadMap` (with `spawn`).
+   * Clear map-local entities before `swap()`; respawn after.
    *
    * If omitted, `swap()` runs automatically.
    */
@@ -781,7 +787,7 @@ export interface GameAPI {
   /**
    * Replace the current map with another isolated map (instant).
    *
-   * Prefer `transitionMap` for doors / room travel — it fades by default.
+   * Prefer `transitionMap` for doors / room travel — soft dim by default.
    * Use raw `loadMap` for tools, tests, or when you already own the fade.
    *
    * Existing resources, widgets, archetypes, and entities are preserved. Destroy
@@ -795,10 +801,11 @@ export interface GameAPI {
   loadMap(map: GameMapData, options?: LoadMapOptions): void;
 
   /**
-   * Fade to black, swap to another isolated map, then fade back in.
+   * Soft dim, swap to another isolated map, then lift.
    *
-   * Default door/room travel path. Mid-fade work (clear `mapLocal`, respawn,
-   * audio) goes in `during` — call `swap()` when you want `loadMap` to run:
+   * Default door/room travel path (light blink — not a full blackout). Mid-fade
+   * work (clear `mapLocal`, respawn, audio) goes in `during` — call `swap()`
+   * when you want `loadMap` to run. Pass `peakOpacity: 1` for a hard cut.
    *
    * @example
    * await game.transitionMap(toMapData(mapExterior), {
@@ -1246,13 +1253,29 @@ export interface GameAPI {
 
   /**
    * Snap a blocked feet/ground point to the nearest walkable location.
-   * Returns the original point when already walkable, or null when no nearby cell is free.
+   * When `options.entityId` is set, candidates are tested against that
+   * entity's real footbox (not the path grid's approximate collider).
+   * Returns the original point when already walkable, or null when no
+   * nearby clear spot is found (or when `snapToNearestWalkable` is false).
    */
   resolveNearestWalkableFeet(
     feetX: number,
     feetY: number,
     options?: FindPathOptions,
   ): PathPoint | null;
+
+  /**
+   * If an entity's footbox overlaps map collision, move it to the nearest
+   * walkable feet point. No-op when already clear. Useful when a player
+   * or NPC spawn/placement lands on an obstacle.
+   *
+   * @returns true when the entity is walkable after this call
+   *
+   * @example
+   * const id = game.spawnAtFeet("player", 500, 700);
+   * game.ensureEntityOnWalkable(id);
+   */
+  ensureEntityOnWalkable(id: EntityId, options?: FindPathOptions): boolean;
 
   /**
    * Give an entity a destination. The runtime follows the path, updates facing,

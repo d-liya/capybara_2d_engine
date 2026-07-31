@@ -16,7 +16,26 @@ npm run dev
 
 # Type checking
 npm run typecheck
+
+# Sync with Capybara (requires .env from an HTML export)
+npm run pull     # download latest project code from Capybara
+npm run push     # upload local code changes to Capybara
+npm run publish  # push, build locally, publish the playable game
 ```
+
+### Capybara sync & publish
+
+When this project was downloaded from Capybara, `.env` contains a chat-scoped API key. Use it only for these scripts:
+
+- **`npm run pull`** — fetch the latest source from the linked Capybara project (use after the user made changes on [capybara.build](https://www.capybara.build)).
+- **`npm run push`** — sync local code commits back to Capybara.
+- **`npm run publish`** — push, run a production build, upload `dist/`, and print the live / game / app links.
+
+These scripts talk to a dedicated git remote named `capybara` (they do **not** overwrite the user's `origin`, so a personal GitHub remote can coexist). Do not commit `.env`.
+
+### Generated assets
+
+This local checkout cannot generate maps, characters, props, audio, or HUD art. If the user asks for new or regenerated assets, tell them to go to [https://www.capybara.build](https://www.capybara.build), create or update the assets in their project there, then run `npm run pull` here to sync the updated `src/data/` files.
 
 ## Architecture & Code Organization
 

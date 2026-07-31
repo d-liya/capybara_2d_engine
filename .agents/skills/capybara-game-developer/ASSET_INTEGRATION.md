@@ -97,7 +97,7 @@ await game.transitionMap(toMapData(mapExterior), {
 
 Call `swap()` inside `during` when you want the map load to apply — clear before it, respawn after. If you omit `during`, the map swaps automatically mid-fade.
 
-Optional: `{ fadeMs: 400 }` (default). Live pattern: `src/scenes/bootstrapWorldFromAssets.ts` (enterable placements). Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
+Optional: `{ fadeMs: 140, peakOpacity: 0.45 }` (defaults — soft blink). Use `peakOpacity: 1` for a full black cut. Live pattern: `src/scenes/bootstrapWorldFromAssets.ts` (enterable placements). Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
 
 Keep an explicit lifecycle: each NPC/clue/pickup is either `mapLocal` (rebuild), hidden off-map, or intentionally persistent.
 

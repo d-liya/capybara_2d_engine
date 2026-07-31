@@ -34,3 +34,18 @@ npm run dev
 ### Assets look wrong?
 
 **Check the original file in `src/data` before regenerating.** Generated art is usually fine — coding agents often wire it in with the wrong aspect ratio.
+
+## Push, pull & publish to Capybara
+
+When you download an HTML export from [capybara.build](https://www.capybara.build), the zip includes a `.env` with a chat-scoped API key and this project's `.git` history.
+
+```bash
+npm run pull     # download latest code from your Capybara project
+npm run push     # sync local commits to Capybara
+npm run publish  # push, build locally, upload dist/, print live / game / app links
+```
+
+For new generated assets (maps, characters, props, audio, HUD), create them on [capybara.build](https://www.capybara.build) then `npm run pull`.
+
+The API key only works for these CLI endpoints. Do not commit `.env`.
+

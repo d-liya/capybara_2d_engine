@@ -364,13 +364,20 @@ export default class GameRuntime {
                 usedX: x,
                 usedY: y,
               });
+            } else {
+              // Footbox already known — snap off colliders if needed.
+              this._ensureEntityOnWalkable(this._controlledEntityId);
             }
             this._ensureSpriteFootAnchorMeasured(
               cacheKey,
               spriteMeta.url,
               spriteMeta.frameCount,
             );
+          } else {
+            this._ensureEntityOnWalkable(this._controlledEntityId);
           }
+        } else {
+          this._ensureEntityOnWalkable(this._controlledEntityId);
         }
       }
     }
@@ -951,16 +958,38 @@ export default class GameRuntime {
     const resolved = this._resolvePathOptions(options);
     const point = { x: feetX, y: feetY };
     const grid = this._getPathGrid(resolved);
+    const snap = resolved.snapToNearestWalkable !== false;
 
     if (options.entityId) {
       if (!this._areEntityFeetBlocked(options.entityId, point, resolved)) {
         return point;
       }
-    } else if (grid.isPointWalkable(point)) {
-      return point;
+      if (!snap) return null;
+      // Prefer the entity's real footbox over the path grid's approx collider.
+      return this._findNearestWalkableFeetForEntity(
+        options.entityId,
+        point,
+        resolved,
+      );
     }
 
+    if (grid.isPointWalkable(point)) {
+      return point;
+    }
+    if (!snap) return null;
     return grid.findNearestWalkablePoint(point);
+  }
+
+  /**
+   * If an entity's footbox overlaps map collision, move it to the nearest
+   * walkable feet point. No-op when already clear.
+   * @returns true when the entity is walkable after this call
+   */
+  ensureEntityOnWalkable(
+    id: EntityId,
+    options: FindPathOptions = {},
+  ): boolean {
+    return this._ensureEntityOnWalkable(id, options);
   }
 
   setEntityDestination(
@@ -1518,52 +1547,94 @@ export default class GameRuntime {
     id: EntityId,
     options: FindPathOptions = {},
   ): boolean {
+    // Wait for auto footbox trim before snapping — otherwise we may move with
+    // a temporary box collider, then skip the authored feet re-anchor.
+    if (this._pendingFeetAnchorPlacement.has(id)) {
+      return false;
+    }
+
     const entity = this._entities.get(id);
     if (!entity) return false;
 
     const pathOptions = this._resolvePathOptions({ ...options, entityId: id });
     const feet = this._getEntityFeetPoint(id, entity);
     if (!this._areEntityFeetBlocked(id, feet, pathOptions)) {
-      return false;
+      return true;
     }
 
-    const nearest =
-      this._getPathGrid(pathOptions).findNearestWalkablePoint(feet);
+    const nearest = this.resolveNearestWalkableFeet(
+      feet.x,
+      feet.y,
+      pathOptions,
+    );
     if (!nearest) return false;
 
     this._placeEntityAtFeet(id, nearest.x, nearest.y);
 
     const updatedEntity = this._entities.get(id);
-    if (!updatedEntity) return true;
+    if (!updatedEntity) return false;
     const updatedFeet = this._getEntityFeetPoint(id, updatedEntity);
-    if (this._areEntityFeetBlocked(id, updatedFeet, pathOptions)) {
-      return this._nudgeActorToWalkable(id);
-    }
-    return true;
+    return !this._areEntityFeetBlocked(id, updatedFeet, pathOptions);
   }
 
-  private _nudgeActorToWalkable(id: EntityId): boolean {
+  /**
+   * Spiral search for the closest feet point whose entity footbox is clear.
+   * Falls back to the path grid when the entity has no actor yet.
+   */
+  private _findNearestWalkableFeetForEntity(
+    id: EntityId,
+    from: PathPoint,
+    pathOptions: FindPathOptions,
+  ): PathPoint | null {
     const actor = this._entityActors.get(id);
-    if (!actor) return false;
+    if (!actor) {
+      return this._getPathGrid(pathOptions).findNearestWalkablePoint(from);
+    }
 
+    const cellSize =
+      Number.isFinite(Number(pathOptions.cellSize)) &&
+      Number(pathOptions.cellSize) > 4
+        ? Number(pathOptions.cellSize)
+        : 25;
+    const snapRadiusCells =
+      Number.isFinite(Number(pathOptions.snapRadiusCells)) &&
+      Number(pathOptions.snapRadiusCells) > 0
+        ? Math.floor(Number(pathOptions.snapRadiusCells))
+        : 8;
     const step = 4;
-    for (let radius = 1; radius <= 12; radius += 1) {
+    const maxRadius = Math.max(
+      12,
+      Math.ceil((snapRadiusCells * cellSize) / step),
+    );
+
+    let best: PathPoint | null = null;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+    for (let radius = 1; radius <= maxRadius; radius += 1) {
       for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
         for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
           if (Math.abs(offsetX) !== radius && Math.abs(offsetY) !== radius) {
             continue;
           }
-          const nextX = actor.x + offsetX * step;
-          const nextY = actor.y + offsetY * step;
-          if (!this.map.checkCollision(actor._footAt(nextX, nextY))) {
-            this.patchEntity(id, { x: nextX, y: nextY });
-            return true;
+          const candidate = {
+            x: from.x + offsetX * step,
+            y: from.y + offsetY * step,
+          };
+          if (this._areEntityFeetBlocked(id, candidate, pathOptions)) {
+            continue;
+          }
+          const distanceSq =
+            (candidate.x - from.x) ** 2 + (candidate.y - from.y) ** 2;
+          if (distanceSq < bestDistanceSq) {
+            best = candidate;
+            bestDistanceSq = distanceSq;
           }
         }
       }
+      if (best) return best;
     }
 
-    return false;
+    return null;
   }
 
   private _setEntityMoveAnimation(id: EntityId): void {
@@ -1914,6 +1985,14 @@ export default class GameRuntime {
       }
 
       this._pendingFeetAnchorPlacement.delete(entityId);
+
+      // After trim is applied, snap the controlled player off any collider.
+      if (
+        !movedSinceSpawn &&
+        entityId === this._controlledEntityId
+      ) {
+        this._ensureEntityOnWalkable(entityId);
+      }
     }
   }
 

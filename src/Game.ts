@@ -279,17 +279,21 @@ export function createGame(config: GameConfig): GameAPI {
       applyLoadMap(mapData, options);
     },
     transitionMap: async (mapData, options = {}) => {
-      const { during, fadeMs, ...loadOptions } = options as TransitionMapOptions;
-      await runScreenFade(() => {
-        const swap = () => {
-          applyLoadMap(mapData, loadOptions);
-        };
-        if (during) {
-          during(swap);
-        } else {
-          swap();
-        }
-      }, { fadeMs });
+      const { during, fadeMs, peakOpacity, ...loadOptions } =
+        options as TransitionMapOptions;
+      await runScreenFade(
+        () => {
+          const swap = () => {
+            applyLoadMap(mapData, loadOptions);
+          };
+          if (during) {
+            during(swap);
+          } else {
+            swap();
+          }
+        },
+        { fadeMs, peakOpacity },
+      );
     },
     defineArchetype: (name, defaults) => {
       runtime.defineArchetype(name, defaults);
@@ -374,6 +378,8 @@ export function createGame(config: GameConfig): GameAPI {
       runtime.isFeetPositionBlocked(feetX, feetY, options),
     resolveNearestWalkableFeet: (feetX, feetY, options = {}) =>
       runtime.resolveNearestWalkableFeet(feetX, feetY, options),
+    ensureEntityOnWalkable: (id, options = {}) =>
+      runtime.ensureEntityOnWalkable(id, options),
     setEntityDestination: (id, destination, options = {}) =>
       runtime.setEntityDestination(id, destination, options),
     clearEntityDestination: (id) => {

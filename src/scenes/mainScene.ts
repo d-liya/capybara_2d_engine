@@ -81,6 +81,7 @@ function spawnStarterPlayer(game: GameAPI): void {
   });
   const playerId = game.spawnAtFeet("player", 500, 700);
   game.setControlledEntity(playerId);
+  game.ensureEntityOnWalkable(playerId);
 }
 
 /**
