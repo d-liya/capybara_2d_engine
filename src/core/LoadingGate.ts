@@ -1,11 +1,13 @@
 /** Fallback gate length when there are no map assets to probe. */
-const DEFAULT_GATE_MS = 1600;
+const DEFAULT_GATE_MS = 2600;
 /** Floor so a warm cache / fast CDN still gets a readable brand wipe. */
-const MIN_GATE_MS = 1600;
+const MIN_GATE_MS = 2600;
 /** Ceiling so a hung image request cannot stall forever. */
 const MAX_GATE_MS = 5000;
 /** Extra beat after the probe image loads before showing Continue. */
-const GATE_DELTA_MS = 280;
+const GATE_DELTA_MS = 400;
+/** Shortest finish animation so the bar always visibly reaches 100%. */
+const MIN_FINISH_MS = 360;
 const LOGO_CROSSFADE_MS = 420;
 const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
@@ -485,12 +487,6 @@ function nextFrame(): Promise<void> {
   });
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -725,6 +721,7 @@ export function createCoreLoadingGate(
     enableContinue();
   };
 
+  // Provisional crawl toward 100% over the ceiling; restarted once duration is known.
   setTimeout(() => {
     progressLine.style.width = "100%";
     revealMask.style.width = "100%";
@@ -740,15 +737,20 @@ export function createCoreLoadingGate(
     const elapsed = performance.now() - gateStarted;
     const remaining = Math.max(0, targetMs - elapsed);
 
-    // Finish the wipe on the remaining budget (or snap if already due).
-    const finishMs = Math.max(80, remaining);
+    // Restart from the current visual width so the bar actually completes
+    // instead of staying on the provisional MAX_GATE_MS timeline.
+    const finishMs = Math.max(MIN_FINISH_MS, remaining);
     const wipeEasing = "cubic-bezier(0.4, 0, 0.2, 1)";
-    progressLine.style.transition = `width ${finishMs}ms ${wipeEasing}`;
-    revealMask.style.transition = `width ${finishMs}ms ${wipeEasing}`;
-    progressLine.style.width = "100%";
-    revealMask.style.width = "100%";
+    for (const el of [progressLine, revealMask]) {
+      const currentWidth = getComputedStyle(el).width;
+      el.style.transition = "none";
+      el.style.width = currentWidth;
+      void el.offsetWidth;
+      el.style.transition = `width ${finishMs}ms ${wipeEasing}`;
+      el.style.width = "100%";
+    }
 
-    await sleep(remaining);
+    await waitForTransitionEnd(progressLine, "width", finishMs);
     await showTitleAndContinue();
   })();
 

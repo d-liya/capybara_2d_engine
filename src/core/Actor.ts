@@ -26,6 +26,13 @@ interface SpriteTrim {
   right: number;
   top: number;
   bottom: number;
+  /**
+   * Horizontal extent of opaque pixels in the feet band (0–1 of frame width).
+   * Measured by scanning up from the bottom past transparent padding.
+   * Omitted when no opaque feet pixels are found.
+   */
+  footLeft?: number;
+  footRight?: number;
 }
 
 interface Animation {
@@ -706,12 +713,48 @@ export default class Actor {
       }
 
       if (maxX < minX) return null;
-      return {
+
+      const trim: SpriteTrim = {
         left: minX / fw,
         right: (maxX + 1) / fw,
         top: minY / fh,
         bottom: (maxY + 1) / fh,
       };
+
+      // Feet width: skip transparent bottom padding, then measure opaque span
+      // across the bottom FOOT_H_RATIO band of the opaque silhouette.
+      let feetBottomY = -1;
+      for (let py = fh - 1; py >= 0; py--) {
+        for (let px = 0; px < fw; px++) {
+          if (data[(py * fw + px) * 4 + 3] > 8) {
+            feetBottomY = py;
+            break;
+          }
+        }
+        if (feetBottomY >= 0) break;
+      }
+
+      if (feetBottomY >= 0) {
+        const contentH = Math.max(1, maxY - minY + 1);
+        const footBandH = Math.max(1, Math.round(contentH * FOOT_H_RATIO));
+        const feetTopY = Math.max(0, feetBottomY - footBandH + 1);
+        let footMinX = fw;
+        let footMaxX = -1;
+        for (let py = feetTopY; py <= feetBottomY; py++) {
+          for (let px = 0; px < fw; px++) {
+            if (data[(py * fw + px) * 4 + 3] > 8) {
+              if (px < footMinX) footMinX = px;
+              if (px > footMaxX) footMaxX = px;
+            }
+          }
+        }
+        if (footMaxX >= footMinX) {
+          trim.footLeft = footMinX / fw;
+          trim.footRight = (footMaxX + 1) / fw;
+        }
+      }
+
+      return trim;
     } catch {
       return null;
     }
@@ -778,8 +821,10 @@ export default class Actor {
     }
 
     // auto: alpha-trim from the *active* sheet so side facings get a narrow
-    // footbox. Center on the fitted flip axis — do not mirror asymmetric trim
-    // with facingX (that shoves the collider sideways on turn-around).
+    // footbox. Prefer the measured feet-band width; fall back to full opaque
+    // width, then inset default. Center on the fitted flip axis — do not
+    // mirror asymmetric trim with facingX (that shoves the collider sideways
+    // on turn-around).
     const fitted = this._getFittedSpriteRect(x, y);
     const anim = this._animations?.[this._activeAnimation];
     const trim = anim?.trim ?? this._collisionTrim;
@@ -790,11 +835,20 @@ export default class Actor {
     const contentH = Math.max(FOOT_H_MIN, bottom - top);
     const footH = Math.max(FOOT_H_MIN, contentH * heightRatio);
 
-    const opaqueW = trim
-      ? Math.max(1, (trim.right - trim.left) * fitted.w)
-      : Math.max(1, fitted.w * (1 - 2 * insetRatio));
+    const insetDefaultW = Math.max(1, fitted.w * (1 - 2 * insetRatio));
+    let footW = insetDefaultW;
+    if (
+      trim &&
+      Number.isFinite(trim.footLeft) &&
+      Number.isFinite(trim.footRight) &&
+      trim.footRight! > trim.footLeft!
+    ) {
+      footW = Math.max(1, (trim.footRight! - trim.footLeft!) * fitted.w);
+    } else if (trim) {
+      footW = Math.max(1, (trim.right - trim.left) * fitted.w);
+    }
     const centerX = fitted.x + fitted.w * 0.5;
-    const halfW = opaqueW * 0.5;
+    const halfW = footW * 0.5;
 
     return {
       x1: centerX - halfW,
@@ -1088,7 +1142,16 @@ export default class Actor {
       const fitted = this._getFittedSpriteRect(this.x, this.y);
       if (trim) {
         const bottom = fitted.y + trim.bottom * fitted.h;
-        const opaqueW = Math.max(1, (trim.right - trim.left) * fitted.w);
+        const hasFeet =
+          Number.isFinite(trim.footLeft) &&
+          Number.isFinite(trim.footRight) &&
+          trim.footRight! > trim.footLeft!;
+        const opaqueW = Math.max(
+          1,
+          (hasFeet
+            ? trim.footRight! - trim.footLeft!
+            : trim.right - trim.left) * fitted.w,
+        );
         const centerX = fitted.x + fitted.w * 0.5;
         worldX1 = centerX - opaqueW * 0.5;
         worldX2 = centerX + opaqueW * 0.5;

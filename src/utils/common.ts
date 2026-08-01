@@ -47,8 +47,9 @@ export type ObjectFitAnchor = "center" | "bottom-center";
 
 /**
  * How character foot colliders are derived from the sprite box.
- * - `auto` (default): alpha-trim opaque pixels, mapped into the same fitted
- *   rect used for drawing (`imageFit` + bottom-center).
+ * - `auto` (default): measure the opaque feet band (scan up past transparent
+ *   bottom padding), mapped into the same fitted rect used for drawing
+ *   (`imageFit` + bottom-center). Falls back to full opaque width, then inset.
  * - `box`: full entity width×height bottom slice (no alpha trim / letterbox).
  * - `manual`: entity-box bottom slice using `footHeightRatio` / `footInsetRatio`
  *   (or the built-in defaults).

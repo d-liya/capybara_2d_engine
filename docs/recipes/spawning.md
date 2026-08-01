@@ -57,12 +57,12 @@ For proximity to grid cells or interactables, use **`game.getEntityFeet(controll
 
 **Navigation mistake:** pathfinding destinations use feet/ground points, but entity `x` / `y` is still top-left. Do not manually convert destination feet points back to top-left in gameplay systems. For walking NPCs, spawn with `spawnAtFeet(...)` and move with `game.setEntityDestination(...)`; the runtime preserves sprite foot anchors and avoids one-frame jumps.
 
-**Footbox:** By default (`footboxMode: "auto"`), the yellow foot collider is alpha-trimmed and placed in the same fitted sprite space as drawing (`imageFit` + bottom-center). Use `footboxMode: "box"` for the full entity bottom, or `"manual"` with `footHeightRatio` / `footInsetRatio` for hardcoded slices.
+**Footbox:** By default (`footboxMode: "auto"`), the yellow foot collider is sized to the opaque feet band (scanning up past transparent bottom padding) and placed in the same fitted sprite space as drawing (`imageFit` + bottom-center). If feet pixels can’t be measured it falls back to full opaque width, then the inset default. Use `footboxMode: "box"` for the full entity bottom, or `"manual"` with `footHeightRatio` / `footInsetRatio` for hardcoded slices.
 
 ```ts
 game.defineArchetype("player", {
   ...toArchetype(charPlayer),
-  // default — opaque-pixel feet inside fitted sprite
+  // default — opaque feet-band width inside fitted sprite
   footboxMode: "auto",
 });
 
