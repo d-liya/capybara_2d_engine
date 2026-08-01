@@ -15,7 +15,7 @@
   },
   "author": "Capybara Game Team",
   "license": "MIT",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^25.9.0",

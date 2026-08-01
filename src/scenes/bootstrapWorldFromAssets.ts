@@ -78,7 +78,17 @@ function frameDurationMsForCharacter(character: AnyGeneratedCharacter): number {
   );
 }
 
+/** Proximity for overlays / state_change / VFX (distance to AABB edge). */
 const INTERACT_RADIUS = 140;
+/**
+ * Max distance from an enterable trigger anchor for the E prompt + transition.
+ * Authored enterable boxes are often the whole building; measuring distance to
+ * the AABB edge with a large radius made courtyard-wide "Press E to enter" zones.
+ * Anchor is footprint center (or bottom-center for tall building boxes).
+ */
+const ENTERABLE_INTERACT_RADIUS = 64;
+/** Cap glow / prompt footprint half-extents around the door center (norm space). */
+const ENTERABLE_PROMPT_MAX_HALF = 48;
 
 type PanelPixels = { width: number; height: number };
 
@@ -477,6 +487,77 @@ function distanceToBounds(
   return Math.hypot(x - clampedX, y - clampedY);
 }
 
+function boundsCenter(bounds: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}): { x: number; y: number } {
+  return {
+    x: (bounds.x1 + bounds.x2) / 2,
+    y: (bounds.y1 + bounds.y2) / 2,
+  };
+}
+
+/**
+ * Interact / glow anchor for an enterable. Tall authored boxes are usually the
+ * whole building — bias to the bottom-center (door face on top-down maps)
+ * instead of the unreachable geometric middle.
+ */
+function enterableAnchor(bounds: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}): { x: number; y: number } {
+  const w = Math.max(0, bounds.x2 - bounds.x1);
+  const h = Math.max(0, bounds.y2 - bounds.y1);
+  const cx = (bounds.x1 + bounds.x2) / 2;
+  if (h > w * 1.15) {
+    return {
+      x: cx,
+      y: bounds.y2 - Math.min(h * 0.12, ENTERABLE_PROMPT_MAX_HALF * 0.65),
+    };
+  }
+  return { x: cx, y: (bounds.y1 + bounds.y2) / 2 };
+}
+
+function distanceToEnterableAnchor(
+  x: number,
+  y: number,
+  bounds: { x1: number; y1: number; x2: number; y2: number },
+): number {
+  const a = enterableAnchor(bounds);
+  return Math.hypot(x - a.x, y - a.y);
+}
+
+/**
+ * Shrink huge authored enterable boxes to a door-sized footprint around the
+ * interact anchor for the world prompt glow and arrival lockout.
+ */
+function enterableInteractBounds(bounds: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}): { x1: number; y1: number; x2: number; y2: number } {
+  const a = enterableAnchor(bounds);
+  const halfW = Math.min(
+    Math.max((bounds.x2 - bounds.x1) / 2, 18),
+    ENTERABLE_PROMPT_MAX_HALF,
+  );
+  const halfH = Math.min(
+    Math.max((bounds.y2 - bounds.y1) / 2, 14),
+    ENTERABLE_PROMPT_MAX_HALF,
+  );
+  return {
+    x1: a.x - halfW,
+    y1: a.y - halfH,
+    x2: a.x + halfW,
+    y2: a.y + halfH,
+  };
+}
+
 function pointInBounds(
   x: number,
   y: number,
@@ -786,7 +867,7 @@ function nearestEnterableAuthored(
   placements: AuthoredPlacement[],
   x: number,
   y: number,
-  radius: number,
+  radius: number = ENTERABLE_INTERACT_RADIUS,
 ): AuthoredPlacement | null {
   let best: AuthoredPlacement | null = null;
   let bestDist = radius;
@@ -801,7 +882,8 @@ function nearestEnterableAuthored(
     if (!dest) continue;
     const bounds = placementBounds(placement.box_2d);
     if (!bounds) continue;
-    const d = distanceToBounds(x, y, bounds);
+    // Anchor + max radius so building-sized footprints don't cover the courtyard.
+    const d = distanceToEnterableAnchor(x, y, bounds);
     if (d <= bestDist) {
       bestDist = d;
       best = placement;
@@ -841,13 +923,13 @@ function nearestEnterable(
   targets: MapPlacementTarget[],
   x: number,
   y: number,
-  radius: number,
+  radius: number = ENTERABLE_INTERACT_RADIUS,
 ): MapPlacementTarget | null {
   let best: MapPlacementTarget | null = null;
   let bestDist = radius;
   for (const target of targets) {
     if (!target.enterable || !target.destinationMapId) continue;
-    const d = distanceToBounds(x, y, target.bounds);
+    const d = distanceToEnterableAnchor(x, y, target.bounds);
     if (d <= bestDist) {
       bestDist = d;
       best = target;
@@ -1053,11 +1135,11 @@ function updateTransitionPrompt(opts: {
     authored,
     x,
     y,
-    INTERACT_RADIUS,
+    ENTERABLE_INTERACT_RADIUS,
   );
   const enterableTarget = enterableAuthored
     ? null
-    : nearestEnterable(game.getPlacementTargets(), x, y, INTERACT_RADIUS);
+    : nearestEnterable(game.getPlacementTargets(), x, y, ENTERABLE_INTERACT_RADIUS);
 
   const dest =
     (enterableAuthored &&
@@ -1073,13 +1155,15 @@ function updateTransitionPrompt(opts: {
     return;
   }
 
-  const bounds = enterableAuthored
+  const rawBounds = enterableAuthored
     ? placementBounds(enterableAuthored.box_2d)
     : (enterableTarget?.bounds ?? null);
-  if (!bounds) {
+  if (!rawBounds) {
     clearTransitionPrompt(game);
     return;
   }
+  // Anchor glow/prompt on a capped footprint around the door / trigger center.
+  const bounds = enterableInteractBounds(rawBounds);
 
   const label = resolveEnterableLabel(
     enterableAuthored ?? enterableTarget,
@@ -1146,7 +1230,7 @@ function handleDefaultInteract(
     authored,
     x,
     y,
-    INTERACT_RADIUS,
+    ENTERABLE_INTERACT_RADIUS,
   );
   const enterableDest =
     (enterableAuthored &&
@@ -1154,7 +1238,7 @@ function handleDefaultInteract(
         enterableAuthored.destinationMapId.trim()) ||
         (typeof enterableAuthored.destinationMapAssetId === "string" &&
           enterableAuthored.destinationMapAssetId.trim()))) ||
-    nearestEnterable(game.getPlacementTargets(), x, y, INTERACT_RADIUS)
+    nearestEnterable(game.getPlacementTargets(), x, y, ENTERABLE_INTERACT_RADIUS)
       ?.destinationMapId;
 
   if (enterableDest && !lockedInArrival) {
@@ -1188,11 +1272,16 @@ function handleDefaultInteract(
                 placementsForMap(next, placementIndex),
                 spawnFeet.x,
                 spawnFeet.y,
-                INTERACT_RADIUS,
+                // Spawn may sit just outside the tight interact radius; search
+                // a bit farther, then lock out on the capped door footprint.
+                ENTERABLE_INTERACT_RADIUS * 2,
               );
-              arrivalRef.mapId = next.id;
-              arrivalRef.bounds = destEnterable
+              const destBounds = destEnterable
                 ? placementBounds(destEnterable.box_2d)
+                : null;
+              arrivalRef.mapId = next.id;
+              arrivalRef.bounds = destBounds
+                ? enterableInteractBounds(destBounds)
                 : null;
             }
           },
