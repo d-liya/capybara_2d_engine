@@ -344,10 +344,14 @@ const push = async () => {
   clearSyncStatus()
   console.log("Pushed to Capybara.")
 
-  // Import allowlisted src/data edits into Postgres, then recompile projection.
+  // Import allowlisted src/data edits into Postgres only.
+  // Do not recompile DB→Relace here — that would rewrite the commit we just
+  // pushed (e.g. restore JSON deleted locally but still present in Postgres).
   try {
     const imported = await apiFetch("/api/cli/import-engine-assets", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sync: false }),
     })
     if (imported?.imported) {
       console.log(
