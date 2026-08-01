@@ -40,10 +40,12 @@ npm run dev
 When you download an HTML export from [capybara.build](https://www.capybara.build), the zip includes a `.env` with a chat-scoped API key and this project's `.git` history.
 
 ```bash
-npm run pull     # download latest code from your Capybara project
-npm run push     # sync local commits to Capybara
+npm run pull     # fetch + merge latest code from Capybara
+npm run push     # merge cloud first, then upload local commits
 npm run publish  # push, build locally, upload dist/, print live / game / app links
 ```
+
+`pull` / `push` merge with the cloud (they do not overwrite your `origin`). On conflict they write `.capybara/sync-status.json` and exit `2` so a coding agent can resolve markers, commit, and re-run.
 
 For new generated assets (maps, characters, props, audio, HUD), create them on [capybara.build](https://www.capybara.build) then `npm run pull`.
 

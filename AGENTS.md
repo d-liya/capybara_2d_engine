@@ -27,11 +27,28 @@ npm run publish  # push, build locally, publish the playable game
 
 When this project was downloaded from Capybara, `.env` contains a chat-scoped API key. Use it only for these scripts:
 
-- **`npm run pull`** — fetch the latest source from the linked Capybara project (use after the user made changes on [capybara.build](https://www.capybara.build)).
-- **`npm run push`** — sync local code commits back to Capybara.
+- **`npm run pull`** — fetch + merge the latest source from the linked Capybara project (use after the user made changes on [capybara.build](https://www.capybara.build)).
+- **`npm run push`** — merge cloud first (same as pull), then upload local commits to Capybara. Never force-pushes.
 - **`npm run publish`** — push, run a production build, upload `dist/`, and print the live / game / app links.
 
-These scripts talk to a dedicated git remote named `capybara` (they do **not** overwrite the user's `origin`, so a personal GitHub remote can coexist). Do not commit `.env`.
+These scripts talk to a dedicated git remote named `capybara` (they do **not** overwrite the user's `origin`, so a personal GitHub remote can coexist). The `capybara` remote uses a long-lived Relace repo token (no TTL), so IDE Source Control can also `git push` / `git pull` that remote directly. Do not commit `.env`.
+
+On [capybara.build](https://www.capybara.build), when the preview sandbox is already running, focusing the tab best-effort pulls Relace into the sandbox (skipped if the sandbox working tree is dirty so in-progress agent edits are not clobbered).
+
+#### Sync conflicts (agents must handle)
+
+Both `pull` and `push` merge `capybara/<branch>` into the local branch. If histories diverged:
+
+1. A backup branch `capybara-local-backup-…` is created automatically (pre-merge HEAD).
+2. Conflict markers are left in the working tree.
+3. Machine-readable status is written to **`.capybara/sync-status.json`** (`state: "conflict"`, `files: [...]`, `backupBranch`, `ours` / `theirs` SHAs). Exit code **2**.
+4. **You (the coding agent) should fix this yourself:**
+   - Read `.capybara/sync-status.json` and open every path in `files`.
+   - Resolve `<<<<<<<` / `=======` / `>>>>>>>` markers (keep a coherent result; prefer preserving both local gameplay edits and cloud/generated asset updates when possible).
+   - `git add` the resolved files, then commit the merge (`git commit --no-edit` is fine if the merge message exists).
+   - Re-run `npm run push` (or `npm run pull` if you only needed cloud changes).
+5. Do **not** use `git merge --abort` unless the user asks — that throws away the in-progress merge. Prefer resolving. The backup branch is the safety net.
+6. Do **not** `git push --force` to `capybara` unless the user explicitly requests it.
 
 ### Generated assets
 

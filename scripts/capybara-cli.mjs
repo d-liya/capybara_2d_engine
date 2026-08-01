@@ -1,12 +1,24 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+  unlinkSync,
+} from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, "..")
+
+const CAPYBARA_REMOTE = "capybara"
+const SYNC_STATUS_PATH = path.join(root, ".capybara", "sync-status.json")
+const CONFLICT_EXIT_CODE = 2
 
 const loadEnvFile = () => {
   const envPath = path.join(root, ".env")
@@ -37,37 +49,41 @@ const apiUrl = (
   process.env.CAPYBARA_API_URL || "https://www.capybara.build"
 ).replace(/\/$/, "")
 
-const fail = (message) => {
+const fail = (message, code = 1) => {
   console.error(message)
-  process.exit(1)
+  process.exit(code)
 }
 
 if (!apiKey) fail("Missing CAPYBARA_API_KEY in .env")
 if (!chatId) fail("Missing CAPYBARA_CHAT_ID in .env")
 
-const run = (command, args, options = {}) => {
-  const result = spawnSync(command, args, {
+const runResult = (command, args, options = {}) =>
+  spawnSync(command, args, {
     cwd: root,
-    stdio: "inherit",
     shell: false,
     ...options,
   })
+
+const run = (command, args, options = {}) => {
+  const result = runResult(command, args, { stdio: "inherit", ...options })
   if (result.status !== 0) {
     process.exit(result.status ?? 1)
   }
 }
 
-const runCapture = (command, args) => {
-  const result = spawnSync(command, args, {
-    cwd: root,
-    encoding: "utf8",
-    shell: false,
-  })
+const runCapture = (command, args, { allowFail = false } = {}) => {
+  const result = runResult(command, args, { encoding: "utf8" })
+  const stdout = (result.stdout || "").trim()
+  const stderr = (result.stderr || "").trim()
   if (result.status !== 0) {
-    const err = (result.stderr || result.stdout || "").trim()
-    fail(err || `${command} ${args.join(" ")} failed`)
+    if (allowFail) {
+      return { ok: false, stdout, stderr, status: result.status ?? 1 }
+    }
+    fail(stderr || stdout || `${command} ${args.join(" ")} failed`)
   }
-  return (result.stdout || "").trim()
+  return allowFail
+    ? { ok: true, stdout, stderr, status: 0 }
+    : stdout
 }
 
 const apiFetch = async (pathname, init = {}) => {
@@ -93,7 +109,7 @@ const apiFetch = async (pathname, init = {}) => {
 
 const ensureCommit = () => {
   const status = runCapture("git", ["status", "--porcelain"])
-  if (!status) return
+  if (!status) return false
   run("git", ["add", "-A"])
   run("git", [
     "-c",
@@ -104,13 +120,63 @@ const ensureCommit = () => {
     "-m",
     `Sync from local ${new Date().toISOString()}`,
   ])
+  return true
 }
 
-const CAPYBARA_REMOTE = "capybara"
+const clearSyncStatus = () => {
+  if (existsSync(SYNC_STATUS_PATH)) {
+    try {
+      unlinkSync(SYNC_STATUS_PATH)
+    } catch {
+      // ignore
+    }
+  }
+}
+
+const writeSyncStatus = (payload) => {
+  mkdirSync(path.dirname(SYNC_STATUS_PATH), { recursive: true })
+  writeFileSync(SYNC_STATUS_PATH, `${JSON.stringify(payload, null, 2)}\n`)
+}
+
+const listConflictedFiles = () => {
+  const result = runCapture("git", ["diff", "--name-only", "--diff-filter=U"], {
+    allowFail: true,
+  })
+  if (!result.ok || !result.stdout) return []
+  return result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+const createBackupBranch = () => {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+  const short = runCapture("git", ["rev-parse", "--short", "HEAD"])
+  const name = `capybara-local-backup-${stamp}-${short}`
+  run("git", ["branch", name])
+  return name
+}
 
 const configureRemote = async () => {
   if (!existsSync(path.join(root, ".git"))) {
     fail("No .git directory found. Re-download the HTML export from Capybara.")
+  }
+
+  // Prefer reusing an existing working `capybara` remote (avoids minting tokens).
+  const existingUrl = runCapture(
+    "git",
+    ["remote", "get-url", CAPYBARA_REMOTE],
+    { allowFail: true }
+  )
+  if (existingUrl.ok && existingUrl.stdout) {
+    const probe = runCapture(
+      "git",
+      ["ls-remote", CAPYBARA_REMOTE, "HEAD"],
+      { allowFail: true }
+    )
+    if (probe.ok) {
+      return { remoteUrl: existingUrl.stdout, branch: "main" }
+    }
   }
 
   const remote = await apiFetch("/api/cli/git-remote", { method: "POST" })
@@ -118,7 +184,7 @@ const configureRemote = async () => {
   const branch = remote?.branch || "main"
   if (!remoteUrl) fail("No Relace remote URL returned")
 
-  // Use a dedicated remote so the user's own `origin` (e.g. GitHub) is left alone.
+  // Dedicated remote — do not overwrite the user's `origin` (e.g. GitHub).
   const remotes = runCapture("git", ["remote"])
   if (remotes.split(/\s+/).includes(CAPYBARA_REMOTE)) {
     run("git", ["remote", "set-url", CAPYBARA_REMOTE, remoteUrl])
@@ -129,18 +195,163 @@ const configureRemote = async () => {
   return { remoteUrl, branch }
 }
 
-const push = async () => {
+/**
+ * Fetch cloud + merge into local. On conflict: write status JSON and exit 2.
+ * @returns {{ branch: string, backupBranch: string | null, merged: boolean }}
+ */
+const integrateCloud = async ({ reason }) => {
   const { branch } = await configureRemote()
+
+  if (existsSync(path.join(root, ".git", "MERGE_HEAD"))) {
+    const files = listConflictedFiles()
+    if (!existsSync(SYNC_STATUS_PATH)) {
+      writeSyncStatus({
+        state: "conflict",
+        reason: "existing-merge",
+        branch,
+        remote: CAPYBARA_REMOTE,
+        backupBranch: null,
+        ours: null,
+        theirs: null,
+        files,
+        createdAt: new Date().toISOString(),
+        nextSteps: [
+          "Finish the in-progress merge before running pull/push again",
+          "Read .capybara/sync-status.json and resolve conflict markers",
+          "git add <resolved files> && git commit --no-edit",
+          "npm run push",
+        ],
+      })
+    }
+    console.error(
+      "A merge is already in progress. Resolve conflicts (see .capybara/sync-status.json), commit, then re-run."
+    )
+    process.exit(CONFLICT_EXIT_CODE)
+  }
+
+  // Commit any dirty work first so merge has a clean tree and local edits aren't lost.
   ensureCommit()
+
+  run("git", ["fetch", CAPYBARA_REMOTE, branch])
+
+  const localHead = runCapture("git", ["rev-parse", "HEAD"])
+  const remoteRef = `${CAPYBARA_REMOTE}/${branch}`
+  const remoteHeadResult = runCapture("git", ["rev-parse", remoteRef], {
+    allowFail: true,
+  })
+  if (!remoteHeadResult.ok) {
+    fail(
+      `Remote branch ${remoteRef} not found after fetch. Does the Capybara project have commits yet?`
+    )
+  }
+  const remoteHead = remoteHeadResult.stdout
+
+  // Already up to date with cloud (remote is ancestor of local, or equal).
+  const bases = runCapture("git", ["merge-base", localHead, remoteHead])
+  if (bases === remoteHead) {
+    clearSyncStatus()
+    return { branch, backupBranch: null, merged: false }
+  }
+
+  const backupBranch = createBackupBranch()
+  console.log(`Backup branch: ${backupBranch}`)
+
+  const merge = runResult(
+    "git",
+    [
+      "-c",
+      "user.name=Capybara Local",
+      "-c",
+      "user.email=local@capybara.build",
+      "merge",
+      "--no-edit",
+      "--no-ff",
+      remoteRef,
+      "-m",
+      `Merge Capybara ${branch} (${reason})`,
+    ],
+    { stdio: "inherit" }
+  )
+
+  if (merge.status === 0) {
+    clearSyncStatus()
+    return { branch, backupBranch, merged: true }
+  }
+
+  const files = listConflictedFiles()
+  if (files.length === 0) {
+    // Not a content conflict (shallow history, hooks, etc.) — abort and surface error.
+    runResult("git", ["merge", "--abort"], { stdio: "ignore" })
+    writeSyncStatus({
+      state: "error",
+      reason,
+      branch,
+      remote: CAPYBARA_REMOTE,
+      backupBranch,
+      ours: localHead,
+      theirs: remoteHead,
+      files: [],
+      createdAt: new Date().toISOString(),
+      nextSteps: [
+        "Merge failed without conflict markers (history may be unrelated or shallow)",
+        `Local backup is at ${backupBranch}`,
+        "Try: git fetch capybara --unshallow  (if shallow) then npm run pull again",
+        "Or ask the user whether to keep local or cloud and reset intentionally",
+      ],
+    })
+    fail(
+      `Merge with Capybara failed without file conflicts. See .capybara/sync-status.json (backup: ${backupBranch})`,
+      1
+    )
+  }
+
+  writeSyncStatus({
+    state: "conflict",
+    reason,
+    branch,
+    remote: CAPYBARA_REMOTE,
+    backupBranch,
+    ours: localHead,
+    theirs: remoteHead,
+    files,
+    createdAt: new Date().toISOString(),
+    nextSteps: [
+      "Read .capybara/sync-status.json for the conflicted file list",
+      "Open each file and resolve conflict markers (<<<<<<< ======= >>>>>>>)",
+      "git add <resolved files>",
+      'git -c user.name="Capybara Local" -c user.email=local@capybara.build commit --no-edit',
+      "npm run push   # or npm run pull if you only needed cloud changes",
+    ],
+  })
+
+  console.error("")
+  console.error("Merge conflict with Capybara cloud.")
+  console.error(`Wrote ${path.relative(root, SYNC_STATUS_PATH)}`)
+  if (files.length > 0) {
+    console.error("Conflicted files:")
+    for (const file of files) console.error(`  - ${file}`)
+  }
+  console.error(
+    "Resolve markers, commit the merge, then re-run npm run push (or pull)."
+  )
+  console.error(`Local backup branch kept at: ${backupBranch}`)
+  process.exit(CONFLICT_EXIT_CODE)
+}
+
+const push = async () => {
+  const { branch } = await integrateCloud({ reason: "before-push" })
   run("git", ["push", "-u", CAPYBARA_REMOTE, `HEAD:${branch}`])
+  clearSyncStatus()
   console.log("Pushed to Capybara.")
 }
 
 const pull = async () => {
-  const { branch } = await configureRemote()
-  run("git", ["fetch", CAPYBARA_REMOTE, branch])
-  run("git", ["pull", "--ff-only", CAPYBARA_REMOTE, branch])
-  console.log("Pulled latest from Capybara.")
+  const { merged } = await integrateCloud({ reason: "pull" })
+  if (merged) {
+    console.log("Pulled and merged latest from Capybara.")
+  } else {
+    console.log("Already up to date with Capybara.")
+  }
 }
 
 const collectFiles = (dir, base, out) => {
