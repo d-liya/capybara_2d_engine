@@ -296,7 +296,7 @@ export function createTouchControlsWidget(
           button.className = [
             FONT,
             "capy-key flex h-12 w-12 items-center justify-center rounded-full",
-            "text-[14px] font-black",
+            "text-[14px] font-normal",
           ].join(" ");
           button.style.touchAction = "none";
 

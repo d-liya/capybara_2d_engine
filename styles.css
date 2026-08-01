@@ -43,7 +43,11 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  /* Google Fonts only ships Geist Pixel at 400. WebKit drops the face entirely
+     when a heavier weight is requested and falls back to system sans. */
   font-family: "Geist Pixel", sans-serif;
+  font-weight: 400;
+  font-synthesis: none;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;

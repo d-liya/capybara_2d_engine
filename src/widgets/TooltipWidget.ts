@@ -156,11 +156,11 @@ export function createTooltipWidget(): Widget {
       ].join(" ");
 
       titleEl = document.createElement("div");
-      titleEl.className = "capy-text text-sm font-bold leading-tight";
+      titleEl.className = "capy-text text-sm font-normal leading-tight";
 
       bodyEl = document.createElement("div");
       bodyEl.className =
-        "capy-text-dim mt-1 text-xs font-medium leading-snug";
+        "capy-text-dim mt-1 text-xs font-normal leading-snug";
 
       cardEl.append(titleEl, bodyEl);
       root.append(cardEl);

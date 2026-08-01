@@ -115,12 +115,12 @@ export function createMapTransitionPromptWidget(
       keyBadgeEl = document.createElement("span");
       keyBadgeEl.className = [
         "capy-key inline-flex min-w-[1.6rem] items-center justify-center",
-        "px-1.5 py-0.5 text-[11px] font-black tracking-wide",
+        "px-1.5 py-0.5 text-[11px] font-normal tracking-wide",
       ].join(" ");
       keyBadgeEl.textContent = "E";
 
       textEl = document.createElement("span");
-      textEl.className = "capy-text text-[13px] font-semibold leading-snug";
+      textEl.className = "capy-text text-[13px] font-normal leading-snug";
 
       promptEl.append(keyBadgeEl, textEl);
       root.append(glowEl, promptEl);

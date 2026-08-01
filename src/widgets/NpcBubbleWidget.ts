@@ -41,14 +41,14 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
     const name = document.createElement("div");
     name.className = [
       "mb-1.5 flex items-center gap-2",
-      "text-[10px] font-black uppercase tracking-[0.16em]",
+      "text-[10px] font-normal uppercase tracking-[0.16em]",
       "text-capy-accent [text-shadow:1px_1px_0_var(--color-capy-ink)]",
       "after:h-[2px] after:flex-1 after:bg-capy-rim",
     ].join(" ");
 
     const text = document.createElement("div");
     text.className =
-      "capy-text min-h-[38px] text-[13px] font-semibold leading-snug";
+      "capy-text min-h-[38px] text-[13px] font-normal leading-snug";
 
     // Hard-edged notch built from the panel tones, not a blurred glass wedge.
     const tail = document.createElement("div");
