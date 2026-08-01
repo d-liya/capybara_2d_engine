@@ -28,8 +28,8 @@ npm run publish  # push, build locally, publish the playable game
 When this project was downloaded from Capybara, `.env` contains a chat-scoped API key. Use it only for these scripts:
 
 - **`npm run pull`** — fetch + merge the latest source from the linked Capybara project (use after the user made changes on [capybara.build](https://www.capybara.build)).
-- **`npm run push`** — merge cloud first (same as pull), then upload local commits to Capybara. Never force-pushes.
-- **`npm run publish`** — push, run a production build, upload `dist/`, and print the live / game / app links.
+- **`npm run push`** — merge cloud first (same as pull), then upload local commits to Capybara. After a successful push, allowlisted `src/data/` edits are imported into Postgres (asset SoT) and the projection is recompiled. Never force-pushes.
+- **`npm run publish`** — push (including that import), run a production build, upload `dist/`, and print the live / game / app links.
 
 These scripts talk to a dedicated git remote named `capybara` (they do **not** overwrite the user's `origin`, so a personal GitHub remote can coexist). The `capybara` remote uses a long-lived Relace repo token (no TTL), so IDE Source Control can also `git push` / `git pull` that remote directly. Do not commit `.env`.
 

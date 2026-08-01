@@ -343,6 +343,25 @@ const push = async () => {
   run("git", ["push", "-u", CAPYBARA_REMOTE, `HEAD:${branch}`])
   clearSyncStatus()
   console.log("Pushed to Capybara.")
+
+  // Import allowlisted src/data edits into Postgres, then recompile projection.
+  try {
+    const imported = await apiFetch("/api/cli/import-engine-assets", {
+      method: "POST",
+    })
+    if (imported?.imported) {
+      console.log(
+        `Imported ${imported.patchedAssetIds?.length ?? 0} asset(s) into Capybara DB.`
+      )
+    } else if (imported?.skipped) {
+      console.log(`Asset import skipped (${imported.skipped}).`)
+    }
+  } catch (error) {
+    console.error(
+      "Asset import after push failed:",
+      error instanceof Error ? error.message : error
+    )
+  }
 }
 
 const pull = async () => {
