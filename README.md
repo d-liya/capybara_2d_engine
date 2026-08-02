@@ -29,7 +29,7 @@ The entire public engine interface lives in a single file: `src/Game.ts`. This g
 - **Dependency-Light:** Fewer moving parts means fewer version fights, easier extensions, and a codebase small enough for agents to hold in context.
 - **Server SDK:** Includes a built-in SDK (`src/sdk/`) to handle the boring parts like player accounts, cloud saves, and multiplayer in just a line or two.
 
-## Quick Start
+## How to use this engine
 
 Capybara v2 moves asset generation into a web interface: start there to generate your worlds, characters, props, and audio, then export the code and bring it into your own coding agent to wire up gameplay.
 
@@ -40,6 +40,8 @@ Capybara v2 moves asset generation into a web interface: start there to generate
 5. Publish directly from your coding agent when ready
 
 The engine also works as a **standalone product** — you can run it, write gameplay code, and ship without generating any new assets.
+
+## Quick Start
 
 Get the engine running locally:
 
