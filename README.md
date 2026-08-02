@@ -1,12 +1,20 @@
 # Capybara 2.5D Engine
 
+[![Walkthrough](https://i.vimeocdn.com/video/2186076829-5f20fc4efb4bdc6fafa3b21b666fcb6d2d3c0f24390aef306c4d5751031a5905-d_1280)](https://vimeo.com/1215006229)
+
+**Watch:** [Web interface walkthrough](https://vimeo.com/1215006229)
+
 **Capybara v2 is here.** This update brings:
 
 - **Richly detailed maps**, generated with far more depth, texture, and life in every tile
 - **A web interface built for pixel-perfect control**, so every placement feels exact, not approximate
 - **Sharper art consistency** across props, characters, and HUDs, paired with a brand new layer of voice lines, sound effects, and an original background score
 
-**Try the demo game:** [DEMO LINK]
+**Try the demo game:** https://game-043brubvt3l0.capybara.build/
+
+### Why a web interface instead of MCP?
+
+We're releasing v2 with a web interface instead of MCP for now. As worlds get more detailed, a graphical interface gives you a level of control that coding agents alone can't: precise placement, direct editing of the world as you build it, and the ability to see changes instantly rather than describing them in text.
 
 **Platform:** [www.capybara.build](https://www.capybara.build/)
 
@@ -40,7 +48,7 @@ npm install
 npm run dev
 ```
 
-> Miss the old MCP setup? Let us know on [Discord](https://discord.gg/GTfuBwCRd) — happy to bring back support if there's demand for it.
+> Miss the old MCP setup? It's still available with the previous engine on the [`v1` branch](https://github.com/d-liya/capybara_2d_engine/tree/v1). Let us know on [Discord](https://discord.gg/GTfuBwCRd) if you'd like to see MCP support return in v2.
 
 ### Assets look wrong?
 
