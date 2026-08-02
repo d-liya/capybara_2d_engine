@@ -80,6 +80,8 @@ export interface GameSDKMultiplayerGroup {
 
 export interface GameSDKInterface {
   init: (options?: GameServerClientOptions) => GameSDKInterface;
+  /** This enables analytics by default (SDK init + guest session + playtime). */
+  enableAnalytics: () => Promise<void>;
   auth: GameSDKAuthGroup;
   save: GameSDKSaveGroup;
   storage: GameSDKStorageGroup;

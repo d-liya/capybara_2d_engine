@@ -16,9 +16,11 @@ Adjust the relative path if needed.
 
 ## Initialization
 
-Gameplay code usually does **not** call `sdk.init()`.
+`main.ts` calls `enableAnalyticsByDefault()` on boot. **This enables analytics by default**: when `window.gameId` is set it initializes the SDK, ensures a guest session, and starts playtime tracking. Local/dev without a game id is a no-op.
 
-SDK calls lazy-initialize from `window.gameId`, which is injected by `index.html`. Do not pass a game id in gameplay code.
+Gameplay code usually does **not** call `sdk.init()` or `sdk.enableAnalytics()`.
+
+SDK calls also lazy-initialize from `window.gameId`, which is injected by `index.html`. Do not pass a game id in gameplay code.
 
 Only call eager initialization when explicitly required for custom client options:
 
