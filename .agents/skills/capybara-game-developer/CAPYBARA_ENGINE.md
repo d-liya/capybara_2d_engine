@@ -11,17 +11,15 @@ Treat the repo as four layers:
    - spawn/patch/query entities
    - register resources, systems, inputs, and widgets
    - resolve generated assets/audio
-2. **SDK facade** — `src/sdk/index.ts` plus `docs/SDK_FACADE.md`
-   - auth/session
-   - save/load
-   - save/load
-3. **Generated facts** — `src/data/assets.md` and `src/scenes/SCENES.md`
-   - current map handles, map VFX/spritesheets, characters, animations, props, widgets, audio, placement targets
-   - active/recommended scene composition
-4. **Gameplay modules** — `src/types`, `src/archetypes`, `src/systems`, `src/inputs`, `src/widgets`, `src/scenes`
+2. **SDK facade** — `src/sdk/index.ts` plus [SDK_FACADE.md](SDK_FACADE.md)
+   - auth/session, save/load, storage, multiplayer
+3. **Generated assets** — `src/data/capybara-assets.json` + lean `map_*.json` / `.sprites.json` / `.placements.json` / `char_*.json` / `prop_*.json` / `huds.json` / `common.json`, with handles from `generated.ts` re-exported by `src/data/index.ts`
+   - after sync, `generatedWorld.ts` → `bootstrapWorldFromAssets` already loads the start map, defines archetypes, spawns `characterPlacements`, starts BGM, loads atmosphere from placements, and binds default interact
+   - active scene composition: `src/scenes/SCENES.md`
+4. **Gameplay modules** — `src/types`, `src/archetypes`, `src/systems`, `src/inputs`, `src/widgets`, `src/scenes` (`configureGameplay` in `mainScene.ts`)
    - game-specific behavior built on the facades above
 
-Avoid inspecting `src/core/` for normal gameplay work. Do not inspect generated JSON just to find names or URLs. Avoid SDK internals except `src/sdk/index.ts`.
+Avoid inspecting `src/core/` for normal gameplay work. Prefer lean map JSON; open sprites sidecars for polygons and placements sidecars for placement lists. Avoid SDK internals except `src/sdk/index.ts`.
 
 Keep game UI clean. Do not render developer/debug errors, stack traces, raw exception messages, or failed SDK response payloads into HUD/dialogue widgets. Log technical details to the browser console with `console.error(...)` / `console.warn(...)`; if the player needs feedback, show only neutral gameplay text such as "Something went wrong" or "Try again".
 
@@ -32,18 +30,27 @@ This section is the engine-side reference map once the task is clearly gameplay-
 For a gameplay feature, start with:
 
 ```txt
-src/data/assets.md
+src/data/capybara-assets.json  # revision + ownership (absent until sync)
+src/data/index.ts              # exported handles + adapters
+src/data/map_*.json            # lean map layout / overlays
+src/data/map_*.placements.json # placement / characters / HUD / atmosphere
+src/data/char_*.json           # characters / animations
+src/data/prop_*.json           # prop groups / items
+src/data/common.json           # shared art / audio names
+src/scenes/generatedWorld.ts   # what bootstrap already wired
 src/scenes/SCENES.md
+src/scenes/mainScene.ts        # configureGameplay hook
 ```
 
 Then read only the targeted public reference that matches the task:
 
 ```txt
-docs/SDK_FACADE.md                 # auth, save/load
+.agents/skills/capybara-game-developer/SDK_FACADE.md  # auth, save/load
+.agents/skills/capybara-game-developer/ASSET_INTEGRATION.md  # overlays, travel, HUD scaffolds
 docs/recipes/farming-sim.md        # day/season/crops/gold
 docs/recipes/map-placement.md      # generated map placement zones
 docs/recipes/inventory-tools.md    # hotbar/tool/cursor attachment
-docs/recipes/npc-dialogue.md       # nearby NPC dialogue; scripted default
+docs/recipes/npc-primitives.md     # NPC state, proximity, barks
 docs/recipes/save-load.md          # persistent game state
 docs/recipes/hud-widget.md         # generated HUD widget adaptation
 docs/recipes/season-atmosphere.md  # tint/overlay atmosphere
@@ -51,33 +58,38 @@ docs/recipes/combat-projectiles.md # combat, bullets, damage, cooldowns
 docs/recipes/enemy-ai-waves.md     # simple enemy behavior and wave spawning
 docs/recipes/rpg-quests-inventory.md # quests, inventory, pickups, equipment
 docs/recipes/world-pointer-input.md # click/touch aiming and world targeting
+docs/recipes/mobile-touch-controls.md # floating joystick + action buttons (keyboard parity)
 ```
 
-Use `src/Game.ts` as reference only when you need exact TypeScript signatures.
+Use `src/Game.types.ts` / `src/Game.ts` when you need exact TypeScript signatures.
 
 ## Manifest precedence
 
 If generated/current-context docs conflict:
 
-1. `src/data/assets.md` wins for asset handles, character handles, animation names, prop groups/items, widget factory exports, audio names, and placement target facts.
-2. `src/scenes/SCENES.md` wins for the currently active/recommended scene structure.
-3. After implementation, update `src/scenes/SCENES.md` to match reality.
+1. `src/data/capybara-assets.json` + generated JSON / exports in `src/data/` win for asset handles, character handles, animation names, prop groups/items, audio names, and placement target facts.
+2. `src/scenes/generatedWorld.ts` + `bootstrapWorldFromAssets` win for what is already live this revision.
+3. `src/scenes/SCENES.md` wins for the currently active/recommended scene structure.
+4. Widget factory names come from exports under `src/widgets/` (and `huds.json` for synced scaffolds).
+5. After implementation, update `src/scenes/SCENES.md` to match reality.
 
-Do not use stale example handles from recipes or scene manifests when `assets.md` lists different generated names.
+Do not use stale example handles from recipes or scene manifests when `src/data/` lists different generated names.
 
 ## Public gameplay extension points
 
 ### Scene orchestration
 
-Scenes live in `src/scenes/` and should orchestrate only:
+Prefer the synced path: `createMainScene` → `createGeneratedWorld` → `bootstrapWorldFromAssets`, then put custom logic in `configureGameplay` (`src/scenes/mainScene.ts`). Do not re-implement map load, character spawn, BGM, or default interact.
+
+When you must orchestrate a scene yourself (tools / tests / no synced maps), scenes should only:
 
 1. preload assets/audio if needed
-2. call `createGame(...)`
+2. call `createGame(...)` (or rely on bootstrap)
 3. register resources
 4. register archetypes
 5. register systems
 6. bind inputs
-7. spawn initial entities
+7. spawn entities bootstrap does not own
 8. mount widgets
 9. start any async SDK/save bootstrap without blocking scene return
 10. return the `GameAPI`
@@ -121,48 +133,41 @@ void (async () => {
 return game;
 ```
 
-### Separate map transitions
+### Map transitions (`transitionMap`)
 
-For registration, stitched extensions vs `loadMap`, and map overlay wiring, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
+For registration, map travel, and map overlay wiring, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
 
-Use `game.loadMap(...)` when moving between maps that are not stitched extension panels, such as house interior → village exterior or dungeon room → overworld. Existing resources, widgets, archetypes, and entities are preserved; gameplay code must deliberately destroy, hide, rebuild, or preserve map-local entities as needed. Do not assume `loadMap` clears NPCs, props, clue decals, or timers for the previous room.
+Each map is a **self-contained** space. Prefer `game.transitionMap(...)` for doors / room travel — it fades to black by default, runs mid-fade work, swaps the map, then fades in. Use instant `game.loadMap(...)` only for tools, tests, or custom transitions. Existing resources, widgets, archetypes, and entities are preserved; gameplay code must deliberately destroy, hide, rebuild, or preserve map-local entities as needed. A map swap does not clear NPCs, props, clue decals, or timers for the previous room — handle those explicitly.
 
 ```ts
 import { mapInterior, mapExterior, toMapData } from "../data";
-import { runScreenFade } from "../utils/screenFade";
 
-// Interior -> exterior. Wrap loadMap for a smooth fade (see ASSET_INTEGRATION.md).
-await runScreenFade(() => {
-  game.loadMap(toMapData(mapExterior), {
-    spawn: { x: 500, y: 820, anchor: "feet" },
-  });
+// Interior -> exterior with default fade.
+await game.transitionMap(toMapData(mapExterior), {
+  spawn: { x: 500, y: 820, anchor: "feet" },
 });
 ```
 
 A common gameplay pattern is to mark room-specific entities as map-local and clear them before loading the next room:
 
 ```ts
-import { runScreenFade } from "../utils/screenFade";
-
-await runScreenFade(() => {
-  for (const id of game.query((c) => c.mapLocal === true)) {
-    game.destroy(id);
-  }
-
-  game.loadMap(toMapData(mapInterior), {
-    spawn: { x: 480, y: 760, anchor: "feet" },
-  });
-
-  // Respawn only the entities that belong in this room.
-  spawnInteriorNpcsAndClues(game);
-
-  game.emit("map:entered", { mapId: "interior" });
+await game.transitionMap(toMapData(mapInterior), {
+  spawn: { x: 480, y: 760, anchor: "feet" },
+  during: (swap) => {
+    for (const id of game.query((c) => c.mapLocal === true)) {
+      game.destroy(id);
+    }
+    swap();
+    // Respawn only the entities that belong in this room.
+    spawnInteriorNpcsAndClues(game);
+    game.emit("map:entered", { mapId: "interior" });
+  },
 });
 ```
 
 For multi-map games, keep an explicit lifecycle table in the scene/plan: each NPC, clue prop, pickup, and room-only marker should be either `mapLocal` and rebuilt, hidden while off-map, or intentionally persistent. A courtyard clue or NPC should not remain visible in an interior/study map unless that is deliberate.
 
-`loadMap` resets active navigation/pathfinding state, clears hover state, stops held movement input, updates the camera bounds, moves the controlled entity if a spawn is supplied, and emits `map:changed`.
+`loadMap` / the swap inside `transitionMap` resets active navigation/pathfinding state, clears hover state, stops held movement input, updates the camera bounds, moves the controlled entity if a spawn is supplied, and emits `map:changed`.
 
 ### Resources
 
@@ -185,7 +190,7 @@ game.defineArchetype(
   toArchetype(charPlayer, {
     kind: "character",
     label: "Player",
-    speed: 190,
+    speed: 55,
     radius: 34,
     width: 140,
     height: 168,
@@ -220,7 +225,20 @@ game.onInputAction("interact", ({ phase }) => {
 });
 ```
 
-HUD widgets should dispatch the same input actions as keyboard/pointer controls.
+**Mobile-first:** never ship keyboard-only gameplay. Configure the default touch HUD with matching action names:
+
+```ts
+const game = createGame({
+  canvasId: "game",
+  map: toMapData(mapMain),
+  cameraEdgePadding: 120,
+  touchControls: {
+    actions: [{ action: "interact", label: "E" }],
+  },
+});
+```
+
+HUD widgets should dispatch the same input actions as keyboard/pointer controls (`dispatchInputAction`). Movement uses `setMovementInput` / `clearMovementInput` (WASD and the default floating joystick share this path). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Widgets
 
@@ -229,9 +247,10 @@ For registering generated HUD scaffolds vs non-HUD widgets, see [ASSET_INTEGRATI
 Widgets are DOM/HUD plugins mounted with:
 
 ```ts
-game.useWidget(createHudWidget); // exact factory name comes from assets.md
+game.useWidget(createHudWidget); // exact factory name from src/widgets/ export
 ```
 
+`createGame` mounts `TouchControlsWidget` by default (opt out with `touchControls: false`). It appears only on touch-primary devices.
 Generated `Hud...` widgets are scaffolds produced alongside HUD art, not complete gameplay UI. They usually map generated HUD artwork to DOM overlays, hotspots, and approximate display positions. Preserve that visual layout, but replace placeholder labels/handlers with resource reads and event/input dispatch. Not every widget needs generated HUD art (bubbles, tooltips, markers, tints).
 
 Widgets display resource state and dispatch intent. They should not own long-lived gameplay state. Gameplay-facing text feedback should go through a HUD/widget layer so players do not miss it. Use dialogue, bark subtitle, toast, prompt, objective, or result-message widgets for text such as NPC barks, quest updates, locked-door reasons, inventory-full messages, tutorial prompts, and action outcomes instead of relying only on console logs or tiny world-only labels. Every widget should reveal newly shown or changed player-facing text with a typing/typewriter effect; keep reveal progress in widget-local ephemeral state unless coordinating text across widgets requires a resource.
@@ -266,7 +285,7 @@ Represent bullets, spells, arrows, and thrown objects as normal entities with co
 
 ### Enemy behavior
 
-Use systems for simple patrol/chase/attack loops. Before moving an enemy/NPC, check `src/data/assets.md` for walk/run/move animations. If only idle/default animation exists, prefer stationary interaction, facing, ranged attacks, or proximity triggers.
+Use systems for simple patrol/chase/attack loops. Before moving an enemy/NPC, check `src/data/` generated JSON for walk/run/move animations. If only idle/default animation exists, prefer stationary interaction, facing, ranged attacks, or proximity triggers.
 
 Friendly/neutral NPCs should usually get a first-pass liveliness baseline instead of standing silently: a short authored patrol route when movement animation exists, facing toward the player when approached, and a simple one-time or cooldown-gated proximity bark before the player presses interact. Keep barks readable through `NpcBubbleWidget`, a bark subtitle, toast, or dialogue widget.
 
@@ -282,11 +301,11 @@ Use widgets for pointer listeners and store gameplay-relevant aim/selection stat
 
 ### Map spritesheet VFX
 
-Generated map data may include map-level spritesheets for environmental animation or triggered effects. Check `src/data/assets.md` first, then use the `Map spritesheets / VFX` section below for exact public API behavior.
+Generated map data may include map-level spritesheets for environmental animation or triggered effects. Check `src/data/` generated JSON first, then use the `Map spritesheets / VFX` section below for exact public API behavior.
 
 ## Stable GameAPI patterns
 
-> Identifiers like `mapMain`, `charPlayer`, `charNpc`, `"<prop_group>"`, `"<item>"`, `createHudWidget`, and `"<music_name>"` in these examples are **placeholders**. Real map/character/prop/widget/animation/audio names are game-specific — copy them from `src/data/assets.md`. The only names safe to copy verbatim are the stable API symbols (`createGame`, `toMapData`, `getPropItemUrl`, `spawnAtFeet`, etc.).
+> Identifiers like `mapMain`, `charPlayer`, `charNpc`, `"<prop_group>"`, `"<item>"`, `createHudWidget`, and `"<music_name>"` in these examples are **placeholders**. Real map/character/prop/widget/animation/audio names are game-specific — copy them from `src/data/` generated JSON. The only names safe to copy verbatim are the stable API symbols (`createGame`, `toMapData`, `getPropItemUrl`, `spawnAtFeet`, etc.).
 
 Import the stable API symbols from the facade, and generated handles + adapters from `src/data`:
 
@@ -307,36 +326,50 @@ import { mapMain, charPlayer, toMapData, toArchetype } from "../data";
 
 ### Map data shape (`toMapData`)
 
-Generated map JSON is **flat**. Map-level generated fields such as `masks`, `walkableBoxes`, `spriteSheets`, `placement`, and `mapOverlays` belong next to `url` in the generated `src/data/map_*.json` file:
+Generated map JSON is **flat**. Prefer a **lean map + sidecars** so agents can read layout without polygon/placement noise:
+
+| File | Contents |
+| ---- | -------- |
+| `map_<id>.json` | `name`, `url`, `walkableBoxes`, `mapOverlays`, optional legacy `masks` / `spriteSheets` |
+| `map_<id>.sprites.json` | `{ "sprites": [ ... ] }` — cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
+| `map_<id>.placements.json` | `{ "placement", "characterPlacements", "hudPlacements", "atmospherePlacements" }` |
+
+Register with `mergeMapSidecars` (sync does this in `generated.ts`), then pass the merged handle to `toMapData`:
+
+```ts
+import mapMainBase from "./map_main.json";
+import mapMainSprites from "./map_main.sprites.json";
+import mapMainPlacements from "./map_main.placements.json";
+export const mapMain = mergeMapSidecars(mapMainBase, {
+  sprites: mapMainSprites,
+  placements: mapMainPlacements,
+});
+```
+
+`toMapData` copies `characterPlacements` and `atmospherePlacements` onto `GameMapData` (atmosphere is applied by the map runtime). `hudPlacements` stay on the merged `GeneratedMap` for gameplay to mount — they are not auto-mounted.
+Lean `map_*.json` shape:
 
 ```jsonc
 {
   "name": "...",
   "url": "...",
-  "masks": [...],
   "walkableBoxes": [...],
-  "spriteSheets": [...],
-  "placement": [...],
   "mapOverlays": [...]
 }
 ```
 
-`createGame` expects the engine's nested `{ panel: { ... } }` `MapData`. Use `toMapData(...)` to bridge the two instead of hand-wrapping. It also accepts `extensions` for multi-panel maps, so single-panel scenes stay simple while staying extensible:
+`createGame` expects the engine's nested `{ panel: { ... } }` `MapData`. Use `toMapData(...)` to bridge the two instead of hand-wrapping. Each map is isolated — travel with `game.transitionMap(toMapData(...))` (fade) or `game.loadMap(...)` (instant):
 
 ```ts
-// Single panel:
 const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120,
 });
 
-// Multi-panel (stitch flat panels together):
-createGame({
-  canvasId: "game",
-  map: toMapData(mapMain, {
-    extensions: [{ direction: "east", panel: toMapData(mapEast) }],
-  }),
+// Later — swap to another authored map with default fade:
+await game.transitionMap(toMapData(mapInterior), {
+  spawn: { x: 500, y: 820, anchor: "feet" },
 });
 ```
 
@@ -347,6 +380,13 @@ const game = createGame({
   canvasId: "game",
   map: toMapData(mapMain),
   cameraEdgePadding: 120,
+  // Optional framing / soft follow / scale tuning:
+  // followZoom: 1.45,
+  // cameraFollowLerp: 10,
+  // maxViewportScale: 1,
+  touchControls: {
+    actions: [{ action: "interact", label: "E" }],
+  },
 });
 ```
 
@@ -383,7 +423,9 @@ Generated map overlay states:
 
 For the overlay vs spawned-prop decision and wiring checklist, see [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
 
-`mapOverlays` are authored in the generated map JSON, not as spawned props in scene code. Use them for stateful map-baked props such as doors, safes, gates, barricades, or border/background props that need to swap images. Each overlay has an `id`, an initial `currentMapStateLabel`, and a list of `states` with image URLs and `box_2d` draw bounds:
+`mapOverlays` are authored in the generated map JSON, not as spawned props in scene code. Use them for stateful map-baked props such as doors, safes, gates, barricades, or border/background props that need to swap images. Each overlay has an `id`, an initial `currentMapStateLabel`, and a list of `states` with image URLs and `box_2d` draw bounds.
+
+Detached crop/plot grids use `kind: "grid"` with per-state `box_2d`, `gridDimensions` `[cols, rows]`, and `gridSpacing` `[gapX, gapY]`. Runtime uses `currentState`: `"initial"` / `"none"` draws nothing; a real state name tiles that art across the full grid. `ghostCellDisplay` is editor-only.
 
 ```jsonc
 {
@@ -428,17 +470,17 @@ Physical collision is optional per overlay state:
 
 Optional render placement can be set with `renderLayer: "background" | "ground" | "occluder" | "prop"` on the overlay or individual state. Default is `"occluder"`.
 
-Animations/facing (animation names come from `assets.md`):
+Animations/facing (adapters emit sheet names `{clip}_{facing}`, e.g. `walk_front`, `idle_right` — copy exact names from character JSON):
 
 ```ts
-game.setEntityAnimation(playerId, "<character>_walk");
-game.setEntityAnimation(playerId, "<character>_default_animation");
+game.setEntityAnimation(playerId, "walk_front");
+game.setEntityAnimation(playerId, "idle_front");
 
 // Generated characters face viewer's right by default.
 game.setEntityFacingX(npcId, player.x < npc.x ? -1 : 1);
 ```
 
-Coordinates are normalized per map panel: `0-1000`.
+Coordinates are normalized per map: `0-1000`. Maps are isolated — travel with `transitionMap` (preferred) or `loadMap`.
 
 ### NPC pathfinding / destinations
 
@@ -451,7 +493,7 @@ const npcId = game.spawnAtFeet("villager", 520, 760);
 game.setEntityDestination(npcId, { x: 780, y: 640 }, { speed: 30 });
 ```
 
-Typical destination speeds are lower than player speeds because large sprites/camera motion make movement feel faster than the raw number: use about `12`–`30` for slow NPC patrols, `40`–`80` for brisk NPCs/enemies, and `160`–`220` for player control.
+Typical destination speeds are lower than player speeds because large sprites/camera motion make movement feel faster than the raw number: use about `12`–`30` for slow NPC patrols, `40`–`80` for brisk NPCs/enemies. Synced player walk speed is height-derived and usually lands in roughly `55`–`95` (bootstrap defaults); hand-tuned players often sit higher.
 
 Useful calls:
 
@@ -468,7 +510,7 @@ Navigation emits:
 - `navigation:arrived`
 - `navigation:failed`
 
-While an entity is following a destination, the runtime switches to a walk/run spritesheet and updates facing from movement direction. When the entity arrives, is blocked, or `clearEntityDestination` is called, it switches back to the idle/default spritesheet. This is automatic when the entity's `spriteSheets` use conventional names (`walk`/`run` for movement, `default_animation`/`idle` for stopping). Check exact names in `src/data/assets.md`; you do not need to call `setEntityAnimation` for basic destination movement.
+While an entity is following a destination, the runtime switches to a walk/run spritesheet and updates facing from movement direction. When the entity arrives, is blocked, or `clearEntityDestination` is called, it switches back to the idle/default spritesheet. This is automatic when the entity's `spriteSheets` use conventional names (`walk` / `walk_*` / `run` for movement, `idle` / `idle_*` / `default_animation` for stopping). Synced directional packs use `walk_front`, `idle_right`, etc. Check exact names in `src/data/` generated JSON; you do not need to call `setEntityAnimation` for basic destination movement.
 
 Defaults are intentionally simple: static map obstacles only, no crowd avoidance, no entity/entity pushing. Use `cellSize` to tune accuracy/performance; smaller values are more accurate but slower. If the target point is inside a collider, the runtime snaps to a nearby walkable cell by default.
 
@@ -481,7 +523,7 @@ For full patrol-loop code, including clearing stale `arrived` / failed navigatio
 - WASD and arrow keys move the controlled entity.
 - Movement uses the entity's `speed` component.
 - Speed is normalized map units per second, matching custom systems that move entities with `speed * dt`.
-- Typical player speed is `160`–`220`; default to about `190`.
+- Typical synced / bootstrap player speed is about `55`–`95` (height-derived). Hand-tuned arcade players may go higher; keep NPCs slower than the player unless they are chasers.
 - Collision uses generated map walkable/collider data.
 - Diagonal movement is supported by the runtime movement input.
 - Horizontal facing updates automatically while the controlled actor moves left/right.
@@ -510,13 +552,15 @@ game.patch(enemyId, {
 
 ### Map spritesheets / VFX
 
-Generated map spritesheets are rendered as map effects from either `panel.spriteSheets` / `panel.spritesheets` entries or inline mask `spriteSheetUrl` fields.
+Generated map spritesheets are rendered as map effects from either `panel.spriteSheets` / `panel.spritesheets` entries or unified `mapOverlays` with `kind: "vfx"`.
 
 - Standalone map spritesheets do **not** need `linkedColliderLabel` or a linked obstacle to render.
 - If `type` / `spriteSheetType` is omitted, map spritesheets default to `background` and autoplay in a loop.
 - Use `type: "gameplay"` for one-shot triggered effects, then call `game.triggerMapEffect(...)` or `game.triggerNearestMapEffect(...)`.
-- `linkedColliderLabel` explicitly controls Y-sort anchoring / static obstacle replacement behavior.
+- `linkedColliderLabel` / VFX `linkedObstacleLabel` explicitly controls Y-sort anchoring / static obstacle replacement behavior.
 - Without `linkedColliderLabel`, the renderer infers a Y-sort anchor from an overlapping/containing map mask when possible, so effects like torches on a wall draw with that wall instead of behind it.
+- **`placementMode: "replace"`** (on `spriteSheets` or `kind: "vfx"` overlays): hide the linked mask’s static background/obstacle images, keep colliders, then play the sheet. Edit-UI replace animations also ship a paired `kind: "erase"` underlay with `clearsCollision: false` so baked map pixels are covered without wiping collision.
+- **`placementMode: "overlay"`** (default for VFX overlays): draw the sheet on top; static art stays.
 
 Background/autoplay VFX loop automatically. Gameplay/triggered effects should be activated through the public facade:
 
@@ -525,7 +569,7 @@ game.triggerMapEffect("door");
 game.triggerNearestMapEffect("door", player.x, player.y);
 ```
 
-Use `triggerNearestMapEffect(...)` for player interactions when multiple effects share the same tag. Do not spawn duplicate entity animations for map-authored effects unless the requested effect is not present in `assets.md`.
+Use `triggerNearestMapEffect(...)` for player interactions when multiple effects share the same tag. Do not spawn duplicate entity animations for map-authored effects unless the requested effect is not present in generated JSON under `src/data/`.
 
 ### Render ordering
 
@@ -569,7 +613,7 @@ For registering audio in `common.json` and the loading-gate bootstrap pattern, s
 Use this split by default:
 
 - **NPC barks/dialogue** -> default to scripted/resource-driven lines.
-- **Background music / ambient music beds** -> use provided audio assets from `src/data/assets.md` with `getAudio(...)`, `stopAudio(...)`, and low volume.
+- **Background music / ambient music beds** -> use provided audio assets from `src/data/` generated JSON with `getAudio(...)`, `stopAudio(...)`, and low volume.
 - **Non-vocal frequent SFX** -> footsteps, UI bleeps, impacts, pickups, weapon sounds, alerts, and short non-verbal stingers should usually be procedural WebAudio by default. Do not invent or import new SFX files unless the task explicitly provides them.
 
 For looping music, use `getAudio(name)`, but **never** call `play()` from passive scene startup. Browsers require a real user gesture. Use **both** paths below — production gate alone is not enough in local/dev:
@@ -646,7 +690,7 @@ export function playUiClickSfx() {
 }
 ```
 
-`playAudio(name)` only plays existing named audio assets and does not expose loop/volume options. Prefer `getAudio(...)` for BGM and procedural WebAudio for new gameplay/UI SFX.
+`playAudio(name, options?)` plays existing named audio assets and accepts `{ loop?, volume?, channel?, restart? }`. Prefer `playAudio(..., { loop: true, volume: 0.05 })` or `getAudio(...)` for BGM, `playDialogue(name)` for voiced lines, and procedural WebAudio for new gameplay/UI SFX when no asset exists.
 
 ### Feedback effects
 
@@ -660,7 +704,7 @@ Do not rely on CSS classes for canvas entities.
 
 ## Character rules
 
-Use `src/data/assets.md` animation names as the source of truth.
+Use `src/data/` character JSON animation names as the source of truth.
 
 - Prefer `game.setEntityDestination(...)` for obstacle-aware NPC movement.
 - If an NPC has no walk/run/move-style animation, avoid wandering by default unless the game explicitly accepts sliding/idle-only movement.
@@ -670,7 +714,7 @@ Use `src/data/assets.md` animation names as the source of truth.
 
 ## SDK rules
 
-This engine guide only identifies when SDK capabilities are appropriate. For import paths, lazy initialization, auth/session behavior, save/load, storage, and multiplayer contracts, follow `docs/SDK_FACADE.md`.
+This engine guide only identifies when SDK capabilities are appropriate. For import paths, lazy initialization, auth/session behavior, save/load, storage, and multiplayer contracts, follow [SDK_FACADE.md](SDK_FACADE.md).
 
 ## If the public surface is insufficient
 

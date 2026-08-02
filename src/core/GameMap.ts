@@ -1,6 +1,11 @@
 import MapObject from "./MapObject";
 import MapEffectObject from "./MapEffectObject";
-import MapOverlayObject, { type MapOverlayEntry } from "./MapOverlayObject";
+import MapOverlayObject, {
+  isMapOverlayOffState,
+  stateHasLocalCollision,
+  type MapOverlayEntry,
+} from "./MapOverlayObject";
+import AtmosphereObject, { type AtmosphereEntry } from "./AtmosphereObject";
 import {
   loadImage,
   parseBox2d,
@@ -45,16 +50,30 @@ interface MapMaskCollider {
 interface MapMaskEntry {
   label: string;
   name?: string;
-  box_2d: Box2D;
+  /** Normalized visual footprint. Optional when pixel_bbox is used. */
+  box_2d?: Box2D;
+  /**
+   * Pixel crop on the map background. Resolved with the loaded image's
+   * naturalWidth/Height — no per-sprite map_size required.
+   */
+  pixel_bbox?: { x: number; y: number; w: number; h: number };
   backgroundImageBox2d?: Box2D;
   collider: MapMaskCollider[];
+  /** Solid collision polygons in normalized map space (map v2 sprites). */
+  collisionPolygons?: Array<Array<{ x: number; y: number }>>;
   backgroundImage?: string;
   obstacleImage?: string;
+  /** 0–1 source crop within obstacleImage for enclosure side strips. */
+  obstacleImageCrop?: { x: number; y: number; w: number; h: number };
   spriteSheetUrl?: string;
   frame_count?: number;
   /** background (loop) or gameplay (triggered). Defaults to background. */
   spriteSheetType?: string;
   type?: string;
+  /** Collision without Y-sorted obstacle draw (full fence → side strips). */
+  collisionOnly?: boolean;
+  /** Y-sort draw strip only — no movement collision. */
+  ySortOnly?: boolean;
 }
 
 interface PlacementEntry {
@@ -66,25 +85,38 @@ interface PlacementEntry {
   grid_dimensions?: number[];
   bounding_box?: number[];
   box_2d: Box2D;
+  enterable?: boolean;
+  destinationMapId?: string;
+  destinationMapAssetId?: string;
+  /** Spawn footprint on the destination map `[ymin,xmin,ymax,xmax]` 0–1000. */
+  destinationSpawnBox2d?: number[];
+  interactionType?: string;
+  functionalRole?: string;
+  templateId?: string;
+  stages?: string[];
+  gamePlay?: string;
 }
 
-export type CardinalDirection = "north" | "south" | "east" | "west";
-
-/** Grid-cell delta for each direction. Each panel is one 1000-unit cell. */
-const DIRECTION_GRID: Record<CardinalDirection, { dx: number; dy: number }> = {
-  north: { dx: 0, dy: -1 },
-  south: { dx: 0, dy: 1 },
-  east: { dx: 1, dy: 0 },
-  west: { dx: -1, dy: 0 },
-};
-
-/** One directional extension — can itself carry further extensions. */
-export interface MapExtension {
-  direction: CardinalDirection;
-  panel: MapPanelData;
+export interface CharacterPlacementEntry {
+  assetId: string;
+  layerId: string;
+  label: string;
+  box_2d: Box2D;
+  width?: number;
+  height?: number;
+  thumbnailUrl?: string;
+  role?: "player" | "npc";
 }
 
-/** Grouped payload for one panel's map content. */
+/** Static visual patch from a `kind: "erase"` mapOverlay. */
+interface ErasePatch {
+  id: string;
+  label: string;
+  bounds: Rect;
+  image: HTMLImageElement | null;
+}
+
+/** Grouped payload for one map's content. */
 export interface MapPanelContent {
   url: string;
   masks?: MapMaskEntry[];
@@ -94,23 +126,20 @@ export interface MapPanelContent {
   mapOverlays?: MapOverlayEntry[];
 }
 
-/**
- * Per-panel data. Extensions are recursive: a panel can itself have
- * extensions, allowing chains of any depth (e.g. east → east-east → east-east-east).
- */
+/** Nested map payload — one isolated map (no panel stitching). */
 export interface MapPanelData {
-  /** Grouped shape for panel-specific fields. */
   panel: MapPanelContent;
-  /** Panels stitched to this panel in the given direction. */
-  extensions?: MapExtension[];
 }
 
 export interface MapData extends MapPanelData {
   name?: string;
+  characterPlacements?: CharacterPlacementEntry[];
+  /** Sky-layer atmosphere sprites (clouds / birds / balloons). */
+  atmospherePlacements?: AtmosphereEntry[];
   panel: MapPanelContent & { masks: MapMaskEntry[] };
   /**
-   * Pixel dimensions of a single panel. Determines the total canvas size when
-   * panels are stitched together. Defaults to 2508 × 1672.
+   * Pixel dimensions of the map image. Defaults to 2508 × 1672 until the
+   * background loads (then natural size is used unless these were set).
    */
   panelPixelWidth?: number;
   panelPixelHeight?: number;
@@ -122,6 +151,14 @@ const DEFAULT_PANEL_PIXEL_HEIGHT = 1672;
 const EDGE_EPS = 0.01;
 const OVERLAY_MASK_REPLACE_EDGE_TOLERANCE = 18;
 const OVERLAY_MASK_REPLACE_IOU_THRESHOLD = 0.82;
+/** Tight change patches often sit fully inside the mask silhouette. */
+const OVERLAY_MASK_REPLACE_CONTAINMENT_THRESHOLD = 0.72;
+/**
+ * Fraction of a sprite's bounds that must lie under an erase patch before we
+ * clear that sprite's collision. Neighbors that only clip the erase edge
+ * (e.g. a wheelbarrow against a crop plot) stay solid.
+ */
+const ERASE_COLLISION_COVERAGE_THRESHOLD = 0.65;
 
 function rectArea(rect: Rect): number {
   return Math.max(0, rect.x2 - rect.x1) * Math.max(0, rect.y2 - rect.y1);
@@ -136,18 +173,17 @@ function rectIntersectionArea(a: Rect, b: Rect): number {
 }
 
 /**
- * Map overlays are authored as stateful replacements for map-baked props. When
- * an overlay state's box nearly matches a mask box, treat the overlay as the
- * prop/object visual owner. The caller suppresses only the mask obstacle image
- * for this case, keeping the generated background/shadow image intact.
+ * Map overlays are authored as stateful patches for map-baked props. When a
+ * state/grid overlay uses `placementMode: "replace"` (default) and its box
+ * nearly matches a mask — or is a tight change patch mostly contained by it —
+ * treat the overlay as the prop/object visual owner and suppress only the mask
+ * obstacle image (background/shadow stays). `placementMode: "overlay"` keeps
+ * the cut-out and draws the patch on top.
  */
-function boxesCloseEnoughForOverlayReplacement(
-  maskBox: Box2D,
-  overlayBox: Box2D,
+function rectsCloseEnoughForOverlayReplacement(
+  mask: Rect,
+  overlay: Rect,
 ): boolean {
-  const mask = parseBox2d(maskBox);
-  const overlay = parseBox2d(overlayBox);
-
   const edgesClose =
     Math.abs(mask.x1 - overlay.x1) <= OVERLAY_MASK_REPLACE_EDGE_TOLERANCE &&
     Math.abs(mask.y1 - overlay.y1) <= OVERLAY_MASK_REPLACE_EDGE_TOLERANCE &&
@@ -158,9 +194,27 @@ function boxesCloseEnoughForOverlayReplacement(
   const intersection = rectIntersectionArea(mask, overlay);
   if (intersection <= 0) return false;
 
-  const union = rectArea(mask) + rectArea(overlay) - intersection;
+  const overlayArea = rectArea(overlay);
+  if (
+    overlayArea > 0 &&
+    intersection / overlayArea >= OVERLAY_MASK_REPLACE_CONTAINMENT_THRESHOLD
+  ) {
+    return true;
+  }
+
+  const union = rectArea(mask) + overlayArea - intersection;
   return (
     union > 0 && intersection / union >= OVERLAY_MASK_REPLACE_IOU_THRESHOLD
+  );
+}
+
+function boxesCloseEnoughForOverlayReplacement(
+  maskBox: Box2D,
+  overlayBox: Box2D,
+): boolean {
+  return rectsCloseEnoughForOverlayReplacement(
+    parseBox2d(maskBox),
+    parseBox2d(overlayBox),
   );
 }
 
@@ -170,20 +224,91 @@ function maskKeysForOverlayLink(mask: MapMaskEntry): string[] {
     .map((value) => value.trim());
 }
 
+/** Visual box for linking — prefer explicit box_2d, else first collider AABB. */
+function maskBoxForOverlayLink(mask: MapMaskEntry): Box2D | null {
+  if (
+    Array.isArray(mask.box_2d) &&
+    mask.box_2d.length >= 4 &&
+    mask.box_2d.every((n) => Number.isFinite(Number(n)))
+  ) {
+    return mask.box_2d;
+  }
+  const collider = mask.collider?.[0]?.box_2d;
+  if (
+    Array.isArray(collider) &&
+    collider.length >= 4 &&
+    collider.every((n) => Number.isFinite(Number(n)))
+  ) {
+    return [
+      Number(collider[0]),
+      Number(collider[1]),
+      Number(collider[2]),
+      Number(collider[3]),
+    ];
+  }
+  return null;
+}
+
+function isStructuralMapOverlay(overlay: MapOverlayEntry): boolean {
+  const kind = overlay.kind ?? "state";
+  return kind === "state" || kind === "grid";
+}
+
+/**
+ * State/grid overlays default to `replace` (hide linked cut-out so doors/chests
+ * don't double-draw). Explicit `overlay` keeps the base sprite and draws the
+ * patch on top — use for shelf stock, props, etc. that only patch part of a prop.
+ */
+function structuralOverlayReplacesObstacle(overlay: MapOverlayEntry): boolean {
+  if (!isStructuralMapOverlay(overlay)) return false;
+  return (overlay.placementMode ?? "replace") === "replace";
+}
+
+function overlayLinkLabels(overlay: MapOverlayEntry): string[] {
+  const labels = [
+    overlay.linkedObstacleLabel?.trim(),
+    // Edit-UI state overlays store the obstacle name on anchorLabel.
+    isStructuralMapOverlay(overlay) ? overlay.anchorLabel?.trim() : undefined,
+  ];
+  return labels.filter((value): value is string => Boolean(value));
+}
+
+/** Active/current state on a raw overlay entry (pre MapOverlayObject). */
+function overlayEntryActiveState(overlay: MapOverlayEntry) {
+  const requested =
+    overlay.currentMapStateLabel ??
+    overlay.currentState ??
+    overlay.states?.[0]?.name;
+  if (isMapOverlayOffState(requested)) return null;
+  return (
+    overlay.states?.find((state) => state.name === requested) ??
+    overlay.states?.[0] ??
+    null
+  );
+}
+
+function overlayEntryOwnsLocalCollision(overlay: MapOverlayEntry): boolean {
+  if (!structuralOverlayReplacesObstacle(overlay)) return false;
+  return stateHasLocalCollision(overlayEntryActiveState(overlay));
+}
+
 function overlayLinksToMask(
   overlay: MapOverlayEntry,
   mask: MapMaskEntry,
 ): boolean {
-  const linkedLabel = overlay.linkedObstacleLabel?.trim();
+  const maskKeys = maskKeysForOverlayLink(mask);
   if (
-    linkedLabel &&
-    maskKeysForOverlayLink(mask).some((key) => key === linkedLabel)
+    overlayLinkLabels(overlay).some((label) =>
+      maskKeys.some((key) => key === label),
+    )
   ) {
     return true;
   }
 
+  const maskBox = maskBoxForOverlayLink(mask);
+  if (!maskBox) return false;
   return overlay.states.some((state) =>
-    boxesCloseEnoughForOverlayReplacement(mask.box_2d, state.box_2d),
+    boxesCloseEnoughForOverlayReplacement(maskBox, state.box_2d),
   );
 }
 
@@ -193,7 +318,10 @@ function maskHasCloseMapOverlay(
 ): boolean {
   if (mask.type?.toLowerCase() === "boundary") return false;
 
-  return overlays.some((overlay) => overlayLinksToMask(overlay, mask));
+  return overlays.some((overlay) => {
+    if (!structuralOverlayReplacesObstacle(overlay)) return false;
+    return overlayLinksToMask(overlay, mask);
+  });
 }
 
 interface BackgroundPanel {
@@ -204,24 +332,24 @@ interface BackgroundPanel {
 }
 
 /**
- * GameMap owns the background image(s), all MapObjects, and the walkable areas
- * for one level. A level may consist of multiple image panels stitched together
- * in any cardinal direction via the `extensions` field on MapData.
+ * GameMap owns the background image, MapObjects, and walkable areas for one
+ * isolated map. Travel between maps with `game.loadMap(...)` — maps are never
+ * stitched into a multi-panel world.
  *
  * Coordinate contract
  * -------------------
- * All stored values (object bounds, colliders, walkable boxes) are in the
- * world-norm space: 0 – worldNormWidth × 0 – worldNormHeight.
- * Each panel occupies exactly 1000 × 1000 norm units.
+ * All stored values (object bounds, colliders, walkable boxes) are in
+ * world-norm space: 0–1000 × 0–1000.
  * The canvas is sized to worldPixelWidth × worldPixelHeight.
  *
  * Public surface
  * --------------
- * .worldPixelWidth / .worldPixelHeight  – total canvas size for camera init
- * .worldNormWidth  / .worldNormHeight   – total norm extent (for toPixel calls)
+ * .worldPixelWidth / .worldPixelHeight  – canvas size for camera init
+ * .worldNormWidth  / .worldNormHeight   – always 1000 × 1000
  * .checkCollision(rect)  – true if rect should be blocked
  * .drawBackground(ctx)   – renders map url and mask backgroundImages
  * .getRenderables()      – returns MapObject[] + map spritesheets for Y-sort queue
+ * .drawAtmosphere(ctx)   – floating sky-layer sprites after the Y-sort queue
  * .drawDebug(ctx)        – renders obstacle colliders + walkable area outlines
  */
 export default class GameMap {
@@ -229,17 +357,30 @@ export default class GameMap {
   private _objects: MapObject[];
   private _mapSprites: MapEffectObject[];
   private _placements: MapPlacementTarget[];
+  private _characterPlacements: CharacterPlacementEntry[];
+  private _atmosphere: AtmosphereObject[];
   private _overlays: MapOverlayObject[];
+  private _erasePatches: ErasePatch[];
   private _walkable: Rect[];
+  private _numCols: number;
+  private _numRows: number;
+  private _panelSizeLocked: boolean;
+  private _metricsListeners: Array<() => void> = [];
+  private _readyResolvers: Array<() => void> = [];
+  private _backgroundLoadsPending: number;
+  private _ready = false;
 
-  readonly panelPixelWidth: number;
-  readonly panelPixelHeight: number;
-  readonly worldPixelWidth: number;
-  readonly worldPixelHeight: number;
+  panelPixelWidth: number;
+  panelPixelHeight: number;
+  worldPixelWidth: number;
+  worldPixelHeight: number;
   readonly worldNormWidth: number;
   readonly worldNormHeight: number;
 
   constructor(mapData: MapData) {
+    const hasExplicitPanelSize =
+      mapData.panelPixelWidth != null || mapData.panelPixelHeight != null;
+    this._panelSizeLocked = hasExplicitPanelSize;
     const panelPixelWidth =
       mapData.panelPixelWidth ?? DEFAULT_PANEL_PIXEL_WIDTH;
     const panelPixelHeight =
@@ -247,47 +388,44 @@ export default class GameMap {
     this.panelPixelWidth = panelPixelWidth;
     this.panelPixelHeight = panelPixelHeight;
 
-    // ── Resolve all panels into grid cells (BFS, supports recursive chaining) ─
-    type Cell = { data: MapPanelData; gridX: number; gridY: number };
-    const cells: Cell[] = [];
-    const queue: Cell[] = [{ data: mapData, gridX: 0, gridY: 0 }];
-    while (queue.length > 0) {
-      const cell = queue.shift()!;
-      cells.push(cell);
-      for (const ext of cell.data.extensions ?? []) {
-        const { dx, dy } = DIRECTION_GRID[ext.direction];
-        queue.push({
-          data: ext.panel,
-          gridX: cell.gridX + dx,
-          gridY: cell.gridY + dy,
-        });
-      }
-    }
+    // One isolated map — travel between maps via loadMap, not panel stitching.
+    this._numCols = 1;
+    this._numRows = 1;
+    this.worldNormWidth = NORM;
+    this.worldNormHeight = NORM;
+    this.worldPixelWidth = panelPixelWidth;
+    this.worldPixelHeight = panelPixelHeight;
 
-    // Normalise so the minimum grid coords become (0, 0).
-    const minGridX = Math.min(...cells.map((c) => c.gridX));
-    const minGridY = Math.min(...cells.map((c) => c.gridY));
-    const maxGridX = Math.max(...cells.map((c) => c.gridX));
-    const maxGridY = Math.max(...cells.map((c) => c.gridY));
-
-    const numCols = maxGridX - minGridX + 1;
-    const numRows = maxGridY - minGridY + 1;
-
-    this.worldNormWidth = numCols * NORM;
-    this.worldNormHeight = numRows * NORM;
-    this.worldPixelWidth = numCols * panelPixelWidth;
-    this.worldPixelHeight = numRows * panelPixelHeight;
+    const cells: Array<{ data: MapPanelData; gridX: number; gridY: number }> = [
+      { data: mapData, gridX: 0, gridY: 0 },
+    ];
+    const minGridX = 0;
+    const minGridY = 0;
 
     // ── Build per-panel objects ──────────────────────────────────────────────
     this._backgroundPanels = [];
     this._objects = [];
     this._mapSprites = [];
     this._placements = [];
+    this._characterPlacements = (mapData.characterPlacements ?? []).map(
+      (placement) => ({
+        ...placement,
+        box_2d: [...placement.box_2d],
+      }),
+    );
+    this._atmosphere = (mapData.atmospherePlacements ?? [])
+      .filter(
+        (entry) =>
+          entry.enabled !== false &&
+          Array.isArray(entry.box_2d) &&
+          entry.box_2d.length >= 4 &&
+          Boolean(entry.spriteSheetUrl?.trim() || entry.url?.trim()),
+      )
+      .map((entry) => new AtmosphereObject(entry));
     this._overlays = [];
+    this._erasePatches = [];
     this._walkable = [];
-
-    const wnw = this.worldNormWidth;
-    const wnh = this.worldNormHeight;
+    this._backgroundLoadsPending = cells.length;
 
     for (const cell of cells) {
       const panel = cell.data.panel;
@@ -296,20 +434,9 @@ export default class GameMap {
       const normOffset =
         normX !== 0 || normY !== 0 ? { x: normX, y: normY } : undefined;
 
-      // Background image panel
-      const bgPanel: BackgroundPanel = { image: null, normX, normY };
-      loadImage(panel.url)
-        .then((img) => {
-          bgPanel.image = img;
-        })
-        .catch(() => {
-          bgPanel.image = null;
-        });
-      this._backgroundPanels.push(bgPanel);
-
       const spriteSheetData = panel.spriteSheets ?? [];
       const mapOverlayData = panel.mapOverlays ?? [];
-      /** Masks whose static art is replaced by a linked spritesheet (placementMode: replace). */
+      /** Masks whose static art is replaced by a linked spritesheet / state overlay. */
       const replaceLinkedMaskKeys = new Set<string>();
       for (const sheet of spriteSheetData) {
         const key = sheet.linkedColliderLabel?.trim();
@@ -317,7 +444,21 @@ export default class GameMap {
         const mode = sheet.placementMode ?? "replace";
         if (mode === "replace") replaceLinkedMaskKeys.add(key);
       }
+      for (const overlay of mapOverlayData) {
+        const kind = overlay.kind ?? "state";
+        const mode =
+          overlay.placementMode ?? (kind === "vfx" ? "overlay" : "replace");
+        if (mode !== "replace") continue;
+        const key =
+          overlay.linkedObstacleLabel?.trim() ||
+          (kind === "state" || kind === "grid"
+            ? overlay.anchorLabel?.trim()
+            : undefined);
+        if (key) replaceLinkedMaskKeys.add(key);
+      }
 
+      // Background image panel — natural size drives pixel_bbox placement.
+      const bgPanel: BackgroundPanel = { image: null, normX, normY };
       const panelObjects = (panel.masks ?? []).map((mask) => {
         const keys = [mask.label, mask.name]
           .filter((v): v is string => Boolean(v?.trim()))
@@ -326,16 +467,58 @@ export default class GameMap {
           mask,
           mapOverlayData,
         );
+        const replaceOwnsCollision =
+          replacedByCloseMapOverlay &&
+          mapOverlayData.some(
+            (overlay) =>
+              overlayLinksToMask(overlay, mask) &&
+              overlayEntryOwnsLocalCollision(overlay),
+          );
         const suppressStaticVisuals =
           Boolean(mask.spriteSheetUrl?.trim()) ||
           keys.some((key) => replaceLinkedMaskKeys.has(key));
         const suppressObstacleVisual = replacedByCloseMapOverlay;
-        return new MapObject(mask, normOffset, {
+        const obj = new MapObject(mask, normOffset, {
           suppressStaticVisuals,
           suppressObstacleVisual,
+          // Only convert pixel_bbox immediately when panel size was caller-forced.
+          // Otherwise wait for the background image natural size.
+          mapPixelWidth: this._panelSizeLocked
+            ? this.panelPixelWidth
+            : undefined,
+          mapPixelHeight: this._panelSizeLocked
+            ? this.panelPixelHeight
+            : undefined,
         });
+        // Replace overlays with local collision must own walkability as soon as
+        // they hide the cut-out — don't wait on background image decode.
+        if (replaceOwnsCollision) {
+          obj.claimCollisionForOverlay();
+        }
+        return obj;
       });
       this._objects.push(...panelObjects);
+
+      loadImage(panel.url)
+        .then((img) => {
+          bgPanel.image = img;
+          this._onBackgroundImageLoaded(
+            img,
+            panelObjects,
+            mapOverlayData,
+            normOffset,
+          );
+        })
+        .catch(() => {
+          bgPanel.image = null;
+          this._onBackgroundImageLoaded(
+            null,
+            panelObjects,
+            mapOverlayData,
+            normOffset,
+          );
+        });
+      this._backgroundPanels.push(bgPanel);
 
       const objectRenderYByKey = new Map<string, number>();
       for (const obj of panelObjects) {
@@ -351,19 +534,30 @@ export default class GameMap {
         return objectRenderYByKey.get(key);
       };
 
-      const maskSortAnchors = (panel.masks ?? []).map((mask, index) => {
-        const rawBounds = parseBox2d(mask.box_2d);
-        const bounds = normOffset
-          ? offsetRect(rawBounds, normOffset.x, normOffset.y)
-          : rawBounds;
-        return {
-          bounds,
-          renderY: panelObjects[index]?.renderY ?? bounds.y2,
-          area:
-            Math.max(0, bounds.x2 - bounds.x1) *
-            Math.max(0, bounds.y2 - bounds.y1),
-        };
-      });
+      const maskSortAnchors = (panel.masks ?? [])
+        .map((mask, index) => {
+          if (!mask.box_2d) return null;
+          const rawBounds = parseBox2d(mask.box_2d);
+          const bounds = normOffset
+            ? offsetRect(rawBounds, normOffset.x, normOffset.y)
+            : rawBounds;
+          return {
+            bounds,
+            renderY: panelObjects[index]?.renderY ?? bounds.y2,
+            area:
+              Math.max(0, bounds.x2 - bounds.x1) *
+              Math.max(0, bounds.y2 - bounds.y1),
+          };
+        })
+        .filter(
+          (
+            anchor,
+          ): anchor is {
+            bounds: Rect;
+            renderY: number;
+            area: number;
+          } => anchor != null,
+        );
 
       const inferRenderYFromOverlappingMask = (
         box: Box2D,
@@ -395,7 +589,7 @@ export default class GameMap {
 
       for (const mask of panel.masks ?? []) {
         const spriteSheetUrl = mask.spriteSheetUrl?.trim();
-        if (!spriteSheetUrl) continue;
+        if (!spriteSheetUrl || !mask.box_2d) continue;
 
         const linkedRenderY =
           resolveLinkedRenderY(mask.label) ??
@@ -461,13 +655,465 @@ export default class GameMap {
           box_2d,
           bounds,
           renderY: bounds.y2,
+          ...(placement.enterable === true ? { enterable: true } : {}),
+          ...(typeof placement.destinationMapId === "string" &&
+          placement.destinationMapId.trim()
+            ? { destinationMapId: placement.destinationMapId.trim() }
+            : typeof placement.destinationMapAssetId === "string" &&
+                placement.destinationMapAssetId.trim()
+              ? { destinationMapId: placement.destinationMapAssetId.trim() }
+              : {}),
+          ...(Array.isArray(placement.destinationSpawnBox2d) &&
+          placement.destinationSpawnBox2d.length >= 4
+            ? {
+                destinationSpawnBox2d: placement.destinationSpawnBox2d
+                  .slice(0, 4)
+                  .map(Number),
+              }
+            : {}),
+          ...(typeof placement.interactionType === "string"
+            ? { interactionType: placement.interactionType }
+            : {}),
+          ...(typeof placement.functionalRole === "string"
+            ? { functionalRole: placement.functionalRole }
+            : {}),
+          ...(typeof placement.templateId === "string"
+            ? { templateId: placement.templateId }
+            : {}),
+          ...(Array.isArray(placement.stages)
+            ? { stages: placement.stages }
+            : {}),
+          ...(typeof placement.gamePlay === "string"
+            ? { gamePlay: placement.gamePlay }
+            : {}),
         });
       }
 
       for (const overlay of mapOverlayData) {
-        this._overlays.push(new MapOverlayObject(overlay, normOffset));
+        const kind = overlay.kind ?? "state";
+        const primary = overlay.states?.[0];
+
+        if (kind === "erase") {
+          // Visual patch + collision clear happen after background load
+          // (sprite bounds may still be unresolved here for pixel_bbox masks).
+          if (!primary?.box_2d || !primary.url?.trim()) continue;
+          const rawBounds = parseBox2d(primary.box_2d);
+          const bounds = normOffset
+            ? offsetRect(rawBounds, normOffset.x, normOffset.y)
+            : rawBounds;
+          const patch: ErasePatch = {
+            id: overlay.id,
+            label: overlay.anchorLabel ?? overlay.id,
+            bounds,
+            image: null,
+          };
+          loadImage(primary.url.trim())
+            .then((image) => {
+              patch.image = image;
+            })
+            .catch(() => {
+              patch.image = null;
+            });
+          this._erasePatches.push(patch);
+          continue;
+        }
+
+        if (kind === "vfx") {
+          const validStates = (overlay.states ?? []).filter(
+            (state) => state.box_2d && state.url?.trim(),
+          );
+          for (const state of validStates) {
+            // A multi-state VFX exports independently triggerable effects using
+            // `<overlayId>:<stateName>`. Only the selected state may auto-loop.
+            const isSelected =
+              state.name ===
+              (overlay.currentState ??
+                overlay.currentMapStateLabel ??
+                validStates[0]?.name);
+            const requestedMode =
+              state.mode === "gameplay" ? "gameplay" : "background";
+            const mode =
+              validStates.length > 1 && !isSelected
+                ? "gameplay"
+                : requestedMode;
+            const frameCount = Math.max(
+              1,
+              Number(state.frameCount ?? state.frame_count) || 1,
+            );
+            this._mapSprites.push(
+              new MapEffectObject(
+                {
+                  label:
+                    validStates.length > 1
+                      ? `${overlay.anchorLabel ?? overlay.id}:${state.name}`
+                      : (overlay.anchorLabel ?? overlay.id),
+                  mask_prompt:
+                    validStates.length > 1
+                      ? `${overlay.id}:${state.name}`
+                      : overlay.id,
+                  type: mode,
+                  box_2d: state.box_2d,
+                  frame_count: frameCount,
+                  spriteSheetUrl: state.url.trim(),
+                  linkedColliderLabel: overlay.linkedObstacleLabel,
+                },
+                resolveLinkedRenderY(overlay.linkedObstacleLabel) ??
+                  inferRenderYFromOverlappingMask(state.box_2d as Box2D),
+                normOffset,
+                { defaultType: mode },
+              ),
+            );
+          }
+          continue;
+        }
+
+        // state / grid / legacy structural overlays
+        if (overlay.states?.length) {
+          const primary = overlay.states[0];
+          const linkedRenderY =
+            resolveLinkedRenderY(overlay.linkedObstacleLabel) ??
+            resolveLinkedRenderY(overlay.anchorLabel) ??
+            (primary?.box_2d
+              ? inferRenderYFromOverlappingMask(primary.box_2d as Box2D)
+              : undefined);
+          this._overlays.push(
+            new MapOverlayObject(overlay, normOffset, { linkedRenderY }),
+          );
+        }
       }
     }
+
+    if (this._backgroundLoadsPending === 0) {
+      this._markReady();
+    }
+  }
+
+  /**
+   * Fired when background panel size / pixel placement is resolved so the
+   * runtime can resync camera canvas metrics.
+   */
+  onMetricsChanged(listener: () => void): () => void {
+    this._metricsListeners.push(listener);
+    return () => {
+      this._metricsListeners = this._metricsListeners.filter(
+        (entry) => entry !== listener,
+      );
+    };
+  }
+
+  /** Resolves once all background panels have finished loading (or failed). */
+  whenReady(): Promise<void> {
+    if (this._ready) return Promise.resolve();
+    return new Promise((resolve) => {
+      this._readyResolvers.push(resolve);
+    });
+  }
+
+  private _onBackgroundImageLoaded(
+    img: HTMLImageElement | null,
+    panelObjects: MapObject[],
+    mapOverlays: MapOverlayEntry[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    const eraseOverlays = mapOverlays.filter(
+      (overlay) => (overlay.kind ?? "state") === "erase",
+    );
+
+    if (img?.naturalWidth && img.naturalHeight) {
+      // Prefer the real loaded map size unless the caller locked panel pixels.
+      if (!this._panelSizeLocked) {
+        const nextW = img.naturalWidth;
+        const nextH = img.naturalHeight;
+        if (nextW !== this.panelPixelWidth || nextH !== this.panelPixelHeight) {
+          this.panelPixelWidth = nextW;
+          this.panelPixelHeight = nextH;
+          this.worldPixelWidth = this._numCols * nextW;
+          this.worldPixelHeight = this._numRows * nextH;
+          for (const listener of this._metricsListeners) listener();
+        }
+      }
+
+      // Place cut-outs from pixel_bbox using the loaded map image size.
+      // (When size is locked, still use locked panel metrics for consistency.)
+      const placeW = this._panelSizeLocked
+        ? this.panelPixelWidth
+        : img.naturalWidth;
+      const placeH = this._panelSizeLocked
+        ? this.panelPixelHeight
+        : img.naturalHeight;
+      for (const obj of panelObjects) {
+        obj.resolveFromMapPixels(placeW, placeH);
+      }
+
+      // v2 sprites only get normalized bounds after pixel_bbox resolve — re-check
+      // state/grid overlay ownership so cut-outs don't double-draw over patches.
+      this._applyStateOverlayObstacleSuppression(
+        mapOverlays,
+        panelObjects,
+        normOffset,
+      );
+
+      // Anchor state/grid overlays to the resolved cut-out Y + real mask label
+      // (authoring labels like "market stall" often differ from sprite labels).
+      this._syncOverlayMaskLinks(mapOverlays, panelObjects, normOffset);
+
+      // Obstacle-edit local collision: overlay owns walkability; clear base sprite.
+      this._syncOverlayLocalCollisionOverrides(panelObjects);
+
+      this._applyEraseOverlayCollisions(
+        eraseOverlays,
+        panelObjects,
+        normOffset,
+      );
+    } else {
+      // Image missing/failed — still transfer collision to replace overlays by label.
+      this._applyStateOverlayObstacleSuppression(
+        mapOverlays,
+        panelObjects,
+        normOffset,
+      );
+      this._syncOverlayMaskLinks(mapOverlays, panelObjects, normOffset);
+      this._syncOverlayLocalCollisionOverrides(panelObjects);
+      this._applyEraseOverlayCollisions(
+        eraseOverlays,
+        panelObjects,
+        normOffset,
+      );
+    }
+
+    this._backgroundLoadsPending = Math.max(
+      0,
+      this._backgroundLoadsPending - 1,
+    );
+    if (this._backgroundLoadsPending === 0) {
+      this._markReady();
+    }
+  }
+
+  /**
+   * After mask bounds resolve, suppress Y-sorted obstacle cut-outs that a
+   * state/grid overlay with `placementMode: "replace"` (default) owns
+   * (label match or bbox containment/IoU). `placementMode: "overlay"` leaves
+   * the base cut-out and draws the patch on top.
+   */
+  private _applyStateOverlayObstacleSuppression(
+    overlays: MapOverlayEntry[],
+    panelObjects: MapObject[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    const structural = overlays.filter(structuralOverlayReplacesObstacle);
+    if (!structural.length) return;
+
+    for (const obj of panelObjects) {
+      if (obj.type.toLowerCase() === "boundary") continue;
+      const maskRect = obj.getBounds();
+      const hasBounds = maskRect.x2 > maskRect.x1 && maskRect.y2 > maskRect.y1;
+
+      const owner = structural.find((overlay) => {
+        const labels = overlayLinkLabels(overlay);
+        if (
+          labels.some(
+            (label) => label === obj.label.trim() || label === obj.name.trim(),
+          )
+        ) {
+          return true;
+        }
+        if (!hasBounds) return false;
+        return (overlay.states ?? []).some((state) => {
+          if (!Array.isArray(state.box_2d) || state.box_2d.length < 4) {
+            return false;
+          }
+          let overlayRect = parseBox2d(state.box_2d);
+          if (normOffset) {
+            overlayRect = offsetRect(overlayRect, normOffset.x, normOffset.y);
+          }
+          return rectsCloseEnoughForOverlayReplacement(maskRect, overlayRect);
+        });
+      });
+
+      if (!owner) continue;
+      obj.suppressObstacleVisual();
+      // Keep collision ownership in lockstep with visual replace. Otherwise the
+      // closed-gate collider still blocks after the open patch is showing.
+      if (overlayEntryOwnsLocalCollision(owner)) {
+        obj.claimCollisionForOverlay();
+      }
+    }
+  }
+
+  /**
+   * Bind structural overlays to the cut-out they patch so they share renderY
+   * and draw immediately after that mask (needed for placementMode: overlay —
+   * otherwise the shelf patch sorts by its own smaller box and paints under the
+   * stall canopy cut-out).
+   */
+  private _syncOverlayMaskLinks(
+    overlays: MapOverlayEntry[],
+    panelObjects: MapObject[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    const candidates = panelObjects.filter((obj) => {
+      if (obj.type.toLowerCase() === "boundary") return false;
+      const bounds = obj.getBounds();
+      return bounds.x2 > bounds.x1 && bounds.y2 > bounds.y1;
+    });
+    if (!candidates.length) return;
+
+    for (const overlayObj of this._overlays) {
+      const entry = overlays.find((overlay) => overlay.id === overlayObj.id);
+      if (!entry || !isStructuralMapOverlay(entry)) continue;
+
+      const labels = overlayLinkLabels(entry);
+      let matched =
+        candidates.find((obj) =>
+          labels.some(
+            (label) => label === obj.label.trim() || label === obj.name.trim(),
+          ),
+        ) ?? null;
+
+      if (!matched) {
+        const overlayRect = overlayObj.getBounds();
+        const centerX = (overlayRect.x1 + overlayRect.x2) * 0.5;
+        const centerY = (overlayRect.y1 + overlayRect.y2) * 0.5;
+        const containing = candidates
+          .map((obj) => {
+            const bounds = obj.getBounds();
+            return {
+              obj,
+              bounds,
+              area: rectArea(bounds),
+              contains:
+                centerX >= bounds.x1 &&
+                centerX <= bounds.x2 &&
+                centerY >= bounds.y1 &&
+                centerY <= bounds.y2,
+            };
+          })
+          .filter((entry) => entry.contains)
+          .sort((a, b) => a.area - b.area)[0];
+        if (containing) {
+          matched = containing.obj;
+        } else {
+          const overlapping = candidates
+            .map((obj) => {
+              const bounds = obj.getBounds();
+              return {
+                obj,
+                area: rectArea(bounds),
+                hit: rectsOverlap(bounds, overlayRect),
+              };
+            })
+            .filter((entry) => entry.hit)
+            .sort((a, b) => a.area - b.area)[0];
+          matched = overlapping?.obj ?? null;
+        }
+      }
+
+      // Also accept close bbox match against authored state boxes (replace patches).
+      if (!matched) {
+        for (const obj of candidates) {
+          const maskRect = obj.getBounds();
+          const close = (entry.states ?? []).some((state) => {
+            if (!Array.isArray(state.box_2d) || state.box_2d.length < 4) {
+              return false;
+            }
+            let overlayRect = parseBox2d(state.box_2d);
+            if (normOffset) {
+              overlayRect = offsetRect(overlayRect, normOffset.x, normOffset.y);
+            }
+            return rectsCloseEnoughForOverlayReplacement(maskRect, overlayRect);
+          });
+          if (close) {
+            matched = obj;
+            break;
+          }
+        }
+      }
+
+      if (matched) {
+        overlayObj.bindLinkedMask(matched.label, matched.renderY);
+      }
+    }
+  }
+
+  /**
+   * Clear sprite collision under unified `kind: "erase"` mapOverlays.
+   * Uses coverage (intersection / sprite area), not label matching — authored
+   * labels are unreliable, and AABB overlap alone would wipe neighbors that
+   * only clip the erase edge.
+   */
+  private _applyEraseOverlayCollisions(
+    eraseOverlays: MapOverlayEntry[],
+    panelObjects: MapObject[],
+    normOffset?: { x: number; y: number },
+  ): void {
+    for (const overlay of eraseOverlays) {
+      const primary = overlay.states?.[0];
+      if (!primary?.box_2d) continue;
+      if (primary.clearsCollision === false) continue;
+      const rawBounds = parseBox2d(primary.box_2d);
+      const bounds = normOffset
+        ? offsetRect(rawBounds, normOffset.x, normOffset.y)
+        : rawBounds;
+      if (rectArea(bounds) <= 0) continue;
+
+      for (const obj of panelObjects) {
+        if (obj.type.toLowerCase() === "boundary") continue;
+        const objBounds = obj.getBounds();
+        const objArea = rectArea(objBounds);
+        if (objArea <= 0) continue;
+        const intersection = rectIntersectionArea(objBounds, bounds);
+        if (intersection <= 0) continue;
+        if (intersection / objArea >= ERASE_COLLISION_COVERAGE_THRESHOLD) {
+          obj.applyEraseOverwrite();
+        }
+      }
+    }
+  }
+
+  /**
+   * When a state/grid overlay has local collision (silhouette / polygons),
+   * the overlay owns walkability and the linked map sprite stops blocking.
+   * Turning the overlay off (`initial`) releases the claim.
+   *
+   * Prefer the resolved link (`linkedMaskKey` / `linkedObstacleLabel`) — that is
+   * the behind-obstacle the overlay replaces. Only fall back to bbox overlap
+   * when no link resolved, so neighboring generated sprites keep their collision.
+   */
+  private _syncOverlayLocalCollisionOverrides(panelObjects: MapObject[]): void {
+    for (const obj of panelObjects) {
+      obj.releaseCollisionForOverlay();
+    }
+
+    for (const overlay of this._overlays) {
+      if (isMapOverlayOffState(overlay.currentStateName)) continue;
+      if (!overlay.hasLocalCollision) continue;
+
+      const overlayBounds = overlay.getBounds();
+      const linkKey = overlay.linkedMaskKey?.trim();
+
+      for (const obj of panelObjects) {
+        if (obj.type.toLowerCase() === "boundary") continue;
+        const linked =
+          Boolean(linkKey) &&
+          (obj.label.trim() === linkKey || obj.name.trim() === linkKey);
+        const shouldOverride = linkKey
+          ? linked
+          : rectsOverlap(obj.getBounds(), overlayBounds);
+        if (shouldOverride) {
+          obj.claimCollisionForOverlay();
+          // Local collision also owns the silhouette visual.
+          obj.suppressObstacleVisual();
+        }
+      }
+    }
+  }
+
+  private _markReady(): void {
+    if (this._ready) return;
+    this._ready = true;
+    const resolvers = this._readyResolvers.splice(0);
+    for (const resolve of resolvers) resolve();
   }
 
   // ── Collision ────────────────────────────────────────────────────────────
@@ -586,6 +1232,36 @@ export default class GameMap {
     for (const overlay of this._overlays) {
       overlay.drawBackground(ctx, now, wnw, wnh, wpw, wph);
     }
+
+    // `kind: "erase"` mapOverlays: static patches on top of the map layer so the
+    // cleared area sits in front of other map-layer art.
+    for (const patch of this._erasePatches) {
+      const image = patch.image;
+      if (!image?.complete || !image.naturalWidth) continue;
+      const { x, y } = toPixel(
+        patch.bounds.x1,
+        patch.bounds.y1,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      const { x: x2, y: y2 } = toPixel(
+        patch.bounds.x2,
+        patch.bounds.y2,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      ctx.drawImage(
+        image,
+        snapCanvasValue(x),
+        snapCanvasValue(y),
+        snapCanvasValue(x2 - x),
+        snapCanvasValue(y2 - y),
+      );
+    }
   }
 
   getRenderables(): Array<
@@ -595,6 +1271,9 @@ export default class GameMap {
       (MapObject | MapEffectObject | MapOverlayObject) & RenderSortable
     > = [];
     const unlinkedSprites = [...this._mapSprites];
+    const unlinkedOverlays = this._overlays.filter(
+      (overlay) => overlay.participatesInYSort,
+    );
 
     for (const obj of this._objects) {
       if (!obj.participatesInYSort) {
@@ -609,12 +1288,20 @@ export default class GameMap {
           unlinkedSprites.splice(i, 1);
         }
       }
+      // State/grid patches (esp. placementMode: overlay) must draw right after
+      // their base cut-out when Y ties — otherwise a smaller shelf box sorts
+      // behind the full stall canopy.
+      for (let i = unlinkedOverlays.length - 1; i >= 0; i -= 1) {
+        const overlay = unlinkedOverlays[i];
+        if (overlay.linkedMaskKey && keys.has(overlay.linkedMaskKey)) {
+          renderables.push(overlay);
+          unlinkedOverlays.splice(i, 1);
+        }
+      }
     }
 
     renderables.push(...unlinkedSprites);
-    renderables.push(
-      ...this._overlays.filter((overlay) => overlay.participatesInYSort),
-    );
+    renderables.push(...unlinkedOverlays);
     return renderables;
   }
 
@@ -626,6 +1313,13 @@ export default class GameMap {
       gridDimensions: placement.gridDimensions
         ? [...placement.gridDimensions]
         : undefined,
+    }));
+  }
+
+  getCharacterPlacements(): CharacterPlacementEntry[] {
+    return this._characterPlacements.map((placement) => ({
+      ...placement,
+      box_2d: [...placement.box_2d],
     }));
   }
 
@@ -643,7 +1337,11 @@ export default class GameMap {
   setMapOverlayState(id: string, state: string): boolean {
     const overlay = this._overlays.find((candidate) => candidate.id === id);
     if (!overlay) return false;
-    return overlay.setState(state);
+    const changed = overlay.setState(state);
+    if (changed) {
+      this._syncOverlayLocalCollisionOverrides(this._objects);
+    }
+    return changed;
   }
 
   getHoverTargetsAt(x: number, y: number): HoverTarget[] {
@@ -668,6 +1366,17 @@ export default class GameMap {
 
   drawOverlay(_ctx: CanvasRenderingContext2D, _now = performance.now()): void {
     // Map spritesheets participate in the Y-sorted render queue via getRenderables().
+  }
+
+  /** Floating sky-layer sprites — drawn after the world Y-sort queue. */
+  drawAtmosphere(ctx: CanvasRenderingContext2D, now = performance.now()): void {
+    const worldNormW = this.worldNormWidth;
+    const worldNormH = this.worldNormHeight;
+    const worldPixelW = this.worldPixelWidth;
+    const worldPixelH = this.worldPixelHeight;
+    for (const item of this._atmosphere) {
+      item.draw(ctx, now, worldNormW, worldNormH, worldPixelW, worldPixelH);
+    }
   }
 
   playGameplayEffectByTag(tag: string, now = performance.now()): boolean {
@@ -711,11 +1420,75 @@ export default class GameMap {
     return true;
   }
 
+  /**
+   * Play the nearest gameplay (non-background) map VFX, regardless of tag.
+   * When `maxDistance` is set, only effects within that world-norm radius play.
+   */
+  playNearestGameplayEffect(
+    atX: number,
+    atY: number,
+    now = performance.now(),
+    maxDistance?: number,
+  ): boolean {
+    let nearest: MapEffectObject | null = null;
+    let nearestDistanceSq = Number.POSITIVE_INFINITY;
+    const maxDistanceSq =
+      typeof maxDistance === "number" && Number.isFinite(maxDistance)
+        ? maxDistance * maxDistance
+        : Number.POSITIVE_INFINITY;
+
+    for (const sprite of this._mapSprites) {
+      if (sprite.type === "background") continue;
+      const distanceSq = sprite.distanceSqTo(atX, atY);
+      if (distanceSq > maxDistanceSq) continue;
+      if (distanceSq < nearestDistanceSq) {
+        nearestDistanceSq = distanceSq;
+        nearest = sprite;
+      }
+    }
+
+    if (!nearest) return false;
+    nearest.play(now, true);
+    return true;
+  }
+
   drawDebug(ctx: CanvasRenderingContext2D): void {
     const wnw = this.worldNormWidth;
     const wnh = this.worldNormHeight;
     const wpw = this.worldPixelWidth;
     const wph = this.worldPixelHeight;
+
+    // Erase mapOverlay patches — magenta outline
+    for (const patch of this._erasePatches) {
+      const { x, y } = toPixel(
+        patch.bounds.x1,
+        patch.bounds.y1,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      const { x: x2, y: y2 } = toPixel(
+        patch.bounds.x2,
+        patch.bounds.y2,
+        wnw,
+        wnh,
+        wpw,
+        wph,
+      );
+      ctx.save();
+      ctx.strokeStyle = "rgba(255, 80, 220, 0.9)";
+      ctx.fillStyle = "rgba(255, 80, 220, 0.1)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.strokeRect(x, y, x2 - x, y2 - y);
+      ctx.fillRect(x, y, x2 - x, y2 - y);
+      ctx.setLineDash([]);
+      ctx.fillStyle = "rgba(255,200,255,0.95)";
+      ctx.font = "11px 'Geist Pixel', sans-serif";
+      ctx.fillText(`erase:${patch.label}`, x + 4, y + 14);
+      ctx.restore();
+    }
 
     // Walkable areas — green outline
     for (const wb of this._walkable) {

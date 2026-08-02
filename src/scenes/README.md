@@ -1,23 +1,40 @@
 # Scenes
 
-Put scene setup modules here.
+Prefer the synced path:
 
-A scene module should be orchestration-only:
+`main.ts` → `createMainScene(opts)` → `createGeneratedWorld(opts)` → `bootstrapWorldFromAssets(...)` → `configureGameplay(game)`.
 
-1. Preload generated assets/audio if needed. Preloading may happen on startup, but do not start browser-gated playback yet.
-2. Create the game with `createGame(...)`.
-3. Register resources with `game.registerResource(...)`.
-4. Call archetype setup functions.
-5. Call system setup functions.
-6. Call input setup functions.
-7. Spawn initial entities from archetypes.
-8. Mount widgets with `game.useWidget(...)`.
-9. Register browser-gated audio work with the loading gate continue hook passed from `src/main.ts` (for example `createMainScene({ onAudioReady: loadingGate.onContinue })`). Start looping music, `AudioContext.resume()`, and similar autoplay-sensitive calls there or from later gameplay inputs.
-10. Start any async SDK/save bootstrap without blocking scene return.
-11. Return `GameAPI`.
+- **Do not hand-edit** `generatedWorld.ts` (rewritten by asset sync).
+- Put custom systems, widgets, inputs, and patches in `configureGameplay` inside `mainScene.ts` (or modules it calls).
+- Pass camera / touch / interact / audio opts through `createMainScene` / `BootstrapGameplayOptions`.
+- When sync has no maps, `createGeneratedWorld` returns `null` and `mainScene` boots a blank SVG starter with a placeholder player.
 
-Do not call `sdk.init()` from scenes unless custom SDK client options are explicitly required; SDK calls lazy-initialize from `window.gameId`.
+## What bootstrap already owns
 
-Do not put heavy gameplay logic, crop transitions, save logic, NPC dialogue logic, or long-lived state directly in scenes.
+Do not re-implement these in `configureGameplay`:
+
+- Start map selection and `createGame` / `toMapData`
+- Character archetypes + `characterPlacements` spawn (player vs NPC)
+- Map-scoped BGM / ambience / autoplay SFX + dual-path audio unlock
+- Atmosphere from `atmospherePlacements`
+- Default `interact` (enterables / synthetic return exits / state overlays / gameplay VFX)
+
+Bootstrap does **not** auto-spawn props from `placement[]` or mount `hudPlacements` — those belong in gameplay.
+
+## If you orchestrate a scene by hand
+
+Only for tools / tests / no synced maps. Keep the scene orchestration-only:
+
+1. Preload generated assets/audio if needed (do not start browser-gated playback yet).
+2. Call `createGame(...)` or rely on bootstrap.
+3. Register resources.
+4. Register archetypes / systems / inputs.
+5. Spawn entities bootstrap does not own.
+6. Mount widgets.
+7. Register browser-gated audio via `onAudioReady` (and a one-shot gesture unlock if you start BGM yourself).
+8. Start async SDK/save bootstrap without blocking return.
+9. Return `GameAPI`.
+
+Do not call `sdk.init()` from scenes unless custom SDK client options are required.
 
 Update `src/scenes/SCENES.md` when adding or changing active scene composition.

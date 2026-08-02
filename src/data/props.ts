@@ -1,9 +1,16 @@
+/**
+ * Prop types and lookup helpers. Stable — Maps sync must not overwrite this file.
+ * Prop JSON registration lives in `./generated-props` (rewritten on sync).
+ */
 import { getCommonAssetUrl } from "./common";
+import { allPropFiles } from "./generated-props";
 
 export interface PropItem {
   name: string;
+  label?: string;
   description?: string;
   url: string;
+  box_2d?: number[];
 }
 
 export interface PropData {
@@ -12,8 +19,7 @@ export interface PropData {
   items?: PropItem[];
 }
 
-/** All `prop_*.json` manifests — updated when prop assets are generated. */
-export const allPropFiles: PropData[] = [];
+export { allPropFiles };
 
 const byGroup = new Map<string, PropData>();
 for (const prop of allPropFiles) {
@@ -22,6 +28,11 @@ for (const prop of allPropFiles) {
 
 export function getPropData(groupName: string): PropData | undefined {
   return byGroup.get(groupName);
+}
+
+/** Sheet / group image URL (e.g. `prop_crops`). */
+export function getPropGroupUrl(groupName: string): string | undefined {
+  return byGroup.get(groupName)?.url;
 }
 
 /** Stage or variant URL inside a prop group (e.g. `prop_crops` + `bare_soil_patch`). */

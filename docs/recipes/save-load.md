@@ -9,7 +9,7 @@ Use the Capybara SDK facade for persistence.
 
 ## Read first
 
-- `docs/SDK_FACADE.md`
+- `.agents/skills/capybara-game-developer/SDK_FACADE.md`
 - `src/sdk/index.ts` only if exact signatures are needed
 
 Avoid SDK internals such as `src/sdk/Save.ts` unless a bug is proven.
@@ -42,7 +42,7 @@ export interface GameSaveData {
 }
 ```
 
-For non-farming games, adapt the payload to stable gameplay fields; `docs/SDK_FACADE.md` shows the generic SDK contract.
+For non-farming games, adapt the payload to stable gameplay fields; `.agents/skills/capybara-game-developer/SDK_FACADE.md` shows the generic SDK contract.
 
 ## Load pattern
 

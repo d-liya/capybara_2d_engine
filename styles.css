@@ -1,30 +1,69 @@
 @import "tailwindcss";
 
+/* Docs quote class names (including ones the art direction forbids). Keep them
+   out of the scan so guidance text cannot leak utilities into the bundle. */
+@source not "**/*.md";
+
 /* Do not add an unlayered `* { padding: 0 }` reset here — it overrides @layer utilities
    (p-*, px-*, py-*, etc.). Tailwind preflight already resets margin/padding in @layer base. */
 
+/* Painted Pixel HUD palette. Games may override these values to match the color
+   script of their generated map; the tone relationships must stay the same:
+   one ink contour, one lit rim, one shade rim, one sparse accent.
+   `static` keeps every token in the build so raw CSS and inline styles can read
+   them even when no Tailwind utility happens to reference the color. */
+@theme static {
+  --color-capy-ink: #150e21;
+  --color-capy-shadow: #251a38;
+  --color-capy-panel: #33264a;
+  --color-capy-panel-lit: #4b3a66;
+  --color-capy-panel-shade: #201736;
+  --color-capy-slot: #1b1430;
+  --color-capy-rim: #7a5f9c;
+  --color-capy-parchment: #f6e7c6;
+  --color-capy-parchment-dim: #bda98c;
+  --color-capy-accent: #ffc558;
+  --color-capy-accent-deep: #d2762a;
+}
+
+:root {
+  --capy-contour: 2px;
+  --capy-radius: 4px;
+  /* Hard-edged cast shadow, key light from the upper left. Never blurred. */
+  --capy-cast: 4px 4px 0 0 rgba(21, 14, 33, 0.55);
+  --capy-cast-sm: 3px 3px 0 0 rgba(21, 14, 33, 0.5);
+}
+
 body {
-  background: #111;
+  /* Letterbox reads as part of the world's color grade, not a pure-black void. */
+  background: var(--color-capy-ink);
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  font-family: "DynaPuff", sans-serif;
+  /* Google Fonts only ships Geist Pixel at 400. WebKit drops the face entirely
+     when a heavier weight is requested and falls back to system sans. */
+  font-family: "Geist Pixel", sans-serif;
+  font-weight: 400;
+  font-synthesis: none;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
 }
 #game-shell {
   position: relative;
+  background: var(--color-capy-ink);
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
 }
 canvas {
   display: block;
-  image-rendering: pixelated;
+  background: var(--color-capy-ink);
+  /* High-res map art: smooth resampling. Pixel-art games can override to `pixelated`. */
+  image-rendering: auto;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -33,9 +72,114 @@ canvas {
 #hud-root {
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Painted Pixel HUD kit — see src/widgets/AGENTS.md for the art direction rules.
+   Every surface here resolves to flat tones with hard edges: no gradients, no
+   backdrop blur, no soft drop shadows, no translucent glass. Tailwind utilities
+   sit in a later layer, so `capy-panel rounded-full` or `capy-panel bg-capy-slot`
+   still work for variants. */
+@layer components {
+  .capy-panel {
+    background-color: var(--color-capy-panel);
+    border: var(--capy-contour) solid var(--color-capy-ink);
+    border-radius: var(--capy-radius);
+    box-shadow:
+      inset 0 2px 0 0 var(--color-capy-panel-lit),
+      inset 2px 0 0 0 var(--color-capy-panel-lit),
+      inset 0 -2px 0 0 var(--color-capy-panel-shade),
+      inset -2px 0 0 0 var(--color-capy-panel-shade),
+      var(--capy-cast);
+  }
+
+  /* Recessed surface: rims flip so the slot reads as carved into the panel. */
+  .capy-slot {
+    background-color: var(--color-capy-slot);
+    border: var(--capy-contour) solid var(--color-capy-ink);
+    border-radius: var(--capy-radius);
+    box-shadow:
+      inset 0 2px 0 0 var(--color-capy-panel-shade),
+      inset 0 -2px 0 0 var(--color-capy-panel-lit);
+  }
+
+  /* Floating joystick ring. The one surface allowed flat alpha, because it sits
+     directly over walkable world art — still a single flat tone, no gradient. */
+  .capy-dial {
+    background-color: rgba(27, 20, 48, 0.72);
+    border: var(--capy-contour) solid var(--color-capy-ink);
+    box-shadow:
+      inset 0 2px 0 0 var(--color-capy-panel-shade),
+      inset 0 -2px 0 0 var(--color-capy-panel-lit);
+  }
+
+  /* Chunky keycap for key badges and action buttons. */
+  .capy-key {
+    background-color: var(--color-capy-panel-lit);
+    border: var(--capy-contour) solid var(--color-capy-ink);
+    border-radius: var(--capy-radius);
+    color: var(--color-capy-accent);
+    box-shadow:
+      inset 0 2px 0 0 var(--color-capy-rim),
+      inset 0 -3px 0 0 var(--color-capy-panel-shade),
+      var(--capy-cast-sm);
+  }
+
+  /* Pressed state drops the cap onto its own shadow — no easing, no scale blur. */
+  .capy-key-pressed,
+  .capy-key:active {
+    background-color: var(--color-capy-panel);
+    box-shadow:
+      inset 0 2px 0 0 var(--color-capy-panel-shade),
+      inset 0 -2px 0 0 var(--color-capy-panel-lit);
+    transform: translate3d(2px, 2px, 0);
+  }
+
+  .capy-text {
+    color: var(--color-capy-parchment);
+    text-shadow: 1px 1px 0 var(--color-capy-ink);
+  }
+
+  .capy-text-dim {
+    color: var(--color-capy-parchment-dim);
+    text-shadow: 1px 1px 0 var(--color-capy-ink);
+  }
+
+  /* Two-tone hard rule: lit line over shade line, matching the key light. */
+  .capy-divider {
+    height: 2px;
+    background-color: var(--color-capy-rim);
+    box-shadow: 0 1px 0 0 var(--color-capy-panel-shade);
+  }
+
+  /* Quantized reveal instead of a smooth opacity ramp. Opacity only: world-
+     anchored widgets rewrite `transform` every frame and must not be eased. */
+  .capy-fade {
+    transition: opacity 90ms steps(3, end);
+  }
+
+  /* Soft floor cue under enterables — Press E is the main affordance. */
+  .capy-glow-pool {
+    border-radius: 9999px;
+    background-color: rgba(255, 197, 88, 0.12);
+    box-shadow:
+      0 0 0 5px rgba(255, 197, 88, 0.08),
+      0 0 0 10px rgba(210, 118, 42, 0.04);
+    animation: capy-glow-step 2s steps(4, end) infinite;
+  }
+}
+
+@keyframes capy-glow-step {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }

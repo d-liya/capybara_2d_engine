@@ -1,43 +1,56 @@
 # Asset Integration Playbook
 
-**Required after every asset-generation tool call.** Generating assets does not finish the task — the agent must register and wire them into the engine before stopping (unless the user asked for generation only).
+Wire assets into gameplay. For deep GameAPI contracts, see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md).
 
-Wire generated assets into gameplay. Read this **after** assets exist in `src/data/` / `src/data/assets.md`, and **before** treating generation as complete.
+## Hosted builder / OpenHands sync
 
-For prompting/generation rules, see [PROMPT_GUIDE.md](PROMPT_GUIDE.md). For deep GameAPI contracts, see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md).
+Assets arrive from Maps / Jobs sync when `src/data/capybara-assets.json` and/or a non-stub `src/scenes/generatedWorld.ts` are present.
+
+Each map is split across files (merged in `generated.ts` via `mergeMapSidecars` before `toMapData`):
+
+| File | Contents |
+| ---- | -------- |
+| `map_<id>.json` | Lean: `url`, `walkableBoxes`, `mapOverlays` (`erase` / `state` / `vfx` / `grid`) |
+| `map_<id>.sprites.json` | Cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
+| `map_<id>.placements.json` | `placement`, `characterPlacements`, `hudPlacements`, `atmospherePlacements` |
+
+What sync + `bootstrapWorldFromAssets` already do:
+
+1. Registries (`generated.ts` / `generated-props.ts` / `common.json` / `huds.json`) are written by sync.
+2. Bootstrap defines character archetypes, spawns `characterPlacements` (player vs NPC), starts map-scoped BGM / ambience / autoplay SFX, and binds default interact (enterables → `transitionMap`, state overlays, gameplay VFX). Forward enterables get a synthetic return exit at `destinationSpawnBox2d` when the destination has no authored back-link.
+3. Atmosphere loads automatically from `toMapData(...).atmospherePlacements` inside the map runtime — bootstrap does **not** call a separate atmosphere API.
+4. Treat manifest-owned JSON and `generatedWorld.ts` as read-only; import handles from `src/data/index.ts`.
+5. Extend gameplay in `configureGameplay` (`src/scenes/mainScene.ts`): systems, custom widgets, overlay triggers, dialogue, combat, quests, inventory, plus any entities you invent.
+
+Bootstrap does **not** auto-spawn props from `placement[]`, mount HUDs from `hudPlacements` / `huds.json`, or run dialogue. Those are gameplay work.
+
+Identifiers like `mapMain`, `charPlayer` below are **placeholders**. Copy real names from generated JSON / exports.
+
+Overlays from the builder are already on the lean map — wire interactions with the overlay APIs below.
+
+HUD catalog lives in `huds.json` with widget TS under `src/widgets/`. `hudPlacements` may be authored on the map sidecar; mount and adapt those widgets yourself (they are not auto-mounted).
 
 ## Source of truth
 
-1. **`src/data/assets.md`** — map/character/prop/audio/widget/placement names and handles for _this_ game. Never invent names from recipes or placeholders.
-2. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `toArchetype`). Stable across regenerations.
-3. **`src/Game.ts`** — public gameplay API (`createGame`, `loadMap`, overlays, audio helpers, spawning).
+1. **`src/data/capybara-assets.json`** — revision + ownership of the synced projection (absent until assets sync).
+2. **`src/data/` generated JSON** — map/character/prop/audio/HUD handles (`map_*.json` + `.sprites.json` / `.placements.json` sidecars, `char_*.json`, `prop_*.json`, `huds.json`, `common.json`; exports from `generated.ts` / `generated-props.ts`, re-exported by `index.ts`). Copy real names from these files.
+3. **`src/data/adapters.ts`** — shape bridges (`toMapData`, `mergeMapSidecars`, `mergeMapSprites`, `toArchetype`, `toPlayerSprite`). Stable across regenerations.
+4. **`src/Game.ts`** — public gameplay API (`createGame`, `transitionMap` / `loadMap`, overlays, audio helpers, spawning).
+5. **`src/scenes/generatedWorld.ts` + `bootstrapWorldFromAssets`** — what is already live this revision. Extend via `configureGameplay`, do not re-bootstrap by hand.
 
-Do not open generated JSON just to find names or URLs. Do not hand-edit generated JSON unless explicitly asked.
+Prefer lean `map_*.json` for layout/overlays. Open `map_*.sprites.json` for collision polygons and `map_*.placements.json` for placement / character / HUD / atmosphere lists.
 
-Identifiers like `mapMain`, `charPlayer`, `"<prop_group>"`, `"<music_name>"` below are **placeholders**. Copy real names from `assets.md`.
-
-## Registration checklist
-
-When new generated files land, register them before using them in a scene:
-
-1. **Maps / characters** — import `map_*.json` / `char_*.json` in [`src/data/index.ts`](../../../src/data/index.ts), export the handles, and include them in `allDataFiles`.
-2. **Prop groups** — add each `prop_*.json` to `allPropFiles` in [`src/data/props.ts`](../../../src/data/props.ts).
-3. **Music / portraits / shared art** — add `{ name, url }` entries to [`src/data/common.json`](../../../src/data/common.json).
-4. **HUD art** — when a HUD is generated, a boilerplate `Hud...` widget scaffold is usually written under `src/widgets/`. Confirm factory names and layout notes in `assets.md`; adapt the scaffold (do not treat it as finished gameplay UI).
-5. **Manifests** — confirm handles and placement ids in `src/data/assets.md`. When a scene owns the map, update [`src/scenes/SCENES.md`](../../../src/scenes/SCENES.md).
-6. **Preload** — in `src/main.ts`, keep `preloadDataAssets(allDataFiles)` and `preloadAllAudio()`.
+---
 
 ## Which API? (decision tree)
 
 ```txt
 Need different map geography?
-  ├─ Same continuous world (stitched panels)
-  │    → toMapData(base, { extensions: [...] })
-  └─ Separate room / interior ↔ exterior
-       → clear mapLocal entities, then game.loadMap(toMapData(...))
+  └─ Separate room / interior ↔ exterior / any travel
+       → clear mapLocal in `during`, then game.transitionMap(toMapData(...))
 
 Change a map-baked door / chest / gate visual or collider?
-  → game.setMapOverlayState(id, state)   // NOT a spawned prop
+  → game.setMapOverlayState(id, state)
 
 Portable item, crop stage, clue, or placement-box prop?
   → placeProp / spawn + getPropItemUrl(...) imageUrl patch
@@ -47,120 +60,67 @@ Map-authored spritesheet VFX?
   → gameplay: triggerMapEffect / triggerNearestMapEffect
 ```
 
-| Intent                                | API                                            |
-| ------------------------------------- | ---------------------------------------------- |
-| First / only panel at boot            | `createGame({ map: toMapData(mapHandle) })`    |
-| Stitch adjacent panels into one world | `toMapData(base, { extensions })`              |
-| Swap to a non-stitched map            | `game.loadMap(toMapData(...), { spawn })`      |
-| Toggle baked overlay state            | `setMapOverlayState`                           |
-| Spawn / stage portable props          | `placeProp` + `getPropItemUrl`                 |
-| Trigger map VFX                       | `triggerMapEffect` / `triggerNearestMapEffect` |
+| Intent                               | API                                                     |
+| ------------------------------------ | ------------------------------------------------------- |
+| Boot from synced assets              | `bootstrapWorldFromAssets` via `generatedWorld.ts`      |
+| Door / room travel (fade by default) | `game.transitionMap(toMapData(...), { spawn, during })` |
+| Instant swap (tools / custom fade)   | `game.loadMap(toMapData(...), { spawn })`               |
+| Toggle baked overlay state           | `setMapOverlayState`                                    |
+| Spawn / stage portable props         | `placeProp` + `getPropItemUrl`                          |
+| Trigger map VFX                      | `triggerMapEffect` / `triggerNearestMapEffect`          |
 
-## Recipe: new game / first map
+## Recipe: map travel (`transitionMap`)
 
-```ts
-import { createGame, getAssetUrl } from "../Game";
-import { mapMain, charPlayer, toMapData, toArchetype } from "../data";
+Each map is a **self-contained** space. Prefer `transitionMap` for house interior → village exterior, dungeon room → overworld, and any other travel between authored maps. It fades to black by default, runs your mid-fade work, swaps the map, then fades back in.
 
-const game = createGame({
-  canvasId: "game",
-  map: toMapData(mapMain),
-  cameraEdgePadding: 120,
-});
+`loadMap` is the instant primitive underneath (same preserve/reset rules). Use it only for tools, tests, or when you already own a custom transition.
 
-game.defineArchetype(
-  "player",
-  toArchetype(charPlayer, {
-    kind: "character",
-    label: "Player",
-    speed: 190,
-    radius: 34,
-    width: 140,
-    height: 168,
-  }),
-);
+Both **preserve** resources, widgets, archetypes, and existing entities. They **reset** navigation/pathfinding, hover, held movement input, and camera bounds; move the controlled entity if `spawn` is set; emit `map:changed`.
 
-const spawn = game.getPlacementTargets().find((t) => t.id === "<spawn-id-from-assets.md>");
-const playerId = game.spawnAtFeet(
-  "player",
-  /* feet x,y from spawn box — see docs/recipes/spawning.md */,
-);
-game.setControlledEntity(playerId);
-// Portrait / HUD art: getAssetUrl("<portrait_name_from_common.json>")
-```
-
-## Recipe: extended (stitched) map
-
-One continuous world from multiple generated panels:
-
-```ts
-import { mapMain, mapEast, toMapData } from "../data";
-import { createGame } from "../Game";
-
-const game = createGame({
-  canvasId: "game",
-  map: toMapData(mapMain, {
-    extensions: [{ direction: "east", panel: toMapData(mapEast) }],
-  }),
-  cameraEdgePadding: 120,
-});
-```
-
-**Origin gotcha:** stitched world origin is the top-left of the _compiled_ map. Extending east/south is easiest; west/north can shift the origin so spawn coords must be adjusted. Prefer extending right/down when designing the layout.
-
-You can also pass the same `extensions` option into `loadMap(toMapData(...))` when replacing the whole stitched world.
-
-## Recipe: separate map load (room swap)
-
-Use when maps are **not** stitched panels (house interior → village exterior, dungeon room → overworld).
-
-`loadMap` **preserves** resources, widgets, archetypes, and existing entities. It **resets** navigation/pathfinding, hover, held movement input, and camera bounds; moves the controlled entity if `spawn` is set; emits `map:changed`.
-
-Clear room-only entities yourself — do not assume the previous map’s NPCs/props disappear:
+Clear room-only entities in `during` when traveling — each map is self-contained:
 
 ```ts
 import { mapInterior, mapExterior, toMapData } from "../data";
-import { runScreenFade } from "../utils/screenFade";
 
-await runScreenFade(() => {
-  for (const id of game.query((c) => c.mapLocal === true)) {
-    game.destroy(id);
-  }
-
-  game.loadMap(toMapData(mapExterior), {
-    spawn: { x: 500, y: 820, anchor: "feet" },
-  });
-  spawnExteriorStuff(game);
-  game.emit("map:entered", { mapId: "exterior" });
+await game.transitionMap(toMapData(mapExterior), {
+  spawn: { x: 500, y: 820, anchor: "feet" },
+  during: (swap) => {
+    for (const id of game.query((c) => c.mapLocal === true)) {
+      game.destroy(id);
+    }
+    swap();
+    spawnExteriorStuff(game);
+    game.emit("map:entered", { mapId: "exterior" });
+  },
 });
 ```
 
-### Screen fade around `loadMap`
+Call `swap()` inside `during` when you want the map load to apply — clear before it, respawn after. If you omit `during`, the map swaps automatically mid-fade.
 
-`loadMap` is instant — wrap it in `runScreenFade` from `src/utils/screenFade.ts` for door/room transitions. The helper fades to black, runs your callback (destroy `mapLocal`, `loadMap`, respawn room content), waits one paint, then fades back in. Blocks pointer input during the fade.
-
-```ts
-import { runScreenFade } from "../utils/screenFade";
-
-await runScreenFade(
-  () => {
-    game.loadMap(toMapData(nextMap), {
-      spawn: { x: 500, y: 900, anchor: "feet" },
-    });
-  },
-  { fadeMs: 400 },
-);
-```
-
-Live pattern: `src/systems/MapTransitionSystem.ts`. Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
+Optional: `{ fadeMs: 140, peakOpacity: 0.45 }` (defaults — soft blink). Use `peakOpacity: 1` for a full black cut. Live pattern: `src/scenes/bootstrapWorldFromAssets.ts` (enterable placements). Pair with spawn points **outside** the destination trigger zone (and suppress re-entry until the player walks out) to avoid transition loops.
 
 Keep an explicit lifecycle: each NPC/clue/pickup is either `mapLocal` (rebuild), hidden off-map, or intentionally persistent.
 
+Low-level fade helper (rarely needed if you use `transitionMap`): `runScreenFade` from `src/utils/screenFade.ts`.
+
 ## Recipe: map overlays (baked state changes)
 
-`mapOverlays` live in generated `map_*.json` next to `masks`, `walkableBoxes`, `spriteSheets`, and `placement`. Use them for doors, safes, gates, barricades, and other map-baked structures.
+Prefer **unified `mapOverlays`** on flat `map_*.json` (next to `walkableBoxes`). Each entry has a `kind`:
 
-Runtime switches state — **do not** spawn a duplicate prop for the same door/gate:
+| `kind`           | Meaning                                                                    | Runtime                         |
+| ---------------- | -------------------------------------------------------------------------- | ------------------------------- |
+| `state` / `grid` | Multi-state structural patch (door, chest, crop stages)                    | `setMapOverlayState(id, state)` |
+| `erase`          | Static remove patch + clear overlapping sprite collision                   | Already applied at load         |
+| `vfx`            | Spritesheet loop or trigger (`states[0].mode`: `background` \| `gameplay`) | Autoplay, or `triggerMapEffect` |
+
+**Detached grids** (`kind: "grid"`, `layout: "detached_stages"`): each state has its own `box_2d` (stage art size may differ). Runtime follows `currentState` / `currentMapStateLabel`:
+
+- `"initial"` or `"none"` → draw nothing (base map only)
+- a real state name → draw that state's art across the full grid via `gridDimensions` + `gridSpacing` (Maps playground tiling)
+
+`ghostCellDisplay` is Maps-editor only and is not synced to the engine. Do not author or depend on `cellBboxes` (legacy load fallback only).
+
+Overlays from the builder are already on the lean map and placements are in `map_*.placements.json`. Wire interactions with the overlay APIs:
 
 ```ts
 game.getMapOverlays();
@@ -172,11 +132,12 @@ game.on("mapOverlay:changed", ({ id, state }) => {
 });
 ```
 
+For a map-baked door/gate, change state with `setMapOverlayState` (same overlay id) — that is the runtime switch.
 Optional per-state physics: `blocksMovement: true` plus `collider`/`colliders` (or the state’s full `box_2d`) blocks movement/pathfinding. Open states use `blocksMovement: false` or omit it. Successful changes clear pathfinding cache and emit `mapOverlay:changed`.
 
 ## Map walkability / collision (generated JSON)
 
-All of this lives in the generated `map_*.json` (`walkableBoxes`, colliders, masks). Prefer editing those boxes over gameplay hacks.
+All of this lives in the generated map files (`walkableBoxes` / overlays in lean `map_*.json`; placement lists in `map_*.placements.json`; sprite colliders in `map_*.sprites.json`). Prefer editing those boxes over gameplay hacks. Ask the user to adjust boxes in the Maps panel rather than hand-editing generated JSON.
 
 | Symptom                                        | Fix                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -229,7 +190,7 @@ game.patch(cropId, {
 });
 ```
 
-Live pattern: `src/systems/FarmingSystem.ts` (`TOMATO_STAGE_LAYOUTS`, `syncCropVisual`).
+Growth-stage layout patterns: [`docs/recipes/farming-sim.md`](../../../docs/recipes/farming-sim.md) and [`docs/recipes/spawning.md`](../../../docs/recipes/spawning.md).
 
 ## Recipe: HUD scaffolds and widgets
 
@@ -241,19 +202,19 @@ Live pattern: `src/systems/FarmingSystem.ts` (`TOMATO_STAGE_LAYOUTS`, `syncCropV
 | **Hand-written / stock widget** | Factory you own or already in the repo (NPC bubbles, tooltips, season tint, world markers)           | No — mount with `useWidget` only            |
 | **Gameplay feedback widget**    | Dialogue, toast, bark subtitle, prompt, objective tracker                                            | Often no new art; reuse DOM + typing reveal |
 
-Generated `Hud...` files are **temporary visual scaffolds**, not the engine contract. Your game owns panel/overlay ids. Preserve the visual layout; replace placeholder labels/handlers with resource reads and input/events.
+Generated `Hud...` files are temporary visual scaffolds. Your game owns panel/overlay ids. Preserve the visual layout; replace placeholder labels/handlers with resource reads and input/events. Synced widgets come from `huds.json` + `src/widgets/` — mount and adapt those.
 
 ### Wiring generated HUD scaffolds
 
-1. Read the HUD contract and factory export name in `src/data/assets.md`.
+1. Read the HUD scaffold factory export under `src/widgets/` (and catalog entry in `huds.json` when present).
 2. Register a game-owned `ui` resource (`createUiState(panels, overlays)`).
 3. Mount with `useWidget(factory, { ui: { type: "panel" \| "overlay", id } })`.
-4. Toggle visibility with `game.patchUi(...)` — never `display: none` / `api.state.isOpen` on the root.
+4. Toggle visibility with `game.patchUi(...)`.
 5. Persist long-lived state in resources; widgets only display and dispatch intent.
 
 ```ts
 import { createUiState } from "../Game";
-import { createHudWidget } from "../widgets/HudExample"; // real name from assets.md
+import { createHudWidget } from "../widgets/HudExample"; // real name from generated JSON in `src/data/`
 
 game.registerResource(
   "ui",
@@ -270,7 +231,7 @@ game.patchUi({
 });
 ```
 
-If `ui` is omitted at mount, the widget stays always visible (preview only). Modals/title screens use `type: "overlay"` and may `blocksWorldInput`. Persistent edge chrome should motivate `cameraEdgePadding` on `createGame`.
+If `ui` is omitted at mount, the widget stays always visible (preview only). Modals/title screens use `type: "overlay"` and may `blocksWorldInput`. Persistent edge chrome should motivate `cameraEdgePadding` on `createGame` (and matching `touchControls.actions` for mobile). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Widgets that are not HUDs
 
@@ -282,35 +243,38 @@ Depth: [`src/widgets/AGENTS.md`](../../../src/widgets/AGENTS.md), [`docs/recipes
 
 Scenes orchestrate; systems/inputs/widgets/archetypes hold the logic. Return the game synchronously; run save/load async.
 
+Entry path: `main.ts` → `createMainScene(opts)` → `createGeneratedWorld(opts)` → `bootstrapWorldFromAssets({ maps, characters, commonAudio, ...opts })` → `configureGameplay(game)`. When sync has no maps, `createGeneratedWorld` returns `null` and `mainScene` boots a blank SVG starter with a placeholder player.
+
 ```ts
-// src/main.ts
+// src/main.ts (template shape)
 preloadDataAssets(allDataFiles);
 void preloadAllAudio();
 const canvas = document.getElementById("game") as HTMLCanvasElement;
-const loadingGate = createLoadingGate(canvas);
+const loadingGate = createLoadingGate(canvas, { dataFiles: allDataFiles });
 createMainScene({ onAudioReady: loadingGate.onContinue });
 await loadingGate.waitForCompletion();
 loadingGate.teardown();
 ```
 
-Inside the scene, start looping BGM with the **dual-path** unlock (`onAudioReady` **and** one-shot `keydown`/`pointerdown`) — see [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md) “Audio/music pattern”. Gate-only wiring fails in local/dev.
+Put custom systems / widgets / patches in `configureGameplay` (`src/scenes/mainScene.ts`). Pass camera / touch / interact opts through `createMainScene({ ... })` — never hand-edit `generatedWorld.ts`.
 
-After wiring a scene, update `src/scenes/SCENES.md` (active file, map/extensions, resources, archetypes, systems, inputs, widgets, audio, SDK). Checklist: [`src/scenes/README.md`](../../../src/scenes/README.md).
+Synced bootstrap already starts map BGM with the dual-path unlock (`onAudioReady` + one-shot `keydown`/`pointerdown`). Do not add a second BGM start path for the same track. See [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md) “Audio/music pattern” only when you add *extra* looping music yourself.
+
+After wiring a scene, update `src/scenes/SCENES.md`. Checklist: [`src/scenes/README.md`](../../../src/scenes/README.md).
 
 ## Name collisions: “overlay”
 
 | Term                      | What it is                                                | API                                |
 | ------------------------- | --------------------------------------------------------- | ---------------------------------- |
-| **`mapOverlays`**         | Map-baked stateful visuals/colliders in map JSON          | `setMapOverlayState`               |
+| **`mapOverlays`**         | Unified map-baked patches (`kind`: erase/state/vfx/grid)  | `setMapOverlayState` / map effects |
 | **HUD `ui.overlays`**     | DOM modal/full-screen UI visibility                       | `patchUi({ overlays: ... })`       |
 | **Season “prop overlay”** | Atmosphere/tint layers in season recipes                  | season systems — not `mapOverlays` |
 | **Spawned prop**          | Entity from `placeProp` / spawn with swappable `imageUrl` | `getPropItemUrl` + `patch`         |
 
 ## See also
 
-- [PROMPT_GUIDE.md](PROMPT_GUIDE.md) — generate maps, overlays, characters, music, HUD art
 - [CAPYBARA_ENGINE.md](CAPYBARA_ENGINE.md) — scene orchestration, GameAPI, pathfinding, VFX
-- [`src/data/assets.md`](../../../src/data/assets.md) — this game’s handles and placement ids
+- [`src/data/`](../../../src/data/) — generated JSON handles (`map_*.json`, `char_*.json`, `prop_*.json`, `huds.json`, `common.json`, `capybara-assets.json`)
 - [`src/scenes/SCENES.md`](../../../src/scenes/SCENES.md) — scene composition status
 - [`src/widgets/AGENTS.md`](../../../src/widgets/AGENTS.md) — widget hooks, z-index, text animation
 - [`docs/recipes/hud-widget.md`](../../../docs/recipes/hud-widget.md) — adapting generated HUD scaffolds

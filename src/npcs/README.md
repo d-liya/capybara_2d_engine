@@ -34,4 +34,4 @@ const guideEntityId = game.spawnAtFeet("npcGuide", 520, 640);
 setupGuideNpc(game, guideEntityId);
 ```
 
-See `docs/recipes/npc-primitives.md` and `docs/recipes/npc-dialogue.md`.
+See `docs/recipes/npc-primitives.md` (and `docs/recipes/npc-pathfinding.md` for destinations). Script dialogue as resources + HUD widgets.

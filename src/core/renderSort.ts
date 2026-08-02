@@ -9,6 +9,9 @@
  * Map `ground_patch` art is painted in `drawBackground` (not the Y-sort queue).
  * Spawned props still use the `prop` layer and Y-sort with `occluder` masks and
  * each other by `renderY` (e.g. player walks in front of / behind crop rows).
+ *
+ * Sky-layer atmosphere (clouds, birds, balloons) is a **separate pass** after
+ * the Y-sort queue (`GameMap.drawAtmosphere`) — not part of these ranks.
  */
 export type RenderLayer = "ground" | "occluder" | "prop";
 

@@ -30,33 +30,31 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
     const item = document.createElement("div");
     item.className = [
       "absolute left-0 top-0 pointer-events-none w-[260px]",
-      "font-['Geist',_sans-serif] text-[#fff7df]",
-      "opacity-0 transition-opacity duration-150 will-change-[transform,opacity]",
+      "font-['Geist Pixel',_sans-serif]",
+      "capy-fade opacity-0 will-change-[transform,opacity]",
     ].join(" ");
     item.dataset.npcBubbleId = npcId;
 
     const card = document.createElement("div");
-    card.className = [
-      "relative w-[260px] rounded-[18px] border border-white/20",
-      "bg-black/40 px-4 py-3 text-white shadow-[0_14px_34px_rgba(0,0,0,0.30)]",
-      "backdrop-blur-xl backdrop-saturate-150 ring-1 ring-white/10",
-    ].join(" ");
+    card.className = "capy-panel relative w-[260px] px-4 py-3";
 
     const name = document.createElement("div");
     name.className = [
       "mb-1.5 flex items-center gap-2",
-      "text-[10px] font-black uppercase tracking-[0.16em] text-white/65",
-      "after:h-px after:flex-1 after:bg-white/15",
+      "text-[10px] font-normal uppercase tracking-[0.16em]",
+      "text-capy-accent [text-shadow:1px_1px_0_var(--color-capy-ink)]",
+      "after:h-[2px] after:flex-1 after:bg-capy-rim",
     ].join(" ");
 
     const text = document.createElement("div");
     text.className =
-      "min-h-[38px] text-[13px] font-semibold leading-snug text-white/95 drop-shadow-[0_1px_1px_rgba(0,0,0,0.45)]";
+      "capy-text min-h-[38px] text-[13px] font-normal leading-snug";
 
+    // Hard-edged notch built from the panel tones, not a blurred glass wedge.
     const tail = document.createElement("div");
     tail.className = [
-      "absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-1/2 rotate-45",
-      "border-b border-r border-white/20 bg-black/40 backdrop-blur-xl",
+      "absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-2 rotate-45",
+      "border-b-2 border-r-2 border-capy-ink bg-capy-panel",
     ].join(" ");
 
     card.append(name, text, tail);
@@ -99,7 +97,7 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
       root.className = "absolute inset-0 pointer-events-none";
       return root;
     },
-    update: ({ game, hudRoot, now }) => {
+    update: ({ game, hudRoot, canvas, now }) => {
       if (!root) return;
       const state = getNpcStateSafe(
         game as { getResource<T = unknown>(name: string): T },
@@ -110,7 +108,12 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
         return;
       }
 
+      // normalizedToCanvasPoint is canvas-local CSS px, not viewport client coords.
+      const canvasRect = canvas.getBoundingClientRect();
       const hudRect = hudRoot.getBoundingClientRect();
+      const canvasToHudX = canvasRect.left - hudRect.left;
+      const canvasToHudY = canvasRect.top - hudRect.top;
+
       for (const npc of Object.values(state.npcs)) {
         const entity = game.get(npc.entityId);
         if (!entity) continue;
@@ -138,8 +141,8 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
 
         node.name.textContent = npc.displayName;
         node.text.textContent = revealText(text, node.revealStartedAt, now);
-        const x = point.x - hudRect.left - 130;
-        const y = point.y - hudRect.top - node.root.offsetHeight - 64;
+        const x = point.x + canvasToHudX - 130;
+        const y = point.y + canvasToHudY - node.root.offsetHeight - 64;
         node.root.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
         node.root.style.opacity = "1";
         activeIds.add(npc.id);

@@ -1,21 +1,31 @@
+import "../styles.css";
 import { preloadAllAudio } from "./core/audio";
-import { createLoadingGate, preloadDataAssets } from "./utils/common";
+import {
+  createLoadingGate,
+  preloadDataAssets,
+  setupOrientationReload,
+} from "./utils/common";
 import { allDataFiles } from "./data";
-import { sdk } from "./sdk";
+import { createMainScene } from "./scenes/mainScene";
+import { enableAnalyticsByDefault } from "./sdk";
 
 async function bootstrap() {
+  setupOrientationReload();
   preloadDataAssets(allDataFiles);
   void preloadAllAudio();
 
-  const canvas = document.getElementById("game") as HTMLCanvasElement;
-  const loadingGate = createLoadingGate(canvas);
+  // This enables analytics by default (SDK init + guest session + playtime). DO not remove unless you don't want to track playtime.
+  void enableAnalyticsByDefault();
 
-  // Create and start the game scene here, for example:
-  // createMainScene({ onAudioReady: loadingGate.onContinue });
-  // Start browser-gated audio from loadingGate.onContinue, not from passive
-  // scene startup. The production loading gate emits this from the Tap To
-  // Continue gesture so calls like music.play() and AudioContext.resume()
-  // are much less likely to be blocked by autoplay rules.
+  const canvas = document.getElementById("game") as HTMLCanvasElement;
+  const loadingGate = createLoadingGate(canvas, { dataFiles: allDataFiles });
+
+  // Starter scene — SVG floor + box player until generated maps/characters exist.
+  createMainScene({
+    onAudioReady: loadingGate.onContinue,
+    followZoom: 1,
+    maxViewportScale: 0.6,
+  });
 
   await loadingGate.waitForCompletion();
   loadingGate.teardown();

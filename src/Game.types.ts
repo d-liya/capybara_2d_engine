@@ -1,7 +1,7 @@
 /**
  * Public Game facade TypeScript contract.
  *
- * Pair with docs/CAPYBARA_ENGINE.md for behavior and src/Game.ts for the
+ * Pair with `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md` for behavior and src/Game.ts for the
  * runtime entrypoint. Bundle this file with Game.ts for one-pass agent tasks.
  *
  * PathPoint is the reference example. Sibling types below follow the same
@@ -10,6 +10,137 @@
 
 export type EntityId = string;
 export type ComponentBag = Record<string, unknown>;
+
+/**
+ * How a sprite fills its entity `width`×`height` box.
+ * - `contain` (default): preserve aspect; letterbox inside the box.
+ * - `fill`: stretch to fill the box (floor decals, intentional distortion).
+ */
+export type ImageFit = "contain" | "fill";
+
+/**
+ * How character foot colliders / feet anchors are derived.
+ * - `auto` (default): sample the opaque feet band (scanning up past transparent
+ *   bottom padding) and map it into the fitted sprite rect (same space as
+ *   `imageFit` draw). Falls back to full opaque width, then inset defaults.
+ * - `box`: full entity-box bottom slice (no alpha trim).
+ * - `manual`: entity-box bottom slice using `footHeightRatio` / `footInsetRatio`.
+ */
+export type FootboxMode = "auto" | "box" | "manual";
+
+/** Current generated-data contract understood by this engine. */
+export const GENERATED_ASSET_CONTRACT_VERSION = 1 as const;
+export type GeneratedAssetContractVersion =
+  typeof GENERATED_ASSET_CONTRACT_VERSION;
+
+export type AudioAssetKind = "bgm" | "sfx" | "ambience" | "voice";
+
+/** One generated audio asset. Unknown extra generator metadata is preserved. */
+export interface GeneratedAudioAsset {
+  id: string;
+  name?: string;
+  label?: string;
+  url: string;
+  kind?: AudioAssetKind;
+  /** Legacy generator alias for `kind`; `tts`/`dialogue` normalize to `voice`. */
+  role?: AudioAssetKind | "tts" | "dialogue";
+  loop?: boolean;
+  looping?: boolean;
+  volume?: number;
+  channel?: string;
+  durationMs?: number;
+  transcript?: string;
+  characterId?: string;
+  autoplay?: boolean;
+  parentAssetId?: string;
+  [key: string]: unknown;
+}
+
+export interface GeneratedDialogueEntry {
+  id: string;
+  text: string;
+  audioId?: string;
+  characterId?: string;
+  speaker?: string;
+  [key: string]: unknown;
+}
+
+/** Versioned catalog shape written by generated asset tooling. */
+export interface GeneratedAssetCatalog {
+  version: GeneratedAssetContractVersion;
+  audio?: GeneratedAudioAsset[];
+  dialogue?: GeneratedDialogueEntry[];
+}
+
+export interface AudioPlayOptions {
+  loop?: boolean;
+  volume?: number;
+  channel?: string;
+  /** Stop existing playback in the selected channel before starting. */
+  exclusive?: boolean;
+  /** Restart a reused looping clip from the beginning. Default `true`. */
+  restart?: boolean;
+}
+
+export interface AudioPlaybackHandle {
+  readonly name: string;
+  readonly channel: string;
+  readonly element: HTMLAudioElement;
+  stop(): void;
+}
+
+/** Character position authored by the map editor; loading a map never spawns it. */
+export interface GeneratedCharacterPlacement {
+  assetId: string;
+  layerId: string;
+  label: string;
+  box_2d: Box2D;
+  width?: number;
+  height?: number;
+  thumbnailUrl?: string;
+  /** Controlled player vs standing NPC (from Maps UI). */
+  role?: "player" | "npc";
+}
+
+/** Sky-layer atmosphere placement authored by the map editor. */
+export interface GeneratedAtmospherePlacement {
+  placementId: string;
+  assetId: string;
+  label: string;
+  box_2d: Box2D;
+  width?: number;
+  height?: number;
+  url?: string;
+  spriteSheetUrl?: string;
+  kind?: "flyer" | "drift";
+  supportsFlipX?: boolean;
+  frameCount?: number;
+  frameWidth?: number;
+  frameHeight?: number;
+  layer?: "far" | "near";
+  motion?: "drift" | "orbit" | "rise_loop";
+  speedX?: number;
+  speedY?: number;
+  wrap?: boolean;
+  amplitude?: number;
+  lifetimeSec?: number;
+  enabled?: boolean;
+}
+
+/** Spawn-ready feet anchor derived from a generated character placement. */
+export interface CharacterPlacementSpawnPlan extends GeneratedCharacterPlacement {
+  feetX: number;
+  feetY: number;
+}
+
+export interface CharacterPlacementSpawnSpec {
+  archetype: string;
+  props?: ComponentBag;
+}
+
+export type CharacterPlacementResolver = (
+  placement: CharacterPlacementSpawnPlan,
+) => string | CharacterPlacementSpawnSpec | null | undefined;
 
 export interface PathPoint {
   /** Feet/ground world X in normalized map space. */
@@ -116,6 +247,15 @@ export interface MapPlacementTarget {
   box_2d: number[];
   bounds: HoverBounds;
   renderY: number;
+  enterable?: boolean;
+  destinationMapId?: string;
+  /** Spawn footprint on the destination map `[ymin,xmin,ymax,xmax]` 0–1000. */
+  destinationSpawnBox2d?: number[];
+  interactionType?: string;
+  functionalRole?: string;
+  templateId?: string;
+  stages?: string[];
+  gamePlay?: string;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -130,6 +270,10 @@ export interface MapOverlayTarget {
   renderY: number;
   blocksMovement: boolean;
   renderLayer: "background" | "ground" | "occluder" | "prop";
+  gridDimensions?: [number, number];
+  gridSpacing?: [number, number];
+  /** Derived cell boxes for the active state (not authored). */
+  cellBboxes?: number[][];
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -186,6 +330,28 @@ export interface LoadMapOptions {
   };
 }
 
+/**
+ * Options for `game.transitionMap` — soft dim, mid-fade work, load map, lift.
+ * Defaults are a light blink (not a full theatrical blackout) since enterables
+ * already show a Press E prompt.
+ */
+export interface TransitionMapOptions extends LoadMapOptions {
+  /** One-way fade duration in ms (default 140). */
+  fadeMs?: number;
+  /**
+   * Peak overlay opacity while the map swaps (0–1, default 0.45).
+   * Use `1` for a full black cut when you want a heavier beat.
+   */
+  peakOpacity?: number;
+  /**
+   * Runs at peak dim. Call `swap()` to apply `loadMap` (with `spawn`).
+   * Clear map-local entities before `swap()`; respawn after.
+   *
+   * If omitted, `swap()` runs automatically.
+   */
+  during?: (swap: () => void) => void;
+}
+
 /** Public Game facade type. Same pattern as PathPoint. */
 export type InputActionPhase = "down" | "up";
 
@@ -231,22 +397,53 @@ export type UiStatePatch<
 /** Public Game facade type. Same pattern as PathPoint. */
 export type Box2D = [number, number, number, number] | number[];
 
-/** Public Game facade type. Same pattern as PathPoint. */
-export type CardinalDirection = "north" | "south" | "east" | "west";
+/** Normalized polygon vertex for map collision (0–1000 space). */
+export interface GameMapCollisionPoint {
+  x: number;
+  y: number;
+}
+
+/** Pixel crop of a cut-out on the map background image. */
+export interface GameMapPixelBBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
 /** Public Game facade type. Same pattern as PathPoint. */
 export interface GameMapMaskEntry {
   label: string;
   name?: string;
-  box_2d: Box2D;
+  /**
+   * Normalized visual footprint `[y1,x1,y2,x2]`. Optional when `pixel_bbox` is
+   * set — then bounds are resolved from the loaded map image size.
+   */
+  box_2d?: Box2D;
+  /**
+   * Pixel placement on the map background. Converted using the background
+   * image's natural width/height when it loads (no per-sprite map_size needed).
+   */
+  pixel_bbox?: GameMapPixelBBox;
   backgroundImageBox2d?: Box2D;
   collider: Array<{ box_2d: Box2D; label: string }>;
+  /**
+   * Optional solid polygons in normalized map space. When present, movement
+   * collision uses these instead of (or in addition to) AABB colliders.
+   */
+  collisionPolygons?: GameMapCollisionPoint[][];
   backgroundImage?: string;
   obstacleImage?: string;
+  /** 0–1 source crop within `obstacleImage` for enclosure side strips. */
+  obstacleImageCrop?: { x: number; y: number; w: number; h: number };
   spriteSheetUrl?: string;
   frame_count?: number;
   spriteSheetType?: string;
   type?: string;
+  /** Keep collision but skip monolithic Y-sorted obstacle draw. */
+  collisionOnly?: boolean;
+  /** Y-sort draw strip only — no movement collision. */
+  ySortOnly?: boolean;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -278,34 +475,56 @@ export interface GameMapPanelContent {
     id: string;
     anchorLabel?: string;
     gamePlay?: string;
+    /** Unified kind from edit-UI compiler. Omit for legacy state overlays. */
+    kind?: "erase" | "state" | "vfx" | "grid";
+    layout?: "single" | "multi_inplace" | "detached_stages";
     linkedObstacleLabel?: string;
+    /**
+     * replace: suppress linked mask static art (keep collider) + erase underlay.
+     * overlay: draw sheet on top of existing map pixels.
+     */
+    placementMode?: "replace" | "overlay" | string;
     currentMapStateLabel?: string;
+    currentState?: string;
     states: Array<{
       name: string;
       label?: string;
       description?: string;
       url: string;
       box_2d: number[];
+      frameCount?: number;
+      frame_count?: number;
+      mode?: "background" | "gameplay";
+      clearsCollision?: boolean;
       collider?: Array<{ box_2d: number[]; label?: string }>;
       colliders?: Array<{ box_2d: number[]; label?: string }>;
       blocksMovement?: boolean;
       renderLayer?: "background" | "ground" | "occluder" | "prop";
+      /** Silhouette for Y-sort when `url` is a flat erase-style patch. */
+      spriteUrl?: string;
+      sprite_bbox?: number[];
+      collision_type?: "solid_volume" | "passable_gap";
+      footprint_height_pct?: number;
+      collision_polygons?: Array<Array<{ x: number; y: number }>>;
     }>;
+    gridDimensions?: [number, number];
+    /**
+     * Gap between detached grid cells `[gapX, gapY]` in 0–1000 space.
+     * Runtime tiles from the active state's `box_2d` (no authored cellBboxes).
+     */
+    gridSpacing?: [number, number];
+    /**
+     * @deprecated Prefer gridDimensions + gridSpacing. Load fallback only.
+     */
+    cellBboxes?: number[][];
     renderLayer?: "background" | "ground" | "occluder" | "prop";
     blocksMovement?: boolean;
   }>;
 }
 
-/** Public Game facade type. Same pattern as PathPoint. */
-export interface GameMapExtension {
-  direction: CardinalDirection;
-  panel: GameMapPanelData;
-}
-
-/** Public Game facade type. Same pattern as PathPoint. */
+/** Nested map payload — one isolated map (use `loadMap` to travel between maps). */
 export interface GameMapPanelData {
   panel: GameMapPanelContent;
-  extensions?: GameMapExtension[];
 }
 
 /**
@@ -313,9 +532,17 @@ export interface GameMapPanelData {
  *
  * Generated map JSON is flat — wrap it with `toMapData(generatedMap)` from
  * `src/data` instead of hand-building `panel`.
+ *
+ * Each `GameMapData` is one self-contained map. Swap maps with
+ * `game.transitionMap(toMapData(...))` (fade) or `game.loadMap(...)` (instant).
  */
 export interface GameMapData extends GameMapPanelData {
   name?: string;
+  generatedAssetContractVersion?: GeneratedAssetContractVersion;
+  /** Authored placements are data only; game code explicitly decides what to spawn. */
+  characterPlacements?: GeneratedCharacterPlacement[];
+  /** Sky-layer atmosphere sprites loaded automatically with the map. */
+  atmospherePlacements?: GeneratedAtmospherePlacement[];
   panel: GameMapPanelContent & {
     masks: GameMapMaskEntry[];
   };
@@ -378,24 +605,41 @@ export interface EntityRenderComponents {
 /** Default feet shadow used by animated characters when `shadow` is omitted. */
 export const DEFAULT_ENTITY_SHADOW = {
   enabled: true,
-  opacity: 0.3,
+  mode: "sprite",
+  opacity: 0.32,
   scaleX: 1,
-  scaleY: 0.18,
+  scaleY: 0.5,
+  skewX: 0.42,
   offsetX: 0,
   offsetY: 0,
   useEntityWidth: false,
 } as const satisfies Required<EntityShadowConfig>;
 
+/** Soft oval vs flattened active-frame silhouette. */
+export type EntityShadowMode = "sprite" | "ellipse";
+
 /** Per-entity feet shadow tuning for animated characters. */
 export interface EntityShadowConfig {
-  /** Draw the feet ellipse shadow. Default `true`. */
+  /** Draw the feet shadow. Default `true`. */
   enabled?: boolean;
-  /** Center opacity of the radial gradient. Default `0.3`. */
+  /**
+   * `sprite` — darkened active frame, flattened + skewed (default).
+   * `ellipse` — soft radial oval under the feet.
+   */
+  mode?: EntityShadowMode;
+  /** Fill opacity. Default `0.32` (sprite) / tune per mode. */
   opacity?: number;
-  /** Horizontal radius multiplier. Default `1`. */
+  /** Horizontal scale. Default `1`. */
   scaleX?: number;
-  /** Vertical radius as a fraction of the horizontal radius. Default `0.18`. */
+  /**
+   * Sprite: vertical squash (`0.5` = half height). Ellipse: oval height vs width.
+   */
   scaleY?: number;
+  /**
+   * Sprite shear. Positive leans the top toward the right (light from upper-left).
+   * Default `0.42`. Ignored for `ellipse`.
+   */
+  skewX?: number;
   /**
    * Horizontal offset in normalized map units. Positive shifts right when facing
    * right; mirrors automatically when the actor faces left.
@@ -404,10 +648,36 @@ export interface EntityShadowConfig {
   /** Vertical offset in normalized map units. Positive moves the shadow down. Default `0`. */
   offsetY?: number;
   /**
-   * Span the shadow across the full entity width instead of trimmed sprite pixels.
-   * Useful for wide tool-holding variants.
+   * Ellipse only: span the shadow across the full entity width instead of
+   * trimmed sprite pixels. Useful for wide tool-holding variants.
    */
   useEntityWidth?: boolean;
+}
+
+/** Directional movement flags shared by keyboard WASD and touch joystick. */
+export interface MovementInput {
+  up: boolean;
+  down: boolean;
+  left: boolean;
+  right: boolean;
+}
+
+/** Partial patch for `setMovementInput` — omitted keys are left unchanged. */
+export type MovementInputPatch = Partial<MovementInput>;
+
+export interface TouchControlAction {
+  /** Same action name used with `bindInputAction` / `onInputAction`. */
+  action: string;
+  /** Short label shown on the on-screen button. */
+  label: string;
+}
+
+export interface TouchControlsConfig {
+  /**
+   * Right-side action buttons. Prefer the same names you bind for keyboard
+   * (e.g. `interact`, `attack`) so one `onInputAction` handler serves both.
+   */
+  actions?: TouchControlAction[];
 }
 
 export interface GameConfig {
@@ -420,6 +690,28 @@ export interface GameConfig {
    * stopping at the edge, this helps when we have hud elements at the edges.
    */
   cameraEdgePadding?: number;
+  /**
+   * Upper bound for CSS canvas scaling. Default `1` avoids magnifying
+   * generated ~1k–2.5k map art on large screens. Pass a higher value to allow
+   * upscaling, or `Infinity` to uncapped contain/cover fit.
+   */
+  maxViewportScale?: number;
+  /**
+   * Camera zoom while following so the player is not dwarfed by a full panel.
+   * Applied on desktop and touch when follow is active. Default `1.45`.
+   */
+  followZoom?: number;
+  /**
+   * Soft camera follow stiffness (higher = snappier). Frame-rate independent.
+   * Default `10`. Pass a large value (e.g. `1000`) for near-instant lock.
+   */
+  cameraFollowLerp?: number;
+  /**
+   * Default floating virtual joystick + action buttons. Mounted automatically
+   * on touch-primary devices. Pass `false` to disable, or `{ actions: [...] }`
+   * to configure right-side buttons that call `dispatchInputAction`.
+   */
+  touchControls?: false | TouchControlsConfig;
   /**
    * Map data consumed by the facade.
    *
@@ -444,11 +736,6 @@ export interface GameConfig {
    *       },
    *     ],
    *   },
-   * // Optional map panel extensions for multi-panel maps.
-   *   extensions: [
-   *     { direction: "east", panel: mapStudyEast },
-   *     { direction: "west", panel: mapStudyWest },
-   *   ],
    * }
    */
   map: GameMapData;
@@ -477,11 +764,33 @@ export interface GameConfig {
  * game.spawnCentered("crate", 560, 700);
  */
 export interface GameAPI {
+  /** Register/replace generated audio and dialogue entries. */
+  registerAudioCatalog(catalog: GeneratedAssetCatalog): void;
+
+  /** Play a generated/common audio name. Playback blocked by autoplay policy is queued. */
+  playAudio(
+    name: string,
+    options?: AudioPlayOptions,
+  ): AudioPlaybackHandle | null;
+
+  /** Stop every active instance for a name. */
+  stopAudio(name: string): void;
+
+  /** Stop all active audio in a logical mixer channel. */
+  stopAudioChannel(channel: string): void;
+
+  /** Retry gesture-blocked playback. Safe to call from pointer/key handlers. */
+  unlockAudio(): Promise<void>;
+
+  /** Return dialogue metadata from the currently registered generated catalog. */
+  getDialogue(id: string): GeneratedDialogueEntry | undefined;
+
   /**
-   * Replace the current map with a separate non-stitched map.
+   * Replace the current map with another isolated map (instant).
    *
-   * Use this for interior/exterior transitions, dungeon rooms, overworld swaps,
-   * or any transition that should not be modeled as a stitched extension panel.
+   * Prefer `transitionMap` for doors / room travel — soft dim by default.
+   * Use raw `loadMap` for tools, tests, or when you already own the fade.
+   *
    * Existing resources, widgets, archetypes, and entities are preserved. Destroy
    * and respawn map-local entities in gameplay code if needed.
    *
@@ -493,13 +802,42 @@ export interface GameAPI {
   loadMap(map: GameMapData, options?: LoadMapOptions): void;
 
   /**
+   * Soft dim, swap to another isolated map, then lift.
+   *
+   * Default door/room travel path (light blink — not a full blackout). Mid-fade
+   * work (clear `mapLocal`, respawn, audio) goes in `during` — call `swap()`
+   * when you want `loadMap` to run. Pass `peakOpacity: 1` for a hard cut.
+   *
+   * @example
+   * await game.transitionMap(toMapData(mapExterior), {
+   *   spawn: { x: 500, y: 820, anchor: "feet" },
+   *   during: (swap) => {
+   *     for (const id of game.query((c) => c.mapLocal === true)) {
+   *       game.destroy(id);
+   *     }
+   *     swap();
+   *     spawnExteriorStuff(game);
+   *   },
+   * });
+   */
+  transitionMap(
+    map: GameMapData,
+    options?: TransitionMapOptions,
+  ): Promise<void>;
+
+  /**
    * Register reusable default components for a named entity type.
    *
    * Rendering-related keys accepted in `defaults`:
    * - Animated actor: `spriteSheets`
    * - Static image: `sprite` or `imageUrl`
    * - Common placement/sizing: `x`, `y`, `width`, `height`, `renderY`
-   *
+   * - `imageFit`: `"contain"` (default) or `"fill"` — how the sprite fills width×height
+   * - `footboxMode`: `"auto"` (default, feet-band alpha trim in fitted sprite
+   *   space), `"box"` (full entity bottom), or `"manual"` (entity bottom using
+   *   `footHeightRatio` / `footInsetRatio`)
+   * - `footHeightRatio` / `footInsetRatio`: optional overrides for the foot slice
+   *   (fractions of content/entity size; mainly for `"manual"` / `"box"`)
    * @example
    * game.defineArchetype("npc", {
    *   spriteSheets: [{
@@ -530,7 +868,7 @@ export interface GameAPI {
    * motion state (walk vs idle).
    *
    * @example
-   * game.defineArchetype("player_with_plow", toArchetype(charFarmerHoldingPlow, { speed: 190 }));
+   * game.defineArchetype("player_with_plow", toArchetype(charFarmerHoldingPlow, { speed: 55 }));
    * game.applyEntityArchetype(playerId, "player_with_plow", { heldTool: "plow" });
    */
   applyEntityArchetype(
@@ -638,6 +976,11 @@ export interface GameAPI {
    * Return map-authored placement regions such as crop beds or interact points.
    */
   getPlacementTargets(): MapPlacementTarget[];
+
+  /**
+   * Return character placements authored on the map (data only — not spawned).
+   */
+  getCharacterPlacements(): GeneratedCharacterPlacement[];
 
   /**
    * Return stateful map overlays such as doors, safes, gates, or baked props.
@@ -838,6 +1181,22 @@ export interface GameAPI {
   dispatchInputAction(action: string, payload?: Record<string, unknown>): void;
 
   /**
+   * Patch directional movement for the controlled entity (same path as WASD).
+   * Used by the floating touch joystick. Activating any direction clears
+   * navigation on the controlled entity so player input wins.
+   *
+   * @example
+   * game.setMovementInput({ up: true });
+   * game.setMovementInput({ up: false, left: true });
+   */
+  setMovementInput(patch: MovementInputPatch): void;
+
+  /**
+   * Clear all directional movement flags (pointerup / blur / leave).
+   */
+  clearMovementInput(): void;
+
+  /**
    * Trigger map gameplay spritesheet effects by label/mask tag.
    *
    * Triggers all effects with this tag.
@@ -856,6 +1215,22 @@ export interface GameAPI {
    * game.triggerNearestMapEffect("door", 540, 820);
    */
   triggerNearestMapEffect(tag: string, atX: number, atY: number): boolean;
+
+  /**
+   * Play the nearest gameplay (non-background) map VFX near a world point,
+   * without requiring a tag. Prefer this for default interact when Maps UI
+   * marked a region animation as Gameplay.
+   *
+   * @param maxDistance Optional world-norm radius; omit to search the whole map.
+   *
+   * @example
+   * game.triggerNearestGameplayEffect(feet.x, feet.y, 140);
+   */
+  triggerNearestGameplayEffect(
+    atX: number,
+    atY: number,
+    maxDistance?: number,
+  ): boolean;
 
   /**
    * Find an obstacle-aware feet-position path in normalized world coordinates.
@@ -879,13 +1254,29 @@ export interface GameAPI {
 
   /**
    * Snap a blocked feet/ground point to the nearest walkable location.
-   * Returns the original point when already walkable, or null when no nearby cell is free.
+   * When `options.entityId` is set, candidates are tested against that
+   * entity's real footbox (not the path grid's approximate collider).
+   * Returns the original point when already walkable, or null when no
+   * nearby clear spot is found (or when `snapToNearestWalkable` is false).
    */
   resolveNearestWalkableFeet(
     feetX: number,
     feetY: number,
     options?: FindPathOptions,
   ): PathPoint | null;
+
+  /**
+   * If an entity's footbox overlaps map collision, move it to the nearest
+   * walkable feet point. No-op when already clear. Useful when a player
+   * or NPC spawn/placement lands on an obstacle.
+   *
+   * @returns true when the entity is walkable after this call
+   *
+   * @example
+   * const id = game.spawnAtFeet("player", 500, 700);
+   * game.ensureEntityOnWalkable(id);
+   */
+  ensureEntityOnWalkable(id: EntityId, options?: FindPathOptions): boolean;
 
   /**
    * Give an entity a destination. The runtime follows the path, updates facing,
@@ -895,9 +1286,9 @@ export interface GameAPI {
    * whose `name` contains `walk` or `run`). When the entity arrives, hits a
    * blocker, or you call `clearEntityDestination`, it switches back to idle
    * (first sheet whose `name` contains `default_animation` or `idle`). Ensure
-   * the entity archetype includes those sheets — check exact names in
-   * `src/data/assets.md`. You do not need to call `setEntityAnimation` yourself
-   * for basic destination movement.
+   * the entity archetype includes those sheets — check exact names in the
+   * character JSON under `src/data/`. You do not need to call
+   * `setEntityAnimation` yourself for basic destination movement.
    */
   setEntityDestination(
     id: EntityId,

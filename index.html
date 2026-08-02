@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DynaPuff:wght@400..700&family=Geist:ital,wght@0,100..900;1,100..900&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Geist+Mono:ital,wght@0,100..900;1,100..900&family=Geist+Pixel:wght@400&family=Geist:ital,wght@0,100..900;1,100..900&display=swap"
       rel="stylesheet"
     />
     <link
@@ -36,14 +36,18 @@
       href="https://www.capybara.build/apple-touch-icon.png"
     />
     <link rel="manifest" href="https://www.capybara.build/site.webmanifest" />
-    <link rel="stylesheet" href="dist/styles.css" />
   </head>
   <body>
     <div id="game-shell">
       <canvas id="game"></canvas>
       <div id="hud-root"></div>
     </div>
-    <script type="module" src="dist/main.js"></script>
+    <script>
+      // Shown on the production loading gate title card.
+      window.game_title = "Capybara World";
+      document.title = window.game_title;
+    </script>
+    <script type="module" src="/src/main.ts"></script>
     <script src="https://assets.capybara.build/js/game-api-client.js"></script>
     <style>
       /* Add overrides here */

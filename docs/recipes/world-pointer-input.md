@@ -9,9 +9,9 @@ Use this for click/touch targeting, aiming, shooting, spell placement, drag-sele
 
 ## Read first
 
-- `docs/CAPYBARA_ENGINE.md`
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md`
 - `src/widgets/AGENTS.md` for widget hook details
-- `src/data/assets.md` for actual crosshair, cursor, marker, HUD, or tool assets
+- `src/data/` generated JSON for actual crosshair, cursor, marker, HUD, or tool assets
 - `docs/recipes/combat-projectiles.md` if pointer input fires projectiles or attacks
 - `docs/recipes/map-placement.md` if clicks interact with generated placement zones
 
@@ -194,4 +194,6 @@ Use simple shape checks in gameplay systems. The public facade does not provide 
 
 ## Mobile/touch
 
-Pointer events work for mouse and touch-capable browsers. For mobile action buttons, use widgets that call `api.game.dispatchInputAction("attack", { phase: "down" })` or emit gameplay events. Keep the same gameplay systems consuming the intent so keyboard, mouse, and touch share behavior.
+Pointer events work for mouse and touch-capable browsers. For mobile action buttons, use the default touch HUD (`createGame({ touchControls: { actions: [...] } })`) or widgets that call `api.game.dispatchInputAction("attack", { phase: "down", source: "touch" })` / emit gameplay events. Keep the same gameplay systems consuming the intent so keyboard, mouse, and touch share behavior.
+
+Movement uses the shared floating joystick → `setMovementInput` path (same as WASD). Full checklist: `docs/recipes/mobile-touch-controls.md`.

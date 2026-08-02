@@ -5,13 +5,13 @@ description: Spawn players, NPCs, props, pickups, and markers with correct coord
 
 # Recipe: Spawning Entities and Props
 
-Use this when placing players, NPCs, crop overlays, pickups, or markers. Read `docs/CAPYBARA_ENGINE.md` for the full API surface.
+Use this when placing players, NPCs, crop overlays, pickups, or markers. Read `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md` for the full API surface.
 
 ## Coordinate contract (critical)
 
 All entity `x` / `y` values — in `spawn`, `patch`, `game.get`, and saved state — are **top-left** of the draw box in normalized map space (`0–1000` per panel).
 
-Generated placement boxes in `src/data/assets.md` are always `[y1, x1, y2, x2]`, not `[x1, y1, x2, y2]`. Convert before storing runtime hit-test bounds:
+Generated placement boxes in `src/data/` generated JSON are always `[y1, x1, y2, x2]`, not `[x1, y1, x2, y2]`. Convert before storing runtime hit-test bounds:
 
 ```ts
 function boxToBounds(box: readonly [number, number, number, number]) {
@@ -23,7 +23,7 @@ const bounds = boxToBounds([692, 235, 802, 290]);
 // bounds is { x1: 235, y1: 692, x2: 290, y2: 802, ... }
 ```
 
-Never write `const bounds = { x1: box[0], y1: box[1], ... }` for an `assets.md` placement box. That transposes the world position.
+Never write `const bounds = { x1: box[0], y1: box[1], ... }` for an generated JSON in `src/data/` placement box. That transposes the world position.
 
 ### Placement targets at runtime
 
@@ -56,6 +56,23 @@ For proximity to grid cells or interactables, use **`game.getEntityFeet(controll
 **Common mistake:** storing cell center `(cx, cy)` in state and later `game.patch({ x: cx, y: cy })`. That shifts the sprite up-left by half its size. After `spawnCentered`, read top-left from `game.get(id)` if you need a stable position for animation.
 
 **Navigation mistake:** pathfinding destinations use feet/ground points, but entity `x` / `y` is still top-left. Do not manually convert destination feet points back to top-left in gameplay systems. For walking NPCs, spawn with `spawnAtFeet(...)` and move with `game.setEntityDestination(...)`; the runtime preserves sprite foot anchors and avoids one-frame jumps.
+
+**Footbox:** By default (`footboxMode: "auto"`), the yellow foot collider is sized to the opaque feet band (scanning up past transparent bottom padding) and placed in the same fitted sprite space as drawing (`imageFit` + bottom-center). If feet pixels can’t be measured it falls back to full opaque width, then the inset default. Use `footboxMode: "box"` for the full entity bottom, or `"manual"` with `footHeightRatio` / `footInsetRatio` for hardcoded slices.
+
+```ts
+game.defineArchetype("player", {
+  ...toArchetype(charPlayer),
+  // default — opaque feet-band width inside fitted sprite
+  footboxMode: "auto",
+});
+
+game.defineArchetype("propLikeNpc", {
+  ...toArchetype(charNpc),
+  footboxMode: "manual",
+  footHeightRatio: 0.12,
+  footInsetRatio: 0.2,
+});
+```
 
 ```ts
 const id = game.spawnCentered("cropOverlay", cell.cx, cell.cy, {
@@ -98,7 +115,7 @@ game.defineArchetype(
 );
 ```
 
-Use `spawnAtFeet(...)` with these character sizes so the visible foot anchor, collision, and Y-sort stay consistent. In the current stitched/camera setup, comfortable movement is about `95` for the player and `14`-`20` for slow NPC patrols; tune by visual feel.
+Use `spawnAtFeet(...)` with these character sizes so the visible foot anchor, collision, and Y-sort stay consistent. Comfortable player walk speed is about `80` (or ~1× character height, clamped ~55–95) and `14`-`20` for slow NPC patrols; tune by visual feel on dense maps.
 
 ## Prop aspect ratio
 
@@ -177,4 +194,4 @@ For `4×4` zones, subdivide the placement box yourself (see `docs/recipes/map-pl
 ## Related docs
 
 - `docs/recipes/map-placement.md` — `getPlacementTargets`, box format, crop grid
-- `docs/CAPYBARA_ENGINE.md` — render ordering, hover, movement
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md` — render ordering, hover, movement

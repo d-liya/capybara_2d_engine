@@ -1,9 +1,81 @@
-const ANIMATION_DURATION_MS = 5000;
+/** Fallback gate length when there are no map assets to probe. */
+const DEFAULT_GATE_MS = 2600;
+/** Floor so a warm cache / fast CDN still gets a readable brand wipe. */
+const MIN_GATE_MS = 2600;
+/** Ceiling so a hung image request cannot stall forever. */
+const MAX_GATE_MS = 5000;
+/** Extra beat after the probe image loads before showing Continue. */
+const GATE_DELTA_MS = 400;
+/** Shortest finish animation so the bar always visibly reaches 100%. */
+const MIN_FINISH_MS = 360;
+const LOGO_CROSSFADE_MS = 420;
 const OVERLAY_FADE_MS = 550;
 const DEV_REVEAL_MS = 420;
 const STYLE_ID = "capybara-loading-style";
-const MASCOT_URL =
-  "https://www.capybara.build/_next/image?url=%2Fmascot-capybara.png&w=1920&q=75";
+const IMAGE_URL_RE = /\.(png|jpe?g|gif|bmp|webp|svg)(\?|#|$)/i;
+/**
+ * One splash per browser tab session — skip when a mobile WebView remounts
+ * the page after switching apps (same tab session, navigation type "navigate").
+ * Explicit refresh (navigation type "reload") always shows the gate again.
+ */
+const SESSION_GATE_KEY = "capybara.loadingGate.completed";
+
+function hasCompletedLoadingGateThisSession(): boolean {
+  try {
+    return sessionStorage.getItem(SESSION_GATE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markLoadingGateCompletedThisSession(): void {
+  try {
+    sessionStorage.setItem(SESSION_GATE_KEY, "1");
+  } catch {
+    // Private mode / blocked storage — gate may show again; acceptable.
+  }
+}
+
+function isReloadNavigation(): boolean {
+  try {
+    const entries = performance.getEntriesByType("navigation");
+    const nav = entries[0] as PerformanceNavigationTiming | undefined;
+    if (nav?.type === "reload") {
+      return true;
+    }
+  } catch {
+    // Fall through to legacy API.
+  }
+  try {
+    // Legacy PerformanceNavigation.TYPE_RELOAD === 1
+    return (
+      typeof performance !== "undefined" &&
+      "navigation" in performance &&
+      (performance as Performance & { navigation?: { type?: number } })
+        .navigation?.type === 1
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Skip remount splash, but always show again after an explicit refresh. */
+function shouldSkipLoadingGate(): boolean {
+  if (isReloadNavigation()) {
+    return false;
+  }
+  return hasCompletedLoadingGateThisSession();
+}
+
+function isE2bHost(hostname: string): boolean {
+  // e.g. 3000-xxxx.e2b.dev, *.e2b.app
+  return (
+    hostname === "e2b.dev" ||
+    hostname === "e2b.app" ||
+    hostname.endsWith(".e2b.dev") ||
+    hostname.endsWith(".e2b.app")
+  );
+}
 
 function isDevMode(): boolean {
   const host = window.location.hostname;
@@ -11,12 +83,16 @@ function isDevMode(): boolean {
   if (path.includes("/workspace/")) {
     return true;
   }
+  if (isE2bHost(host)) {
+    return true;
+  }
   return host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
 }
 
 function injectLoadingStyles(): void {
-  if (document.getElementById(STYLE_ID)) {
-    return;
+  const existing = document.getElementById(STYLE_ID);
+  if (existing) {
+    existing.remove();
   }
 
   const style = document.createElement("style");
@@ -28,7 +104,11 @@ function injectLoadingStyles(): void {
       z-index: 9999;
       background-color: #0c0c0c;
       color: #ececec;
-      font-family: "Bebas Neue", cursive;
+      /* Google Fonts only ships Geist Pixel at weight 400. Safari is strict about
+         weight matching and will fall back to system sans if we request 500/700. */
+      font-family: "Geist Pixel", sans-serif;
+      font-weight: 400;
+      font-synthesis: none;
       opacity: 1;
       transition: opacity ${OVERLAY_FADE_MS}ms ease;
     }
@@ -41,30 +121,35 @@ function injectLoadingStyles(): void {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 20px;
+      gap: 0;
       opacity: 0;
       animation: cpy-loading-fade-in 1s ease forwards;
-    }
-
-    .cpy-loading-mascot {
-      width: min(220px, 42vw);
-      height: auto;
-      display: block;
-      object-fit: contain;
-      user-select: none;
-      pointer-events: none;
     }
 
     .cpy-loading-logo {
       position: relative;
       display: inline-block;
+      opacity: 1;
+      transform: scale(1);
+      transition:
+        opacity ${LOGO_CROSSFADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+        transform ${LOGO_CROSSFADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .cpy-loading-logo.is-swapping {
+      opacity: 0;
+      transform: scale(0.985);
+      pointer-events: none;
     }
 
     .cpy-loading-logo-content {
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 15px;
+      gap: 12px;
       width: max-content;
+      max-width: min(92vw, 22em);
+      box-sizing: border-box;
     }
 
     .cpy-loading-logo-dim {
@@ -76,21 +161,69 @@ function injectLoadingStyles(): void {
     }
 
     .cpy-loading-brand {
-      font-size: 28px;
-      font-weight: 500;
-      letter-spacing: -0.5px;
+      margin: 0;
+      font-size: clamp(32px, 8vw, 48px);
+      font-weight: 400;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1.15;
+      text-align: center;
+      white-space: normal;
+      overflow-wrap: break-word;
+      word-break: normal;
+      max-width: 100%;
     }
 
-    .cpy-loading-logo.is-continue {
+    /* Game title phase: allow long names to wrap instead of overflowing. */
+    .cpy-loading-logo.is-title .cpy-loading-logo-content {
+      width: min(92vw, 22em);
+      max-width: min(92vw, 22em);
+    }
+
+    .cpy-loading-subtitle {
+      margin: 0;
+      font-size: clamp(12px, 2.6vw, 14px);
+      letter-spacing: 0.34em;
+      text-indent: 0.34em;
+      text-transform: uppercase;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .cpy-loading-subtitle:empty {
+      display: none;
+    }
+
+    /* Game title phase: solid white, no grey base / wipe; also a continue target. */
+    .cpy-loading-logo.is-title {
       cursor: pointer;
     }
 
-    .cpy-loading-logo.is-continue .cpy-loading-brand {
+    .cpy-loading-logo.is-title .cpy-loading-logo-dim {
+      visibility: hidden;
+    }
+
+    .cpy-loading-logo.is-title .cpy-loading-reveal-mask {
+      width: 100% !important;
+      transition: none;
+    }
+
+    .cpy-loading-logo.is-title .cpy-loading-logo-bright {
+      opacity: 1;
       transition: opacity 180ms ease;
     }
 
-    .cpy-loading-logo.is-continue:active .cpy-loading-brand {
-      opacity: 0.75;
+    .cpy-loading-logo.is-title:hover .cpy-loading-logo-bright,
+    .cpy-loading-logo.is-title:focus-visible .cpy-loading-logo-bright {
+      opacity: 0.7;
+    }
+
+    .cpy-loading-logo.is-title:focus-visible {
+      outline: none;
+    }
+
+    .cpy-loading-logo.is-title:active .cpy-loading-logo-bright {
+      opacity: 0.55;
     }
 
     .cpy-loading-reveal-mask {
@@ -100,7 +233,7 @@ function injectLoadingStyles(): void {
       height: 100%;
       width: 0%;
       overflow: hidden;
-      transition: width ${ANIMATION_DURATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: width ${MAX_GATE_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .cpy-loading-status {
@@ -108,13 +241,60 @@ function injectLoadingStyles(): void {
       bottom: 30px;
       left: 50%;
       transform: translateX(-50%);
-      font-family: "Geist", sans-serif;
+      font-family: "Geist Pixel", sans-serif;
       font-size: 12px;
       font-weight: 400;
+      font-synthesis: none;
       letter-spacing: 0.02em;
       color: #fff;
       opacity: 0;
       animation: cpy-loading-fade-in 1s ease 0.5s forwards;
+    }
+
+    .cpy-loading-status.is-hidden {
+      opacity: 0 !important;
+      animation: none;
+      pointer-events: none;
+    }
+
+    /* Bottom Continue CTA — separate from the title card. */
+    .cpy-loading-continue {
+      position: absolute;
+      bottom: 48px;
+      left: 50%;
+      transform: translateX(-50%);
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: transparent;
+      color: #fff;
+      font-family: "Geist Pixel", sans-serif;
+      font-size: clamp(14px, 3vw, 16px);
+      font-weight: 400;
+      font-synthesis: none;
+      letter-spacing: 0.28em;
+      text-indent: 0.28em;
+      text-transform: uppercase;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity ${LOGO_CROSSFADE_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .cpy-loading-continue.is-visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .cpy-loading-continue:hover,
+    .cpy-loading-continue:focus-visible {
+      opacity: 0.7;
+      outline: none;
+    }
+
+    .cpy-loading-continue:active {
+      opacity: 0.55;
     }
 
     .cpy-loading-progress {
@@ -136,7 +316,7 @@ function injectLoadingStyles(): void {
       height: 100%;
       width: 0%;
       background-color: #fff;
-      transition: width ${ANIMATION_DURATION_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
+      transition: width ${MAX_GATE_MS}ms cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     @keyframes cpy-loading-fade-in {
@@ -148,15 +328,57 @@ function injectLoadingStyles(): void {
   document.head.appendChild(style);
 }
 
+interface TitleBlock {
+  root: HTMLDivElement;
+  brand: HTMLHeadingElement;
+  subtitle: HTMLParagraphElement;
+}
+
+function createTitleBlock(
+  toneClass: "cpy-loading-logo-dim" | "cpy-loading-logo-bright",
+  brandText: string,
+  subtitleText: string,
+): TitleBlock {
+  const root = document.createElement("div");
+  root.className = `cpy-loading-logo-content ${toneClass}`;
+
+  const brand = document.createElement("h1");
+  brand.className = "cpy-loading-brand";
+  brand.textContent = brandText;
+
+  const subtitle = document.createElement("p");
+  subtitle.className = "cpy-loading-subtitle";
+  subtitle.textContent = subtitleText;
+
+  root.appendChild(brand);
+  root.appendChild(subtitle);
+
+  return { root, brand, subtitle };
+}
+
 interface OverlayElements {
   overlay: HTMLDivElement;
   status: HTMLDivElement;
   logo: HTMLDivElement;
-  brand: HTMLHeadingElement;
-  brightBrand: HTMLHeadingElement;
+  dim: TitleBlock;
+  bright: TitleBlock;
   revealMask: HTMLDivElement;
   progress: HTMLDivElement;
   progressLine: HTMLDivElement;
+  continueBtn: HTMLButtonElement;
+}
+
+function getGameTitle(): string {
+  const fromWindow =
+    typeof window.game_title === "string" ? window.game_title.trim() : "";
+  if (fromWindow) {
+    return fromWindow;
+  }
+  const fromDocument = document.title?.trim();
+  if (fromDocument) {
+    return fromDocument;
+  }
+  return "Game";
 }
 
 function createProductionOverlay(): OverlayElements {
@@ -168,43 +390,34 @@ function createProductionOverlay(): OverlayElements {
   const center = document.createElement("div");
   center.className = "cpy-loading-center";
 
-  const mascot = document.createElement("img");
-  mascot.className = "cpy-loading-mascot";
-  mascot.src = MASCOT_URL;
-  mascot.alt = "Capybara mascot";
-  mascot.decoding = "async";
-  center.appendChild(mascot);
-
   const logo = document.createElement("div");
   logo.className = "cpy-loading-logo";
 
-  const dim = document.createElement("div");
-  dim.className = "cpy-loading-logo-content cpy-loading-logo-dim";
-
-  const brand = document.createElement("h1");
-  brand.className = "cpy-loading-brand";
-  brand.textContent = "Capybara";
-  dim.appendChild(brand);
+  const dim = createTitleBlock("cpy-loading-logo-dim", "Capybara", "Presents");
 
   const revealMask = document.createElement("div");
   revealMask.className = "cpy-loading-reveal-mask";
 
-  const bright = document.createElement("div");
-  bright.className = "cpy-loading-logo-content cpy-loading-logo-bright";
+  const bright = createTitleBlock(
+    "cpy-loading-logo-bright",
+    "Capybara",
+    "Presents",
+  );
 
-  const brightBrand = document.createElement("h1");
-  brightBrand.className = "cpy-loading-brand";
-  brightBrand.textContent = "Capybara";
-  bright.appendChild(brightBrand);
-
-  revealMask.appendChild(bright);
-  logo.appendChild(dim);
+  revealMask.appendChild(bright.root);
+  logo.appendChild(dim.root);
   logo.appendChild(revealMask);
   center.appendChild(logo);
 
   const status = document.createElement("div");
   status.className = "cpy-loading-status";
   status.textContent = "www.capybara.build";
+
+  const continueBtn = document.createElement("button");
+  continueBtn.type = "button";
+  continueBtn.className = "cpy-loading-continue";
+  continueBtn.textContent = "Continue";
+  continueBtn.setAttribute("aria-label", "Continue");
 
   const progress = document.createElement("div");
   progress.className = "cpy-loading-progress";
@@ -215,18 +428,128 @@ function createProductionOverlay(): OverlayElements {
 
   overlay.appendChild(center);
   overlay.appendChild(status);
+  overlay.appendChild(continueBtn);
   overlay.appendChild(progress);
 
   return {
     overlay,
     status,
     logo,
-    brand,
-    brightBrand,
+    dim,
+    bright,
     revealMask,
     progress,
     progressLine,
+    continueBtn,
   };
+}
+
+function setLogoCopy(
+  dim: TitleBlock,
+  bright: TitleBlock,
+  brandText: string,
+  subtitleText: string,
+): void {
+  dim.brand.textContent = brandText;
+  bright.brand.textContent = brandText;
+  dim.subtitle.textContent = subtitleText;
+  bright.subtitle.textContent = subtitleText;
+}
+
+function waitForTransitionEnd(
+  element: HTMLElement,
+  propertyName: string,
+  fallbackMs: number,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      element.removeEventListener("transitionend", onEnd);
+      resolve();
+    };
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === element && event.propertyName === propertyName) {
+        finish();
+      }
+    };
+    element.addEventListener("transitionend", onEnd);
+    setTimeout(finish, fallbackMs + 40);
+  });
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function looksLikeMapData(value: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(value.walkableBoxes) ||
+    Array.isArray(value.masks) ||
+    Array.isArray(value.sprites) ||
+    Array.isArray(value.mapOverlays) ||
+    Array.isArray(value.characterPlacements) ||
+    (typeof value.url === "string" && typeof value.name === "string")
+  );
+}
+
+/** Prefer the first map-shaped entry's top-level `url` (background image). */
+function findFirstMapImageUrl(dataFiles: unknown[]): string | null {
+  for (const data of dataFiles) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) continue;
+    const obj = data as Record<string, unknown>;
+    if (!looksLikeMapData(obj)) continue;
+    const url = obj.url;
+    if (typeof url !== "string" || url.length === 0) continue;
+    if (IMAGE_URL_RE.test(url) || url.startsWith("http") || url.startsWith("/")) {
+      return url;
+    }
+  }
+  return null;
+}
+
+function loadImageProbe(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) resolve();
+  });
+}
+
+/**
+ * Default gate length, or probe the first map background to approximate
+ * connection speed and dismiss shortly after that image is ready.
+ */
+async function resolveGateDurationMs(dataFiles: unknown[]): Promise<number> {
+  if (!Array.isArray(dataFiles) || dataFiles.length === 0) {
+    return DEFAULT_GATE_MS;
+  }
+
+  const url = findFirstMapImageUrl(dataFiles);
+  if (!url) {
+    return DEFAULT_GATE_MS;
+  }
+
+  const started = performance.now();
+  try {
+    await loadImageProbe(url);
+  } catch {
+    return DEFAULT_GATE_MS;
+  }
+
+  const elapsed = performance.now() - started;
+  return clamp(elapsed + GATE_DELTA_MS, MIN_GATE_MS, MAX_GATE_MS);
 }
 
 export const LOADING_GATE_CONTINUE_EVENT = "capybara:loading-gate-continue";
@@ -243,8 +566,8 @@ export type LoadingGateContinueListener = (
 export interface LoadingGate {
   /**
    * Fires synchronously from the loading gate continue gesture in production.
-    * Put browser-gated work such as music.play() or AudioContext.resume()
-    * here instead of passive scene startup.
+   * Put browser-gated work such as music.play() or AudioContext.resume()
+   * here instead of passive scene startup.
    */
   onContinue(listener: LoadingGateContinueListener): () => void;
   waitForCompletion(): Promise<void>;
@@ -255,7 +578,17 @@ export function createCoreLoadingGate(
   canvas: HTMLCanvasElement | null,
   options: Record<string, unknown> = {},
 ): LoadingGate {
+  const skipSplash = shouldSkipLoadingGate();
+
   if (isDevMode()) {
+    if (skipSplash) {
+      return {
+        onContinue: () => () => undefined,
+        waitForCompletion: () => Promise.resolve(),
+        teardown: () => undefined,
+      };
+    }
+
     document.body.style.opacity = "0";
     document.body.style.transition = `opacity ${DEV_REVEAL_MS}ms ease`;
 
@@ -263,6 +596,7 @@ export function createCoreLoadingGate(
       onContinue: () => () => undefined,
       waitForCompletion: () => Promise.resolve(),
       teardown: () => {
+        markLoadingGateCompletedThisSession();
         requestAnimationFrame(() => {
           document.body.style.opacity = "1";
         });
@@ -270,12 +604,35 @@ export function createCoreLoadingGate(
     };
   }
 
+  // App-switch remounts keep sessionStorage and are not "reload" — skip splash.
+  // Explicit refresh is "reload" and shows the gate again via shouldSkipLoadingGate.
+  if (skipSplash) {
+    return {
+      onContinue: (listener) => {
+        // No user gesture available; scenes should unlock audio on first input.
+        listener({ userActivated: false });
+        return () => undefined;
+      },
+      waitForCompletion: () => Promise.resolve(),
+      teardown: () => undefined,
+    };
+  }
+
   if (canvas) {
     canvas.style.visibility = "hidden";
   }
 
-  const { overlay, logo, brand, brightBrand, revealMask, progress, progressLine } =
-    createProductionOverlay();
+  const {
+    overlay,
+    status,
+    logo,
+    dim,
+    bright,
+    revealMask,
+    progress,
+    progressLine,
+    continueBtn,
+  } = createProductionOverlay();
   document.body.appendChild(overlay);
 
   let isResolved = false;
@@ -291,6 +648,9 @@ export function createCoreLoadingGate(
       return;
     }
     hasEmittedContinue = true;
+    if (detail.userActivated) {
+      markLoadingGateCompletedThisSession();
+    }
     for (const listener of continueListeners) {
       listener(detail);
     }
@@ -309,39 +669,90 @@ export function createCoreLoadingGate(
     resolvePromise();
   };
 
-  const showContinuePrompt = () => {
-    progress.classList.add("is-complete");
-    brand.textContent = "Tap To Continue";
-    brightBrand.textContent = "Tap To Continue";
-    logo.classList.add("is-continue");
-    logo.setAttribute("role", "button");
-    logo.setAttribute("tabindex", "0");
-    logo.setAttribute("aria-label", "Tap to continue");
-
+  const enableContinue = () => {
     const onContinue = () => {
       emitContinueIfNeeded({ userActivated: true });
       resolveIfNeeded();
     };
 
-    logo.addEventListener("click", onContinue, { once: true });
-    logo.addEventListener(
-      "keydown",
-      (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onContinue();
-        }
-      },
-      { once: true },
-    );
+    // Both game title and bottom Continue dismiss the gate.
+    logo.setAttribute("role", "button");
+    logo.setAttribute("tabindex", "0");
+    logo.setAttribute("aria-label", "Continue");
+
+    for (const target of [logo, continueBtn] as HTMLElement[]) {
+      target.addEventListener("click", onContinue, { once: true });
+      target.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onContinue();
+          }
+        },
+        { once: true },
+      );
+    }
   };
 
+  /**
+   * 1. Capybara presents + letter wipe + progress bar (full load)
+   * 2. When bar ends → opacity to game title (center)
+   * 3. Continue button fades in at the bottom
+   * 4. Clicking either the game title or Continue proceeds
+   */
+  const showTitleAndContinue = async () => {
+    progress.classList.add("is-complete");
+    status.classList.add("is-hidden");
+
+    logo.classList.add("is-swapping");
+    await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
+
+    setLogoCopy(dim, bright, getGameTitle(), "");
+    revealMask.style.transition = "none";
+    revealMask.style.width = "100%";
+    logo.classList.add("is-title");
+
+    await nextFrame();
+    logo.classList.remove("is-swapping");
+    await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
+
+    continueBtn.classList.add("is-visible");
+    enableContinue();
+  };
+
+  // Provisional crawl toward 100% over the ceiling; restarted once duration is known.
   setTimeout(() => {
     progressLine.style.width = "100%";
     revealMask.style.width = "100%";
   }, 50);
 
-  setTimeout(showContinuePrompt, ANIMATION_DURATION_MS);
+  const dataFiles = Array.isArray(options.dataFiles)
+    ? (options.dataFiles as unknown[])
+    : [];
+  const gateStarted = performance.now();
+
+  void (async () => {
+    const targetMs = await resolveGateDurationMs(dataFiles);
+    const elapsed = performance.now() - gateStarted;
+    const remaining = Math.max(0, targetMs - elapsed);
+
+    // Restart from the current visual width so the bar actually completes
+    // instead of staying on the provisional MAX_GATE_MS timeline.
+    const finishMs = Math.max(MIN_FINISH_MS, remaining);
+    const wipeEasing = "cubic-bezier(0.4, 0, 0.2, 1)";
+    for (const el of [progressLine, revealMask]) {
+      const currentWidth = getComputedStyle(el).width;
+      el.style.transition = "none";
+      el.style.width = currentWidth;
+      void el.offsetWidth;
+      el.style.transition = `width ${finishMs}ms ${wipeEasing}`;
+      el.style.width = "100%";
+    }
+
+    await waitForTransitionEnd(progressLine, "width", finishMs);
+    await showTitleAndContinue();
+  })();
 
   return {
     onContinue: (listener) => {

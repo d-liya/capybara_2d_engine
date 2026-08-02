@@ -5,6 +5,10 @@ import {
   rectsOverlap,
   snapCanvasValue,
   toPixel,
+  fitRectInBox,
+  resolveImageFit,
+  resolveFootboxMode,
+  topLeftFromFeetWithSpriteFit,
   NORM,
 } from "../utils/common";
 import GameMap from "./GameMap";
@@ -114,14 +118,17 @@ interface SpriteFootAnchor {
   left: number;
   right: number;
   bottom: number;
+  /** Source frame width/height; used with imageFit for spawn placement. */
+  aspect: number;
 }
 
 interface PendingFeetAnchorPlacement {
   cacheKey: string;
   feetX: number;
   feetY: number;
-  usedCenterRatio: number;
-  usedBottomRatio: number;
+  /** Top-left written at spawn time (before trim resolves). */
+  usedX: number;
+  usedY: number;
 }
 
 const KEY_MAP: Record<string, keyof MovementInput> = {
@@ -136,6 +143,7 @@ const KEY_MAP: Record<string, keyof MovementInput> = {
 };
 
 const CAMERA_FOLLOW_ZOOM = 1.45;
+const CAMERA_FOLLOW_LERP = 10;
 const SPAWN_REVEAL_MS = 320;
 const DEFAULT_ENTITY_WIDTH = 80;
 const DEFAULT_ENTITY_HEIGHT = 80;
@@ -159,6 +167,8 @@ export default class GameRuntime {
   viewport: Viewport;
   cameraFollowEnabled: boolean;
   debug: boolean;
+  /** When true, skip map background panels so cut-out masks/sprites are easy to inspect. */
+  hideMapBackground: boolean;
   keys: MovementInput;
   map: GameMap;
   widgets: WidgetManager<GameRuntime>;
@@ -192,8 +202,23 @@ export default class GameRuntime {
     canvasId: string,
     map: GameMap,
     player?: PlayerSpawnConfig,
-    cameraEdgePadding = 0,
+    options: {
+      cameraEdgePadding?: number;
+      maxViewportScale?: number;
+      followZoom?: number;
+      cameraFollowLerp?: number;
+    } = {},
   ) {
+    const cameraEdgePadding = options.cameraEdgePadding ?? 0;
+    const followZoom =
+      Number.isFinite(options.followZoom) && (options.followZoom as number) > 0
+        ? (options.followZoom as number)
+        : CAMERA_FOLLOW_ZOOM;
+    const cameraFollowLerp =
+      Number.isFinite(options.cameraFollowLerp) &&
+      (options.cameraFollowLerp as number) > 0
+        ? (options.cameraFollowLerp as number)
+        : CAMERA_FOLLOW_LERP;
     this.canvas = document.getElementById(canvasId) as HTMLCanvasElement;
     this.ctx = this.canvas.getContext("2d");
     this.cameraController = new CameraViewportController(this.canvas, {
@@ -201,16 +226,28 @@ export default class GameRuntime {
       panelPixelHeight: map.panelPixelHeight,
       worldPixelWidth: map.worldPixelWidth,
       worldPixelHeight: map.worldPixelHeight,
-      followZoom: CAMERA_FOLLOW_ZOOM,
+      followZoom,
+      followLerp: cameraFollowLerp,
       edgePadding: cameraEdgePadding,
+      maxViewportScale: options.maxViewportScale,
     });
     this.camera = this.cameraController.camera;
     this.viewport = this.cameraController.viewport;
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
 
     this.debug = false;
+    this.hideMapBackground = false;
     this.keys = createEmptyMovementInput();
     this.map = map;
+    // When the map background loads, pixel size may update from naturalWidth/Height.
+    map.onMetricsChanged(() => {
+      this.cameraController.panelPixelWidth = map.panelPixelWidth;
+      this.cameraController.panelPixelHeight = map.panelPixelHeight;
+      this.cameraController.worldPixelWidth = map.worldPixelWidth;
+      this.cameraController.worldPixelHeight = map.worldPixelHeight;
+      this._syncActorWorldSpace();
+      this._resizeCanvas();
+    });
     this.widgets = new WidgetManager<GameRuntime>(this.canvas, "hud-root", {
       plugins: [],
       state: {},
@@ -269,11 +306,20 @@ export default class GameRuntime {
     this.cameraController.panelPixelHeight = newMap.panelPixelHeight;
     this.cameraController.worldPixelWidth = newMap.worldPixelWidth;
     this.cameraController.worldPixelHeight = newMap.worldPixelHeight;
+    newMap.onMetricsChanged(() => {
+      this.cameraController.panelPixelWidth = newMap.panelPixelWidth;
+      this.cameraController.panelPixelHeight = newMap.panelPixelHeight;
+      this.cameraController.worldPixelWidth = newMap.worldPixelWidth;
+      this.cameraController.worldPixelHeight = newMap.worldPixelHeight;
+      this._syncActorWorldSpace();
+      this._resizeCanvas();
+    });
 
     this._pathGridCache.clear();
     this._entityNavigation.clear();
     this._hoverTarget = null;
     this.keys = createEmptyMovementInput();
+    this._syncActorWorldSpace();
 
     const spawn = options.spawn;
     if (this._controlledEntityId && spawn) {
@@ -286,21 +332,22 @@ export default class GameRuntime {
         const anchor = spawn.anchor ?? "top-left";
         const measuredAnchor =
           anchor === "feet" ? this._getSpriteFootAnchorFromCache(entity) : null;
-        const centerRatio = measuredAnchor
-          ? (measuredAnchor.left + measuredAnchor.right) * 0.5
-          : 0.5;
-        const bottomRatio = measuredAnchor?.bottom ?? 1;
 
         if (anchor === "center") {
           x = spawn.x - width * 0.5;
           y = spawn.y - height * 0.5;
         } else if (anchor === "feet") {
-          x = spawn.x - width * centerRatio;
-          y = spawn.y - height * bottomRatio;
+          const topLeft = this._topLeftFromFeetAnchor(
+            entity,
+            spawn.x,
+            spawn.y,
+            measuredAnchor,
+          );
+          x = topLeft.x;
+          y = topLeft.y;
         }
 
         this.patchEntity(this._controlledEntityId, { x, y });
-        this._ensureEntityOnWalkable(this._controlledEntityId);
 
         if (anchor === "feet") {
           const spriteMeta = this._getPrimarySpriteSheetMeta(entity);
@@ -309,21 +356,28 @@ export default class GameRuntime {
               spriteMeta.url,
               spriteMeta.frameCount,
             );
-            if (!measuredAnchor) {
+            if (!measuredAnchor && this._usesAutoFootbox(entity)) {
               this._pendingFeetAnchorPlacement.set(this._controlledEntityId, {
                 cacheKey,
                 feetX: spawn.x,
                 feetY: spawn.y,
-                usedCenterRatio: centerRatio,
-                usedBottomRatio: bottomRatio,
+                usedX: x,
+                usedY: y,
               });
+            } else {
+              // Footbox already known — snap off colliders if needed.
+              this._ensureEntityOnWalkable(this._controlledEntityId);
             }
             this._ensureSpriteFootAnchorMeasured(
               cacheKey,
               spriteMeta.url,
               spriteMeta.frameCount,
             );
+          } else {
+            this._ensureEntityOnWalkable(this._controlledEntityId);
           }
+        } else {
+          this._ensureEntityOnWalkable(this._controlledEntityId);
         }
       }
     }
@@ -415,9 +469,8 @@ export default class GameRuntime {
     this._entities.set(id, entity);
     this._entitySpawnTimes.set(id, performance.now());
     this._bindEntityRenderState(id, entity);
-    if (this._entityActors.has(id)) {
-      this._ensureEntityOnWalkable(id);
-    }
+    // Honor authored spawn/placement feet even on collision — do not snap
+    // to nearest walkable on spawn (Maps character placements, etc.).
     return id;
   }
 
@@ -434,18 +487,16 @@ export default class GameRuntime {
 
     const merged = { ...base, ...props };
     const measuredAnchor = this._getSpriteFootAnchorFromCache(merged);
-    const centerRatio = measuredAnchor
-      ? (measuredAnchor.left + measuredAnchor.right) * 0.5
-      : 0.5;
-    const bottomRatio = measuredAnchor?.bottom ?? 1;
-    const inferredWidth = this._inferEntityWidth(merged);
-    const inferredHeight = this._inferEntityHeight(merged);
-    const x = feetX - inferredWidth * centerRatio;
-    const y = feetY - inferredHeight * bottomRatio;
+    const topLeft = this._topLeftFromFeetAnchor(
+      merged,
+      feetX,
+      feetY,
+      measuredAnchor,
+    );
     const id = this.spawn(archetype, {
       ...props,
-      x,
-      y,
+      x: topLeft.x,
+      y: topLeft.y,
     });
 
     const spriteMeta = this._getPrimarySpriteSheetMeta(merged);
@@ -454,13 +505,13 @@ export default class GameRuntime {
         spriteMeta.url,
         spriteMeta.frameCount,
       );
-      if (!measuredAnchor) {
+      if (!measuredAnchor && this._usesAutoFootbox(merged)) {
         this._pendingFeetAnchorPlacement.set(id, {
           cacheKey,
           feetX,
           feetY,
-          usedCenterRatio: centerRatio,
-          usedBottomRatio: bottomRatio,
+          usedX: topLeft.x,
+          usedY: topLeft.y,
         });
       }
       this._ensureSpriteFootAnchorMeasured(
@@ -632,7 +683,10 @@ export default class GameRuntime {
       return null;
     }
 
-    const scale = this.viewport.cssScale || rect.width / this.canvas.width || 1;
+    const scale =
+      this.viewport.cssScale ||
+      rect.width / this.cameraController.panelPixelWidth ||
+      1;
     const canvasX = (clientX - rect.left) / scale;
     const canvasY = (clientY - rect.top) / scale;
     const worldPixelX = (canvasX - this.camera.x) / this.camera.zoom;
@@ -681,6 +735,10 @@ export default class GameRuntime {
 
   getPlacementTargets(): MapPlacementTarget[] {
     return this.map.getPlacementTargets();
+  }
+
+  getCharacterPlacements() {
+    return this.map.getCharacterPlacements();
   }
 
   getMapOverlays(): MapOverlayTarget[] {
@@ -801,6 +859,24 @@ export default class GameRuntime {
     this.dispatchInputAction(action, { phase, source: "keyboard" });
   }
 
+  setMovementInput(patch: Partial<MovementInput>): void {
+    if (typeof patch.up === "boolean") this.keys.up = patch.up;
+    if (typeof patch.down === "boolean") this.keys.down = patch.down;
+    if (typeof patch.left === "boolean") this.keys.left = patch.left;
+    if (typeof patch.right === "boolean") this.keys.right = patch.right;
+
+    if (this.keys.up || this.keys.down || this.keys.left || this.keys.right) {
+      this._clearControlledEntityNavigation();
+    }
+  }
+
+  clearMovementInput(): void {
+    this.keys.up = false;
+    this.keys.down = false;
+    this.keys.left = false;
+    this.keys.right = false;
+  }
+
   handlePointerMove(clientX: number, clientY: number): void {
     const nextTarget = this.getHoverTargetAt(clientX, clientY);
     const previousId = this._hoverTarget?.id ?? null;
@@ -829,6 +905,19 @@ export default class GameRuntime {
 
   triggerNearestMapEffect(tag: string, atX: number, atY: number): boolean {
     return this.map.playNearestGameplayEffectByTag(tag, atX, atY);
+  }
+
+  triggerNearestGameplayEffect(
+    atX: number,
+    atY: number,
+    maxDistance?: number,
+  ): boolean {
+    return this.map.playNearestGameplayEffect(
+      atX,
+      atY,
+      performance.now(),
+      maxDistance,
+    );
   }
 
   findPath(
@@ -869,16 +958,38 @@ export default class GameRuntime {
     const resolved = this._resolvePathOptions(options);
     const point = { x: feetX, y: feetY };
     const grid = this._getPathGrid(resolved);
+    const snap = resolved.snapToNearestWalkable !== false;
 
     if (options.entityId) {
       if (!this._areEntityFeetBlocked(options.entityId, point, resolved)) {
         return point;
       }
-    } else if (grid.isPointWalkable(point)) {
-      return point;
+      if (!snap) return null;
+      // Prefer the entity's real footbox over the path grid's approx collider.
+      return this._findNearestWalkableFeetForEntity(
+        options.entityId,
+        point,
+        resolved,
+      );
     }
 
+    if (grid.isPointWalkable(point)) {
+      return point;
+    }
+    if (!snap) return null;
     return grid.findNearestWalkablePoint(point);
+  }
+
+  /**
+   * If an entity's footbox overlaps map collision, move it to the nearest
+   * walkable feet point. No-op when already clear.
+   * @returns true when the entity is walkable after this call
+   */
+  ensureEntityOnWalkable(
+    id: EntityId,
+    options: FindPathOptions = {},
+  ): boolean {
+    return this._ensureEntityOnWalkable(id, options);
   }
 
   setEntityDestination(
@@ -994,7 +1105,7 @@ export default class GameRuntime {
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
   }
 
-  _updateCamera(): void {
+  _updateCamera(dt = 1 / 60): void {
     if (!this._controlledEntityId) {
       return;
     }
@@ -1003,7 +1114,7 @@ export default class GameRuntime {
     if (!player) {
       return;
     }
-    this.cameraController.updateForPlayer(player);
+    this.cameraController.updateForPlayer(player, dt);
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
   }
 
@@ -1019,13 +1130,19 @@ export default class GameRuntime {
     const { ctx, map, widgets } = this;
     widgets.update(now, this);
     const controlsBlocked = widgets.blocksWorldInput(this);
+    if (controlsBlocked) {
+      // Drop sticky WASD / joystick flags so closing a modal does not lurch.
+      this.clearMovementInput();
+    }
 
     this._updatePlayer(controlsBlocked ? NO_MOVEMENT_INPUT : this.keys, dt);
     this._updateNavigation(dt);
     for (const system of this._systems.values()) {
       system(dt, this);
     }
-    this._updateCamera();
+    this._updateCamera(dt);
+
+    const dpr = this.viewport.devicePixelRatio || 1;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
@@ -1033,16 +1150,19 @@ export default class GameRuntime {
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     ctx.save();
+    // DPR scales the backing store; gameplay/camera math stays in logical panel px.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // Keep gameplay/camera math as floats, but snap the final render transform
-    // to canvas pixels so connected panels and props don't shimmer or expose
+    // to device pixels so connected panels and props don't shimmer or expose
     // subpixel seams while the camera follows the player.
-    ctx.translate(
-      snapCanvasValue(this.camera.x),
-      snapCanvasValue(this.camera.y),
-    );
+    const snapX = Math.round(this.camera.x * dpr) / dpr;
+    const snapY = Math.round(this.camera.y * dpr) / dpr;
+    ctx.translate(snapX, snapY);
     ctx.scale(this.camera.zoom, this.camera.zoom);
 
-    map.drawBackground(ctx, now);
+    if (!this.hideMapBackground) {
+      map.drawBackground(ctx, now);
+    }
 
     const queue: QueueRenderable[] = [
       ...map.getRenderables(),
@@ -1057,6 +1177,7 @@ export default class GameRuntime {
       item.draw(ctx, now, worldNormW, worldNormH, worldPixelW, worldPixelH);
     }
     map.drawOverlay(ctx, now);
+    map.drawAtmosphere(ctx, now);
 
     if (this.debug) {
       map.drawDebug(ctx);
@@ -1074,35 +1195,50 @@ export default class GameRuntime {
 
     ctx.restore();
 
-    if (this.debug) this._drawDebugHUD(ctx);
+    if (this.debug || this.hideMapBackground) {
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this._drawDebugHUD(ctx);
+      ctx.restore();
+    }
 
     requestAnimationFrame((nextNow) => this._loop(nextNow));
   }
 
   _drawDebugHUD(ctx: CanvasRenderingContext2D): void {
-    if (!this._controlledEntityId) {
-      return;
-    }
-    const player = this._entityActors.get(this._controlledEntityId);
-    if (!player) {
-      return;
-    }
+    const player = this._controlledEntityId
+      ? this._entityActors.get(this._controlledEntityId)
+      : null;
+
+    const flags = [
+      this.debug ? "debug" : null,
+      this.hideMapBackground ? "bg off" : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    const pos = player
+      ? `pos (${Math.round(player.x)}, ${Math.round(player.y)})`
+      : "pos —";
+    const line = flags ? `${pos}  ${flags}` : pos;
 
     ctx.save();
     ctx.fillStyle = "rgba(0,0,0,0.55)";
-    ctx.fillRect(8, 8, 210, 36);
+    ctx.fillRect(8, 8, Math.max(210, 12 + line.length * 7.2), 36);
     ctx.fillStyle = "#fff";
     ctx.font = "13px monospace";
-    ctx.fillText(
-      `pos (${Math.round(player.x)}, ${Math.round(player.y)})  debug ON`,
-      14,
-      30,
-    );
+    ctx.fillText(line, 14, 30);
     ctx.restore();
   }
 
   _setupInput(): void {
     this.input.setup();
+  }
+
+  private _clearControlledEntityNavigation(): void {
+    if (!this._controlledEntityId) return;
+    if (!this._entityNavigation.has(this._controlledEntityId)) return;
+    this.clearEntityDestination(this._controlledEntityId);
   }
 
   private _updatePlayer(input: MovementInput, dt: number): void {
@@ -1115,6 +1251,10 @@ export default class GameRuntime {
       return;
     }
 
+    if (input.up || input.down || input.left || input.right) {
+      this._clearControlledEntityNavigation();
+    }
+
     player.update(input, this.map, dt);
     this._setEntityPosition(
       this._controlledEntityId,
@@ -1122,7 +1262,41 @@ export default class GameRuntime {
       player.y,
       player.renderY,
     );
-    this._setEntityFacing(this._controlledEntityId, player.facingX);
+    this._syncActorVisualState(this._controlledEntityId, player);
+  }
+
+  /** Push actor anim / facing / hold-frame into the entity bag for widgets & API. */
+  private _syncActorVisualState(
+    id: EntityId,
+    actor: {
+      facingX: number;
+      activeAnimationName?: string;
+      holdFrame?: number | null;
+      facingDir?: string;
+      isDirectional?: boolean;
+    },
+  ): void {
+    const entity = this._entities.get(id);
+    if (!entity) return;
+    const next: ComponentBag = {
+      ...entity,
+      facingX: actor.facingX,
+    };
+    if (typeof actor.activeAnimationName === "string") {
+      next.activeAnimation = actor.activeAnimationName;
+    }
+    if ("holdFrame" in actor) {
+      next.animHoldFrame =
+        actor.holdFrame === undefined ? null : actor.holdFrame;
+    }
+    if (typeof actor.facingDir === "string") {
+      next.facingDir = actor.facingDir;
+    }
+    this._entities.set(id, next);
+    this._entityBoundAnimations.set(
+      id,
+      String(next.activeAnimation ?? this._entityBoundAnimations.get(id) ?? ""),
+    );
   }
 
   private _updateNavigation(dt: number): void {
@@ -1213,8 +1387,16 @@ export default class GameRuntime {
         continue;
       }
       this._setEntityPosition(id, nextPosition.x, nextPosition.y);
-      this._setEntityFacing(id, dx);
-      this._setEntityMoveAnimation(id);
+      if (actor) {
+        actor.x = nextPosition.x;
+        actor.y = nextPosition.y;
+        // Native 4-way (or classic flip) from path direction.
+        actor.applyLocomotionIntent(dx, dy);
+        this._syncActorVisualState(id, actor);
+      } else {
+        this._setEntityFacing(id, dx);
+        this._setEntityMoveAnimation(id);
+      }
     }
   }
 
@@ -1304,7 +1486,8 @@ export default class GameRuntime {
   private _getEntityFeetPoint(id: EntityId, entity: ComponentBag): PathPoint {
     const actor = this._entityActors.get(id);
     if (actor) {
-      return { x: actor.x + actor._w * 0.5, y: actor.renderY };
+      const foot = actor._footAt(actor.x, actor.y);
+      return { x: (foot.x1 + foot.x2) * 0.5, y: foot.y2 };
     }
 
     const x = Number(entity.x) || 0;
@@ -1364,55 +1547,107 @@ export default class GameRuntime {
     id: EntityId,
     options: FindPathOptions = {},
   ): boolean {
+    // Wait for auto footbox trim before snapping — otherwise we may move with
+    // a temporary box collider, then skip the authored feet re-anchor.
+    if (this._pendingFeetAnchorPlacement.has(id)) {
+      return false;
+    }
+
     const entity = this._entities.get(id);
     if (!entity) return false;
 
     const pathOptions = this._resolvePathOptions({ ...options, entityId: id });
     const feet = this._getEntityFeetPoint(id, entity);
     if (!this._areEntityFeetBlocked(id, feet, pathOptions)) {
-      return false;
+      return true;
     }
 
-    const nearest =
-      this._getPathGrid(pathOptions).findNearestWalkablePoint(feet);
+    const nearest = this.resolveNearestWalkableFeet(
+      feet.x,
+      feet.y,
+      pathOptions,
+    );
     if (!nearest) return false;
 
     this._placeEntityAtFeet(id, nearest.x, nearest.y);
 
     const updatedEntity = this._entities.get(id);
-    if (!updatedEntity) return true;
+    if (!updatedEntity) return false;
     const updatedFeet = this._getEntityFeetPoint(id, updatedEntity);
-    if (this._areEntityFeetBlocked(id, updatedFeet, pathOptions)) {
-      return this._nudgeActorToWalkable(id);
-    }
-    return true;
+    return !this._areEntityFeetBlocked(id, updatedFeet, pathOptions);
   }
 
-  private _nudgeActorToWalkable(id: EntityId): boolean {
+  /**
+   * Spiral search for the closest feet point whose entity footbox is clear.
+   * Falls back to the path grid when the entity has no actor yet.
+   */
+  private _findNearestWalkableFeetForEntity(
+    id: EntityId,
+    from: PathPoint,
+    pathOptions: FindPathOptions,
+  ): PathPoint | null {
     const actor = this._entityActors.get(id);
-    if (!actor) return false;
+    if (!actor) {
+      return this._getPathGrid(pathOptions).findNearestWalkablePoint(from);
+    }
 
+    const cellSize =
+      Number.isFinite(Number(pathOptions.cellSize)) &&
+      Number(pathOptions.cellSize) > 4
+        ? Number(pathOptions.cellSize)
+        : 25;
+    const snapRadiusCells =
+      Number.isFinite(Number(pathOptions.snapRadiusCells)) &&
+      Number(pathOptions.snapRadiusCells) > 0
+        ? Math.floor(Number(pathOptions.snapRadiusCells))
+        : 8;
     const step = 4;
-    for (let radius = 1; radius <= 12; radius += 1) {
+    const maxRadius = Math.max(
+      12,
+      Math.ceil((snapRadiusCells * cellSize) / step),
+    );
+
+    let best: PathPoint | null = null;
+    let bestDistanceSq = Number.POSITIVE_INFINITY;
+
+    for (let radius = 1; radius <= maxRadius; radius += 1) {
       for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
         for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
           if (Math.abs(offsetX) !== radius && Math.abs(offsetY) !== radius) {
             continue;
           }
-          const nextX = actor.x + offsetX * step;
-          const nextY = actor.y + offsetY * step;
-          if (!this.map.checkCollision(actor._footAt(nextX, nextY))) {
-            this.patchEntity(id, { x: nextX, y: nextY });
-            return true;
+          const candidate = {
+            x: from.x + offsetX * step,
+            y: from.y + offsetY * step,
+          };
+          if (this._areEntityFeetBlocked(id, candidate, pathOptions)) {
+            continue;
+          }
+          const distanceSq =
+            (candidate.x - from.x) ** 2 + (candidate.y - from.y) ** 2;
+          if (distanceSq < bestDistanceSq) {
+            best = candidate;
+            bestDistanceSq = distanceSq;
           }
         }
       }
+      if (best) return best;
     }
 
-    return false;
+    return null;
   }
 
   private _setEntityMoveAnimation(id: EntityId): void {
+    const actor = this._entityActors.get(id);
+    if (actor?.isDirectional) {
+      // Keep last non-zero intent if any; treat as moving using last facing.
+      actor.applyLocomotionIntent(
+        Number(this._entities.get(id)?.facingX) || 1,
+        0,
+      );
+      this._syncActorVisualState(id, actor);
+      return;
+    }
     const entity = this._entities.get(id);
     if (!entity) return;
     const animation = this._findAnimationName(entity, ["walk", "run"]);
@@ -1420,6 +1655,12 @@ export default class GameRuntime {
   }
 
   private _setEntityIdleAnimation(id: EntityId): void {
+    const actor = this._entityActors.get(id);
+    if (actor) {
+      actor.applyLocomotionIntent(0, 0);
+      this._syncActorVisualState(id, actor);
+      return;
+    }
     const entity = this._entities.get(id);
     if (!entity) return;
     const animation = this._findAnimationName(entity, [
@@ -1478,6 +1719,19 @@ export default class GameRuntime {
       return mapHeight;
     }
     return this.map?.panelPixelHeight ?? DEFAULT_MAP_HEIGHT_PX;
+  }
+
+  /** Keep actor footbox fit aligned with the current map's pixel axes. */
+  private _syncActorWorldSpace(): void {
+    if (!this.map) return;
+    for (const actor of this._entityActors.values()) {
+      actor.setWorldSpace(
+        this.map.worldNormWidth,
+        this.map.worldNormHeight,
+        this.map.worldPixelWidth,
+        this.map.worldPixelHeight,
+      );
+    }
   }
 
   private _getPrimarySpriteSheetMeta(
@@ -1603,19 +1857,94 @@ export default class GameRuntime {
         left: minX / fw,
         right: (maxX + 1) / fw,
         bottom: (maxY + 1) / fh,
+        aspect: fw / fh,
       };
     } catch {
       return null;
     }
   }
 
+  private _usesAutoFootbox(entity: ComponentBag): boolean {
+    return resolveFootboxMode(entity.footboxMode) === "auto";
+  }
+
+  /**
+   * Infer source-frame aspect from sheet metadata when the image is not loaded
+   * yet. Falls back to the entity box aspect (no letterboxing).
+   */
+  private _inferSpriteAspect(
+    entity: ComponentBag,
+    entityW: number,
+    entityH: number,
+  ): number {
+    const spriteSheets = entity.spriteSheets;
+    if (Array.isArray(spriteSheets) && spriteSheets.length > 0) {
+      const firstSheet = spriteSheets[0] as {
+        width?: number;
+        height?: number;
+        frame_count?: unknown;
+      };
+      const widthPx = Number(firstSheet?.width);
+      const heightPx = Number(firstSheet?.height);
+      const rawFrameCount = Number(firstSheet?.frame_count);
+      const frameCount =
+        Number.isFinite(rawFrameCount) && rawFrameCount > 0
+          ? Math.max(1, Math.floor(rawFrameCount))
+          : 1;
+      if (
+        Number.isFinite(widthPx) &&
+        widthPx > 0 &&
+        Number.isFinite(heightPx) &&
+        heightPx > 0
+      ) {
+        return widthPx / frameCount / heightPx;
+      }
+    }
+    if (entityW > 0 && entityH > 0) {
+      return entityW / entityH;
+    }
+    return 1;
+  }
+
+  private _topLeftFromFeetAnchor(
+    entity: ComponentBag,
+    feetX: number,
+    feetY: number,
+    measuredAnchor: SpriteFootAnchor | null,
+  ): { x: number; y: number } {
+    const width = this._inferEntityWidth(entity);
+    const height = this._inferEntityHeight(entity);
+    const mode = resolveFootboxMode(entity.footboxMode);
+
+    if (mode !== "auto") {
+      return { x: feetX - width * 0.5, y: feetY - height };
+    }
+
+    const aspect =
+      measuredAnchor?.aspect ?? this._inferSpriteAspect(entity, width, height);
+    // Horizontal feet stay on the fitted flip axis (0.5), not asymmetric
+    // opaque center — otherwise turn-around shifts the collider into walls.
+    const centerRatio = 0.5;
+    const bottomRatio = measuredAnchor?.bottom ?? 1;
+
+    return topLeftFromFeetWithSpriteFit({
+      feetX,
+      feetY,
+      entityW: width,
+      entityH: height,
+      contentAspect: aspect,
+      imageFit: entity.imageFit,
+      centerRatio,
+      bottomRatio,
+      scaleX: this.map.worldPixelWidth / this.map.worldNormWidth,
+      scaleY: this.map.worldPixelHeight / this.map.worldNormHeight,
+    });
+  }
+
   private _applyPendingFeetAnchorPlacements(
     cacheKey: string,
     anchor: SpriteFootAnchor,
   ): void {
-    const newCenterRatio = (anchor.left + anchor.right) * 0.5;
-    const newBottomRatio = anchor.bottom;
-
     for (const [
       entityId,
       pending,
@@ -1630,26 +1959,40 @@ export default class GameRuntime {
         continue;
       }
 
-      const width = this._inferEntityWidth(entity);
-      const height = this._inferEntityHeight(entity);
-      const expectedPreviousX = pending.feetX - width * pending.usedCenterRatio;
-      const expectedPreviousY =
-        pending.feetY - height * pending.usedBottomRatio;
+      if (!this._usesAutoFootbox(entity)) {
+        this._pendingFeetAnchorPlacement.delete(entityId);
+        continue;
+      }
+
       const currentX = Number(entity.x);
       const currentY = Number(entity.y);
 
       const movedSinceSpawn =
-        Math.abs(currentX - expectedPreviousX) > 0.001 ||
-        Math.abs(currentY - expectedPreviousY) > 0.001;
+        Math.abs(currentX - pending.usedX) > 0.001 ||
+        Math.abs(currentY - pending.usedY) > 0.001;
 
       if (!movedSinceSpawn) {
+        const topLeft = this._topLeftFromFeetAnchor(
+          entity,
+          pending.feetX,
+          pending.feetY,
+          anchor,
+        );
         this.patchEntity(entityId, {
-          x: pending.feetX - width * newCenterRatio,
-          y: pending.feetY - height * newBottomRatio,
+          x: topLeft.x,
+          y: topLeft.y,
         });
       }
 
       this._pendingFeetAnchorPlacement.delete(entityId);
+
+      // After trim is applied, snap the controlled player off any collider.
+      if (
+        !movedSinceSpawn &&
+        entityId === this._controlledEntityId
+      ) {
+        this._ensureEntityOnWalkable(entityId);
+      }
     }
   }
 
@@ -1971,8 +2314,26 @@ export default class GameRuntime {
         this._inferEntityWidth(entity),
         this._inferEntityHeight(entity),
       );
+      actor.setWorldSpace(
+        this.map.worldNormWidth,
+        this.map.worldNormHeight,
+        this.map.worldPixelWidth,
+        this.map.worldPixelHeight,
+      );
+      actor.setImageFit(entity.imageFit);
+      actor.setFootboxMode(entity.footboxMode);
+      actor.setFootboxRatios({
+        footHeightRatio: entity.footHeightRatio,
+        footInsetRatio: entity.footInsetRatio,
+      });
       const facingX = Number(entity.facingX);
       if (Number.isFinite(facingX)) actor.setFacingX(facingX);
+      // Freeze a walk-strip frame when there is no dedicated idle art.
+      if (entity.animHoldFrame === null || entity.animHoldFrame === undefined) {
+        actor.setHoldFrame(null);
+      } else if (Number.isFinite(Number(entity.animHoldFrame))) {
+        actor.setHoldFrame(Number(entity.animHoldFrame));
+      }
       if (Number.isFinite(animationTransitionMs)) {
         actor.setAnimationTransitionMs(animationTransitionMs);
       }
@@ -2274,13 +2635,27 @@ export default class GameRuntime {
           const drawY = snapCanvasValue(p1.y);
           const drawX2 = snapCanvasValue(p2.x);
           const drawY2 = snapCanvasValue(p2.y);
+          const boxW = drawX2 - drawX;
+          const boxH = drawY2 - drawY;
+          const natW = imageState.image.naturalWidth;
+          const natH = imageState.image.naturalHeight;
+          const contentAspect = natW > 0 && natH > 0 ? natW / natH : 1;
+          const fitted = fitRectInBox(
+            drawX,
+            drawY,
+            boxW,
+            boxH,
+            contentAspect,
+            resolveImageFit(entity.imageFit),
+            "center",
+          );
           this._drawWithEntityEffects(ctx, entity, () => {
             ctx.drawImage(
               imageState.image,
-              drawX,
-              drawY,
-              drawX2 - drawX,
-              drawY2 - drawY,
+              fitted.x,
+              fitted.y,
+              fitted.w,
+              fitted.h,
             );
           });
         },

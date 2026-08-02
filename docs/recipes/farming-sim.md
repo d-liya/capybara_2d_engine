@@ -9,24 +9,24 @@ Use this for day/season/crop/gold loops.
 
 ## Read first
 
-- `src/data/assets.md`
-- `docs/CAPYBARA_ENGINE.md`
+- `src/data/` generated JSON
+- `.agents/skills/capybara-game-developer/CAPYBARA_ENGINE.md`
 - `docs/recipes/map-placement.md`
 - `docs/recipes/inventory-tools.md`
 - `docs/recipes/save-load.md` only if persistence/autosave is requested
 
-`src/data/assets.md` wins for actual generated prop names, crop lifecycle item names, widget factories, and placement ids.
+`src/data/` prop/map JSON wins for actual generated prop names, crop lifecycle item names, and placement ids. Widget factory names come from `src/widgets/` exports.
 
-## Live reference (this repo)
+## Pattern reference
 
-`src/scenes/FarmScene.ts` + `src/systems/FarmingSystem.ts` implement a minimal loop:
+This recipe is a planning/implementation pattern — there is no `FarmScene.ts` / `FarmingSystem.ts` in the template. Build the loop in `configureGameplay` + `src/systems/` using placement grids from synced map JSON:
 
-- Two generated zones (`crop-field-1`, `crop-field-2`) subdivided with `placement.bounds` and `gridDimensions` (`[cols, rows]`, e.g. `[4, 3]` = 4 columns × 3 rows)
-- `P` / `H` keyboard actions plant and harvest the nearest empty/mature cell within range
+- Generated zones subdivided with `placement.bounds` and `gridDimensions` (`[cols, rows]`, e.g. `[4, 3]` = 4 columns × 3 rows)
+- Keyboard or touch actions plant and harvest the nearest empty/mature cell within range
 - Proximity from `game.getEntityFeet(...)`; crop overlays spawned with `spawnCentered` + `getPropItemUrl`
-- Automatic timed growth through 5 prop stages (0–4), not the full hoe/water/seed day loop below
+- Automatic timed growth through prop stages, or a fuller hoe/water/seed day loop below
 
-Use that code when wiring placement grids; use the sections below for fuller day/season/economy sims.
+Use the sections below for fuller day/season/economy sims.
 
 ## HUD visibility
 
@@ -123,7 +123,7 @@ Use task-facing state numbers even if prop item names differ per generated game:
 - State 4: mid-growth
 - State 5: mature/harvestable crop
 
-Map these states to actual generated item names from `src/data/assets.md`:
+Map these states to actual generated item names from `src/data/` generated JSON:
 
 ```ts
 const cropImageByState: Partial<Record<CropState, string>> = {
@@ -135,7 +135,7 @@ const cropImageByState: Partial<Record<CropState, string>> = {
 };
 ```
 
-If `assets.md` lists different prop group/item names, use those exact names.
+If generated JSON in `src/data/` lists different prop group/item names, use those exact names.
 
 Typical tool transitions:
 
@@ -238,7 +238,7 @@ Do not save entity ids. Reconnect saved crop records to fresh overlay entities b
 
 The scene should only:
 
-1. Create game with `toMapData(<map handle>)`, using the generated map handle from `assets.md`.
+1. Create game with `toMapData(<map handle>)`, using the generated map handle from generated JSON in `src/data/`.
 2. Register default resources.
 3. Register archetypes, systems, inputs.
 4. Spawn player/NPC/crop overlays.

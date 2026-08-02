@@ -1,4 +1,4 @@
-import { initGameService } from "./Core";
+import { apiClient, activeGameId, initGameService, requireInit } from "./Core";
 import * as Auth from "./Auth";
 import * as Save from "./Save";
 import * as Multiplayer from "./Multiplayer";
@@ -14,6 +14,24 @@ import type {
 export type * from "./types";
 
 /**
+ * Boots the SDK + guest session + playtime tracking when `window.gameId` is set.
+ * This enables analytics by default for hosted games. Local/dev without a game
+ * id (or without the CDN client) is a no-op and never throws into gameplay.
+ */
+export async function enableAnalyticsByDefault(): Promise<void> {
+  if (!window.gameId || !window.GameServerClient) return;
+
+  try {
+    requireInit();
+    await Auth.ensureGuestSession();
+    if (!apiClient || !activeGameId) return;
+    apiClient.startPlaytimeTracking(activeGameId);
+  } catch (error) {
+    console.warn("[Game Service] Analytics bootstrap failed", error);
+  }
+}
+
+/**
  * Unified SDK facade to simplify usage.
  *
  * Developers can initialize once and call methods from a single object
@@ -21,12 +39,21 @@ export type * from "./types";
  */
 export class GameSDK implements GameSDKInterface {
   /**
-   * Optional eager initialization. Most gameplay code can skip this because SDK
-   * calls lazy-initialize from `window.gameId`, which is injected by index.html.
+   * Optional eager initialization. Bootstrap already calls
+   * `enableAnalyticsByDefault()` so gameplay usually does not need this.
+   * SDK calls also lazy-initialize from `window.gameId` when needed.
    */
   init(options: GameServerClientOptions = {}): this {
     initGameService(options);
     return this;
+  }
+
+  /**
+   * This enables analytics by default (SDK init + guest session + playtime).
+   * Prefer the boot-time `enableAnalyticsByDefault()` call from `main.ts`.
+   */
+  enableAnalytics(): Promise<void> {
+    return enableAnalyticsByDefault();
   }
 
   auth: GameSDKAuthGroup = {
