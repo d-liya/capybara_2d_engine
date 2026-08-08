@@ -14,8 +14,14 @@ export interface PropItem {
 }
 
 export interface PropData {
+  assetId?: string;
   name: string;
+  label?: string;
+  description?: string;
+  gamePlay?: string;
   url: string;
+  box_2d?: number[];
+  parentAssetId?: string;
   items?: PropItem[];
 }
 

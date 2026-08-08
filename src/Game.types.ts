@@ -102,7 +102,20 @@ export interface GeneratedCharacterPlacement {
   role?: "player" | "npc";
 }
 
-/** Sky-layer atmosphere placement authored by the map editor. */
+/** Independent Y-sorted gameplay object authored by the map editor. */
+export interface GeneratedPropPlacement {
+  placementId: string;
+  assetId: string;
+  label: string;
+  box_2d: Box2D;
+  width?: number;
+  height?: number;
+  url?: string;
+  movable?: boolean;
+  gamePlay?: string;
+}
+
+/** Always-on-top overhead-plane placement authored by the map editor. */
 export interface GeneratedAtmospherePlacement {
   placementId: string;
   assetId: string;
@@ -117,6 +130,7 @@ export interface GeneratedAtmospherePlacement {
   frameCount?: number;
   frameWidth?: number;
   frameHeight?: number;
+  /** Legacy motion/scale hint; atmosphere has one overhead render plane. */
   layer?: "far" | "near";
   motion?: "drift" | "orbit" | "rise_loop";
   speedX?: number;
@@ -541,7 +555,9 @@ export interface GameMapData extends GameMapPanelData {
   generatedAssetContractVersion?: GeneratedAssetContractVersion;
   /** Authored placements are data only; game code explicitly decides what to spawn. */
   characterPlacements?: GeneratedCharacterPlacement[];
-  /** Sky-layer atmosphere sprites loaded automatically with the map. */
+  /** Independent gameplay props authored on this map; bootstrap auto-spawns them. */
+  propPlacements?: GeneratedPropPlacement[];
+  /** Single-plane overhead atmosphere sprites loaded automatically with the map. */
   atmospherePlacements?: GeneratedAtmospherePlacement[];
   panel: GameMapPanelContent & {
     masks: GameMapMaskEntry[];

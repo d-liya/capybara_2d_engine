@@ -10,8 +10,8 @@
  * Spawned props still use the `prop` layer and Y-sort with `occluder` masks and
  * each other by `renderY` (e.g. player walks in front of / behind crop rows).
  *
- * Sky-layer atmosphere (clouds, birds, balloons) is a **separate pass** after
- * the Y-sort queue (`GameMap.drawAtmosphere`) — not part of these ranks.
+ * All overhead atmosphere (clouds, birds, distant aircraft) shares one **separate pass**
+ * after the Y-sort queue (`GameMap.drawAtmosphere`) — not part of these ranks.
  */
 export type RenderLayer = "ground" | "occluder" | "prop";
 
@@ -30,7 +30,10 @@ const layerOf = (item: RenderSortable): RenderLayer =>
   item.renderLayer ?? "occluder";
 
 /** Ascending sort: lower values are drawn first (behind). */
-export function compareRenderSort(a: RenderSortable, b: RenderSortable): number {
+export function compareRenderSort(
+  a: RenderSortable,
+  b: RenderSortable,
+): number {
   const layerA = layerOf(a);
   const layerB = layerOf(b);
   const aGround = layerA === "ground";

@@ -12,17 +12,17 @@ Each map is split across files (merged in `generated.ts` via `mergeMapSidecars` 
 | ---- | -------- |
 | `map_<id>.json` | Lean: `url`, `walkableBoxes`, `mapOverlays` (`erase` / `state` / `vfx` / `grid`) |
 | `map_<id>.sprites.json` | Cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
-| `map_<id>.placements.json` | `placement`, `characterPlacements`, `hudPlacements`, `atmospherePlacements` |
+| `map_<id>.placements.json` | `placement`, `characterPlacements`, `propPlacements`, `hudPlacements`, `atmospherePlacements` |
 
 What sync + `bootstrapWorldFromAssets` already do:
 
 1. Registries (`generated.ts` / `generated-props.ts` / `common.json` / `huds.json`) are written by sync.
-2. Bootstrap defines character archetypes, spawns `characterPlacements` (player vs NPC), starts map-scoped BGM / ambience / autoplay SFX, and binds default interact (enterables → `transitionMap`, state overlays, gameplay VFX). Forward enterables get a synthetic return exit at `destinationSpawnBox2d` when the destination has no authored back-link.
+2. Bootstrap defines character archetypes, spawns `characterPlacements` (player vs NPC) and explicit `propPlacements`, starts map-scoped BGM / ambience / autoplay SFX, and binds default interact (enterables → `transitionMap`, state overlays, gameplay VFX). Forward enterables get a synthetic return exit at `destinationSpawnBox2d` when the destination has no authored back-link.
 3. Atmosphere loads automatically from `toMapData(...).atmospherePlacements` inside the map runtime — bootstrap does **not** call a separate atmosphere API.
 4. Treat manifest-owned JSON and `generatedWorld.ts` as read-only; import handles from `src/data/index.ts`.
 5. Extend gameplay in `configureGameplay` (`src/scenes/mainScene.ts`): systems, custom widgets, overlay triggers, dialogue, combat, quests, inventory, plus any entities you invent.
 
-Bootstrap does **not** auto-spawn props from `placement[]`, mount HUDs from `hudPlacements` / `huds.json`, or run dialogue. Those are gameplay work.
+Bootstrap auto-spawns explicit `propPlacements` as map-local, bottom-Y-sorted entities with `kind`, `assetId`, and `placementId`. It does **not** turn generic `placement[]` targets into props, make props collectible automatically, mount HUDs from `hudPlacements` / `huds.json`, or run dialogue. Query the authored prop entity for gameplay and do not place a duplicate over its box.
 
 Identifiers like `mapMain`, `charPlayer` below are **placeholders**. Copy real names from generated JSON / exports.
 
@@ -38,7 +38,7 @@ HUD catalog lives in `huds.json` with widget TS under `src/widgets/`. `hudPlacem
 4. **`src/Game.ts`** — public gameplay API (`createGame`, `transitionMap` / `loadMap`, overlays, audio helpers, spawning).
 5. **`src/scenes/generatedWorld.ts` + `bootstrapWorldFromAssets`** — what is already live this revision. Extend via `configureGameplay`, do not re-bootstrap by hand.
 
-Prefer lean `map_*.json` for layout/overlays. Open `map_*.sprites.json` for collision polygons and `map_*.placements.json` for placement / character / HUD / atmosphere lists.
+Prefer lean `map_*.json` for layout/overlays. Open `map_*.sprites.json` for collision polygons and `map_*.placements.json` for placement / character / prop / HUD / atmosphere lists.
 
 ---
 
@@ -53,7 +53,7 @@ Change a map-baked door / chest / gate visual or collider?
   → game.setMapOverlayState(id, state)
 
 Portable item, crop stage, clue, or placement-box prop?
-  → placeProp / spawn + getPropItemUrl(...) imageUrl patch
+  → query an authored propPlacement by assetId/placementId, or placeProp / spawn + getPropItemUrl(...) for additional instances
 
 Map-authored spritesheet VFX?
   → background loops automatically
@@ -66,7 +66,8 @@ Map-authored spritesheet VFX?
 | Door / room travel (fade by default) | `game.transitionMap(toMapData(...), { spawn, during })` |
 | Instant swap (tools / custom fade)   | `game.loadMap(toMapData(...), { spawn })`               |
 | Toggle baked overlay state           | `setMapOverlayState`                                    |
-| Spawn / stage portable props         | `placeProp` + `getPropItemUrl`                          |
+| Use an authored generated prop       | `query(c => c.assetId === ...)`                         |
+| Spawn / stage additional props       | `placeProp` + `getPropItemUrl`                          |
 | Trigger map VFX                      | `triggerMapEffect` / `triggerNearestMapEffect`          |
 
 ## Recipe: map travel (`transitionMap`)

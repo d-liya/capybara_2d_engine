@@ -9,6 +9,7 @@ import {
 
 export type AtmosphereKind = "flyer" | "drift";
 export type AtmosphereMotion = "drift" | "orbit" | "rise_loop";
+/** Legacy motion/scale profile inside the single overhead render plane. */
 export type AtmosphereParallaxLayer = "far" | "near";
 
 export interface AtmosphereEntry {
@@ -70,7 +71,7 @@ function resolveMotion(
 }
 
 /**
- * Floating sky-layer sprite (cloud / bird / balloon).
+ * Sprite on the one always-on-top overhead plane (cloud / bird / distant aircraft).
  * Drawn in a dedicated pass after the world Y-sort queue.
  */
 export default class AtmosphereObject {
@@ -196,11 +197,8 @@ export default class AtmosphereObject {
           ? -Math.abs(this._speedY) * NORM * t * life
           : -height * (0.8 + this._amplitude) * t;
       const driftX =
-        (typeof this._speedX === "number" ? this._speedX : 0) *
-        NORM *
-        t *
-        life;
-      // Fade in, hold, fade out.
+        (typeof this._speedX === "number" ? this._speedX : 0) * NORM * t * life;
+      // Legacy screen-north travel/fade inside the same overhead plane.
       if (t < 0.15) this._alpha = t / 0.15;
       else if (t > 0.75) this._alpha = Math.max(0, (1 - t) / 0.25);
       else this._alpha = 1;
@@ -214,8 +212,7 @@ export default class AtmosphereObject {
         : this.kind === "flyer"
           ? FLYER_SPEED_NORM
           : DRIFT_SPEED_NORM;
-    const sy =
-      Math.abs(this._speedY) > 1e-6 ? this._speedY * NORM : 0;
+    const sy = Math.abs(this._speedY) > 1e-6 ? this._speedY * NORM : 0;
     let xOff = elapsed * sx;
     let yOff =
       elapsed * sy +
@@ -239,8 +236,7 @@ export default class AtmosphereObject {
         xOff = (sx >= 0 ? 1 : -1) * (span * 1.5 - cycle);
         this._flipX = this.supportsFlipX;
       }
-      yOff =
-        Math.sin(elapsed * 0.7 + this._phase * 1.3) * BOB_AMPLITUDE_NORM;
+      yOff = Math.sin(elapsed * 0.7 + this._phase * 1.3) * BOB_AMPLITUDE_NORM;
     }
 
     return { x: xOff, y: yOff };

@@ -85,7 +85,10 @@ export interface GeneratedDirectionalSheet {
  * ```
  *
  * Adapter emits sheet names `{clip}_{facing}` (`walk_front`, `idle_right`, …).
- * Actor picks clip + facing natively on move. Missing `idle` → hold frame 0 of walk.
+ * Actor picks clip + facing on move when 2+ facings exist; a single-facing
+ * pack (`walk_front` only / + synthesized idle) stays classic 2-way (flip).
+ * Missing `idle` → synthesize a 1-frame `idle_{defaultFacing}` sheet from
+ * `baseUrl` when present; else the actor freezes frame 0 of the walk strip.
  */
 export interface GeneratedDirectionalCharacter {
   label?: string;
@@ -101,6 +104,10 @@ export interface GeneratedDirectionalCharacter {
    * top-level `front`/`back`/`right` + optional `animation` name.
    */
   animation?: string;
+  /**
+   * Static character plate. Used as a 1-frame idle sheet when the pack has
+   * walk (or other) clips but no dedicated idle animation.
+   */
   baseUrl?: string;
   directions?: string[];
   front?: GeneratedDirectionalSheet;
@@ -254,19 +261,75 @@ export function directionalToSpriteSheets(
   return legacyDirectionalToSpriteSheets(character);
 }
 
+/**
+ * When a directional pack has no idle strip but ships a static `baseUrl`
+ * plate, synthesize a 1-frame `idle_{facing}` sheet so standing still does
+ * not loop the walk cycle.
+ */
+function ensureIdleSheetsFromBaseUrl(
+  character: AnyGeneratedCharacter,
+  sheets: EntitySpriteSheet[],
+): EntitySpriteSheet[] {
+  const baseUrl = String(
+    (character as GeneratedDirectionalCharacter).baseUrl ?? "",
+  ).trim();
+  if (!baseUrl || sheets.length === 0) return sheets;
+
+  const hasIdle = sheets.some((sheet) => {
+    const name = String(sheet.name ?? "")
+      .trim()
+      .toLowerCase();
+    return name === "idle" || name.startsWith("idle_");
+  });
+  if (hasIdle) return sheets;
+
+  const defaultFacing =
+    String(
+      (character as GeneratedDirectionalCharacter).defaultFacing ?? "front",
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_") || "front";
+  const facing = (FACING_KEYS as string[]).includes(defaultFacing)
+    ? defaultFacing
+    : "front";
+
+  const sizeSource =
+    sheets.find((sheet) =>
+      String(sheet.name ?? "")
+        .trim()
+        .toLowerCase()
+        .endsWith(`_${facing}`),
+    ) ?? sheets[0];
+
+  const idleSheet: EntitySpriteSheet = {
+    name: `idle_${facing}`,
+    url: baseUrl,
+    frame_count: 1,
+  };
+  const width = Number(sizeSource?.width);
+  const height = Number(sizeSource?.height);
+  if (Number.isFinite(width) && width > 0) idleSheet.width = width;
+  if (Number.isFinite(height) && height > 0) idleSheet.height = height;
+
+  return [...sheets, idleSheet];
+}
+
 /** Normalize any supported character JSON into engine spriteSheets. */
 export function toSpriteSheets(
   character: AnyGeneratedCharacter,
 ): EntitySpriteSheet[] {
+  let sheets: EntitySpriteSheet[];
   if (isMultiClipDirectionalCharacter(character)) {
-    return multiClipDirectionalToSpriteSheets(character);
+    sheets = multiClipDirectionalToSpriteSheets(character);
+  } else if (isLegacyDirectionalCharacter(character)) {
+    sheets = legacyDirectionalToSpriteSheets(character);
+  } else {
+    sheets = Array.isArray((character as GeneratedCharacter).spriteSheets)
+      ? (character as GeneratedCharacter).spriteSheets
+      : [];
   }
-  if (isLegacyDirectionalCharacter(character)) {
-    return legacyDirectionalToSpriteSheets(character);
-  }
-  return Array.isArray((character as GeneratedCharacter).spriteSheets)
-    ? (character as GeneratedCharacter).spriteSheets
-    : [];
+  return ensureIdleSheetsFromBaseUrl(character, sheets);
 }
 
 type PanelContent = GameMapData["panel"];
@@ -381,7 +444,7 @@ export interface GeneratedHudPlacement {
   url?: string;
 }
 
-/** Sky-layer atmosphere placement (world-normalized 0–1000). */
+/** Single-plane overhead atmosphere placement (world-normalized 0–1000). */
 export interface GeneratedAtmospherePlacement {
   placementId: string;
   assetId: string;
@@ -406,10 +469,24 @@ export interface GeneratedAtmospherePlacement {
   enabled?: boolean;
 }
 
+/** Independent generated gameplay object placed in world-normalized space. */
+export interface GeneratedPropPlacement {
+  placementId: string;
+  assetId: string;
+  label: string;
+  box_2d: [number, number, number, number] | number[];
+  width?: number;
+  height?: number;
+  url?: string;
+  movable?: boolean;
+  gamePlay?: string;
+}
+
 /** Sidecar file shape: `map_<id>.placements.json`. */
 export interface GeneratedMapPlacementsFile {
   placement?: PanelContent["placement"];
   characterPlacements?: GeneratedCharacterPlacement[];
+  propPlacements?: GeneratedPropPlacement[];
   hudPlacements?: GeneratedHudPlacement[];
   atmospherePlacements?: GeneratedAtmospherePlacement[];
 }
@@ -429,6 +506,7 @@ export interface GeneratedMap {
   placement?: PanelContent["placement"];
   mapOverlays?: PanelContent["mapOverlays"];
   characterPlacements?: GeneratedCharacterPlacement[];
+  propPlacements?: GeneratedPropPlacement[];
   hudPlacements?: GeneratedHudPlacement[];
   atmospherePlacements?: GeneratedAtmospherePlacement[];
   /**
@@ -1164,7 +1242,7 @@ function normalizeMapOverlays(
           colliders: state.colliders,
           blocksMovement: state.blocksMovement,
           renderLayer: state.renderLayer,
-          ...(((): Record<string, unknown> => {
+          ...((): Record<string, unknown> => {
             const s = state as Record<string, unknown>;
             const out: Record<string, unknown> = {};
             if (typeof s.spriteUrl === "string" && s.spriteUrl.trim()) {
@@ -1206,12 +1284,14 @@ function normalizeMapOverlays(
                       const o = p as { x?: unknown; y?: unknown };
                       const x = Number(o.x);
                       const y = Number(o.y);
-                      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+                      if (!Number.isFinite(x) || !Number.isFinite(y))
+                        return null;
                       return { x, y };
                     })
                     .filter(
-                      (p: { x: number; y: number } | null): p is { x: number; y: number } =>
-                        p != null,
+                      (
+                        p: { x: number; y: number } | null,
+                      ): p is { x: number; y: number } => p != null,
                     );
                   return pts.length >= 3 ? pts : null;
                 })
@@ -1223,7 +1303,7 @@ function normalizeMapOverlays(
               if (polys.length) out.collision_polygons = polys;
             }
             return out;
-          })()),
+          })(),
         };
       })
       .filter((state): state is NonNullable<typeof state> => state != null);
@@ -1351,6 +1431,9 @@ export function mergeMapSidecars(
       ...(placements.characterPlacements?.length
         ? { characterPlacements: placements.characterPlacements }
         : {}),
+      ...(placements.propPlacements?.length
+        ? { propPlacements: placements.propPlacements }
+        : {}),
       ...(placements.hudPlacements?.length
         ? { hudPlacements: placements.hudPlacements }
         : {}),
@@ -1432,6 +1515,7 @@ export function toMapData(
     name: map.name,
     ...(generatedAssetContractVersion ? { generatedAssetContractVersion } : {}),
     characterPlacements: map.characterPlacements ?? [],
+    propPlacements: map.propPlacements ?? [],
     atmospherePlacements: map.atmospherePlacements ?? [],
     panel: {
       url: map.url,

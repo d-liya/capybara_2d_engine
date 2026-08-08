@@ -152,12 +152,30 @@ function injectLoadingStyles(): void {
       box-sizing: border-box;
     }
 
+    .cpy-loading-mascot {
+      display: block;
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      image-rendering: auto;
+      user-select: none;
+      pointer-events: none;
+    }
+
     .cpy-loading-logo-dim {
       color: #444;
     }
 
+    .cpy-loading-logo-dim .cpy-loading-mascot {
+      filter: grayscale(1) brightness(0.4);
+    }
+
     .cpy-loading-logo-bright {
       color: #fff;
+    }
+
+    .cpy-loading-logo.is-title .cpy-loading-mascot {
+      display: none;
     }
 
     .cpy-loading-brand {
@@ -328,6 +346,9 @@ function injectLoadingStyles(): void {
   document.head.appendChild(style);
 }
 
+const MASCOT_HEAD_URL =
+  "https://www.capybara.build/_next/image?url=%2Fmascot-capybara-head.png&w=48&q=75";
+
 interface TitleBlock {
   root: HTMLDivElement;
   brand: HTMLHeadingElement;
@@ -342,6 +363,15 @@ function createTitleBlock(
   const root = document.createElement("div");
   root.className = `cpy-loading-logo-content ${toneClass}`;
 
+  const mascot = document.createElement("img");
+  mascot.className = "cpy-loading-mascot";
+  mascot.src = MASCOT_HEAD_URL;
+  mascot.alt = "";
+  mascot.width = 48;
+  mascot.height = 48;
+  mascot.decoding = "async";
+  mascot.draggable = false;
+
   const brand = document.createElement("h1");
   brand.className = "cpy-loading-brand";
   brand.textContent = brandText;
@@ -350,6 +380,7 @@ function createTitleBlock(
   subtitle.className = "cpy-loading-subtitle";
   subtitle.textContent = subtitleText;
 
+  root.appendChild(mascot);
   root.appendChild(brand);
   root.appendChild(subtitle);
 
@@ -669,41 +700,50 @@ export function createCoreLoadingGate(
     resolvePromise();
   };
 
+  /**
+   * Title phase already looks clickable (`is-title` + cursor) before the
+   * crossfade finishes. Arm interaction as soon as that phase starts — not
+   * after the fade — so the first click/tap always dismisses. Listen on the
+   * overlay too: during `is-swapping` the logo has `pointer-events: none`.
+   */
   const enableContinue = () => {
     const onContinue = () => {
       emitContinueIfNeeded({ userActivated: true });
       resolveIfNeeded();
     };
 
-    // Both game title and bottom Continue dismiss the gate.
     logo.setAttribute("role", "button");
     logo.setAttribute("tabindex", "0");
     logo.setAttribute("aria-label", "Continue");
 
-    for (const target of [logo, continueBtn] as HTMLElement[]) {
-      target.addEventListener("click", onContinue, { once: true });
-      target.addEventListener(
-        "keydown",
-        (event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onContinue();
-          }
-        },
-        { once: true },
-      );
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onContinue();
+      }
+    };
+
+    for (const target of [overlay, logo, continueBtn] as HTMLElement[]) {
+      target.addEventListener("click", onContinue);
     }
+    logo.addEventListener("keydown", onKeyDown);
+    continueBtn.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown);
   };
 
   /**
    * 1. Capybara presents + letter wipe + progress bar (full load)
    * 2. When bar ends → opacity to game title (center)
-   * 3. Continue button fades in at the bottom
-   * 4. Clicking either the game title or Continue proceeds
+   * 3. Continue is armed immediately; bottom Continue fades in
+   * 4. Clicking the title, Continue, or anywhere on the overlay proceeds
    */
   const showTitleAndContinue = async () => {
     progress.classList.add("is-complete");
     status.classList.add("is-hidden");
+
+    // Accept the first continue gesture for the whole title transition —
+    // including clicks during the swap when the logo is not hit-testable.
+    enableContinue();
 
     logo.classList.add("is-swapping");
     await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
@@ -715,10 +755,7 @@ export function createCoreLoadingGate(
 
     await nextFrame();
     logo.classList.remove("is-swapping");
-    await waitForTransitionEnd(logo, "opacity", LOGO_CROSSFADE_MS);
-
     continueBtn.classList.add("is-visible");
-    enableContinue();
   };
 
   // Provisional crawl toward 100% over the ceiling; restarted once duration is known.

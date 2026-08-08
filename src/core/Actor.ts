@@ -231,9 +231,9 @@ export default class Actor {
   protected _isMoving: boolean;
   protected _facingX: number;
   /**
-   * True when sprite sheet names include directional clips
-   * (`walk_front`, `idle_back`, `walking_right`, …).
-   * Locomotion + facing are then handled in `_setMovementState`.
+   * True when sprite sheets cover 2+ distinct facings
+   * (`walk_front` + `walk_back`, etc.). Single-facing packs
+   * (`idle_front` + `walk_front`) stay in classic 2-way flip mode.
    */
   protected _directionalMode: boolean;
   /** Current cardinal facing (front = toward camera / +Y). */
@@ -338,11 +338,24 @@ export default class Actor {
     const moveKeys = allKeys.filter(
       (k) => k.includes("walk") || k.includes("run") || k.includes("walking"),
     );
-    this._moveAnimKey = moveKeys.length === 1 ? moveKeys[0] : this._idleAnimKey;
+    // Prefer a walk/run strip for classic 2-way move; don't collapse to idle
+    // just because multiple move sheet names exist.
+    this._moveAnimKey =
+      moveKeys.find(
+        (k) => k.includes("walk") || k.includes("walking") || k.includes("run"),
+      ) ??
+      moveKeys[0] ??
+      this._idleAnimKey;
 
-    // Directional mode: any clip named *_front / *_back / *_right / *_left
+    // Directional (4-way) mode only when distinct facings exist. A pack with
+    // only `idle_front` + `walk_front` is classic 2-way (flip with facingX).
     const directionalKeys = allKeys.filter((k) => parseFacingSuffix(k));
-    this._directionalMode = directionalKeys.length >= 2;
+    const uniqueFacings = new Set(
+      directionalKeys
+        .map((k) => parseFacingSuffix(k))
+        .filter((dir): dir is ActorFacingDir => dir != null),
+    );
+    this._directionalMode = uniqueFacings.size >= 2;
     this._hasDirectionalIdle = allKeys.some(
       (k) =>
         (k.startsWith("idle_") || k.includes("default_animation_")) &&
@@ -438,14 +451,30 @@ export default class Actor {
           ? [this._moveClipBase, "walk", "walking", "run"]
           : [clip, this._moveClipBase, "walk", "walking", "run"];
 
+    const facingOrder: ActorFacingDir[] = [
+      dir,
+      "front",
+      "right",
+      "back",
+      "left",
+    ];
+    const seenFacing = new Set<ActorFacingDir>();
+    const orderedFacings = facingOrder.filter((facing) => {
+      if (seenFacing.has(facing)) return false;
+      seenFacing.add(facing);
+      return true;
+    });
+
     const seen = new Set<string>();
     for (const base of bases) {
       if (!base || seen.has(base)) continue;
       seen.add(base);
-      const exact = `${base}_${dir}`;
-      if (this._animations[exact]) return exact;
+      for (const facing of orderedFacings) {
+        const exact = `${base}_${facing}`;
+        if (this._animations[exact]) return exact;
+      }
     }
-    // Any sheet for this facing (last resort)
+    // Any sheet for the requested facing (last resort)
     const any = Object.keys(this._animations).find(
       (k) => parseFacingSuffix(k) === dir,
     );
@@ -881,12 +910,17 @@ export default class Actor {
       return;
     }
 
-    // Classic 2-way: one idle strip + one walk strip, flip with facingX.
+    // Classic 2-way: idle vs walk strips, mirror with facingX.
     const nextAnimation = moving ? this._moveAnimKey : this._idleAnimKey;
     if (nextAnimation !== this._activeAnimation) {
       this._transitionToAnimation(nextAnimation);
     }
-    this._holdFrame = null;
+    // If idle reuses a walk/run strip (no dedicated idle art), freeze frame 0.
+    const idleIsMoveStrip =
+      this._idleAnimKey === this._moveAnimKey ||
+      this._idleAnimKey.includes("walk") ||
+      this._idleAnimKey.includes("run");
+    this._holdFrame = !moving && idleIsMoveStrip ? 0 : null;
     if (dx > MOVE_DIR_EPS) this._facingX = 1;
     if (dx < -MOVE_DIR_EPS) this._facingX = -1;
   }

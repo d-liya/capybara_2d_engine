@@ -1,7 +1,7 @@
 /**
  * Auto-wire a playable world from Maps-compiled `src/data/*` JSON.
  *
- * Spawns character placements, sets the controlled player, starts BGM,
+ * Spawns character and prop placements, sets the controlled player, starts BGM,
  * and binds a default interact action for state overlays / gameplay VFX /
  * enterable map transitions. Forward enterables also get a synthetic return
  * link at `destinationSpawnBox2d` when the destination map has no authored
@@ -16,6 +16,7 @@ import {
   stopAudio,
   type GameAPI,
   type GeneratedCharacterPlacement,
+  type GeneratedPropPlacement,
   type MapOverlayTarget,
   type MapPlacementTarget,
   type TouchControlsConfig,
@@ -391,6 +392,16 @@ function archetypeNameForAssetId(assetId: string): string {
   return trimmed.startsWith("char_") ? trimmed : `char_${trimmed}`;
 }
 
+function propArchetypeNameForAssetId(assetId: string): string {
+  const clean = assetId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 72);
+  return `prop_${clean || "unknown"}`;
+}
+
 function characterAssetId(entry: BootstrapCharacterEntry): string {
   const fromJson = (entry.character as { assetId?: unknown }).assetId;
   if (typeof fromJson === "string" && fromJson.trim()) return fromJson.trim();
@@ -590,6 +601,87 @@ const DEFAULT_AMBIENCE_VOLUME = 1;
 type CommonAudioClip = NonNullable<
   BootstrapWorldOptions["commonAudio"]
 >[number];
+
+type GeneratedCharacterDialogue = {
+  id?: string;
+  assetId?: string;
+  name?: string;
+  url?: string;
+  transcript?: string;
+};
+
+/**
+ * Character-owned dialogue is projected onto char_*.json rather than
+ * common.json. Register it with the runtime catalog here so gameplay code can
+ * call `game.getDialogue(assetId)` and play the returned `audioId` without
+ * copying hosted URLs or constructing HTMLAudioElement directly.
+ */
+function characterDialogueCatalog(
+  characters: BootstrapWorldOptions["characters"],
+): {
+  audio: Array<{
+    id: string;
+    name: string;
+    url: string;
+    kind: "voice";
+    role: "dialogue";
+    transcript?: string;
+    characterId: string;
+  }>;
+  dialogue: Array<{
+    id: string;
+    text: string;
+    audioId: string;
+    characterId: string;
+  }>;
+} {
+  const audio: Array<{
+    id: string;
+    name: string;
+    url: string;
+    kind: "voice";
+    role: "dialogue";
+    transcript?: string;
+    characterId: string;
+  }> = [];
+  const dialogue: Array<{
+    id: string;
+    text: string;
+    audioId: string;
+    characterId: string;
+  }> = [];
+
+  for (const entry of characters ?? []) {
+    const characterId = characterAssetId(entry);
+    const raw = entry.character as AnyGeneratedCharacter & {
+      dialogues?: GeneratedCharacterDialogue[];
+    };
+    for (const line of raw.dialogues ?? []) {
+      const id = line.assetId?.trim() || line.id?.trim() || "";
+      const url = line.url?.trim() || "";
+      if (!id || !url) continue;
+      const audioId = `dialogue_${id}`;
+      const transcript = line.transcript?.trim() || line.name?.trim() || "";
+      audio.push({
+        id,
+        name: audioId,
+        url,
+        kind: "voice",
+        role: "dialogue",
+        ...(transcript ? { transcript } : {}),
+        characterId,
+      });
+      dialogue.push({
+        id,
+        text: transcript,
+        audioId,
+        characterId,
+      });
+    }
+  }
+
+  return { audio, dialogue };
+}
 
 function clampVolume(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -844,6 +936,55 @@ function spawnMapCharacters(
   return toControl;
 }
 
+/**
+ * Spawn projected standalone props once for the active map. They are visual,
+ * queryable gameplay entities, not automatic collectibles or colliders: custom
+ * gameplay decides what interaction destroys, moves, hides, or reuses them.
+ */
+function spawnMapProps(
+  game: GameAPI,
+  map: GeneratedMap,
+  definedArchetypes: Set<string>,
+): void {
+  const placements = (map.propPlacements ?? []) as GeneratedPropPlacement[];
+  for (const placement of placements) {
+    if (!placement.assetId?.trim() || !placement.url?.trim()) continue;
+    if (!Array.isArray(placement.box_2d) || placement.box_2d.length < 4)
+      continue;
+    const box = placement.box_2d.slice(0, 4).map(Number);
+    if (!box.every(Number.isFinite)) continue;
+
+    const archetype = propArchetypeNameForAssetId(placement.assetId);
+    if (!definedArchetypes.has(archetype)) {
+      game.defineArchetype(archetype, {
+        imageUrl: placement.url,
+        imageFit: "contain",
+        kind: "prop",
+      });
+      definedArchetypes.add(archetype);
+    }
+
+    try {
+      game.placeProp(archetype, box, {
+        assetId: placement.assetId,
+        placementId: placement.placementId,
+        label: placement.label,
+        tooltip: placement.label,
+        kind: "prop",
+        mapLocal: true,
+        generatedPlacement: true,
+        movable: placement.movable === true,
+        ...(placement.gamePlay ? { gamePlay: placement.gamePlay } : {}),
+      });
+    } catch (err) {
+      console.warn(
+        `[bootstrapWorldFromAssets] prop spawn failed for "${placement.label}"`,
+        err,
+      );
+    }
+  }
+}
+
 function nearestOverlay(
   overlays: MapOverlayTarget[],
   x: number,
@@ -940,10 +1081,13 @@ function nearestEnterable(
 
 function cycleOverlayState(game: GameAPI, overlay: MapOverlayTarget): boolean {
   const states = overlay.states.filter(Boolean);
-  if (states.length < 2) return false;
+  if (states.length === 0) return false;
   const current = game.getMapOverlayState(overlay.id) ?? overlay.currentState;
-  const idx = Math.max(0, states.indexOf(current));
-  const next = states[(idx + 1) % states.length]!;
+  const idx = states.indexOf(current);
+  // Generated state overlays intentionally boot at "initial", which is not a
+  // generated state name. The first interaction must therefore activate
+  // states[0], including for the common one-state edit case.
+  const next = idx < 0 ? states[0]! : states[(idx + 1) % states.length]!;
   return game.setMapOverlayState(overlay.id, next);
 }
 
@@ -1260,6 +1404,7 @@ function handleDefaultInteract(
             spawnMapCharacters(game, opts, next.map, definedArchetypes, {
               preserveExistingPlayer: true,
             });
+            spawnMapProps(game, next.map, definedArchetypes);
             const nextAssetId =
               typeof next.map.assetId === "string" && next.map.assetId.trim()
                 ? next.map.assetId.trim()
@@ -1379,45 +1524,63 @@ export function bootstrapWorldFromAssets(
           }),
   });
 
-  if (opts.commonAudio?.length) {
+  const characterDialogues = characterDialogueCatalog(opts.characters);
+  if (opts.commonAudio?.length || characterDialogues.audio.length) {
     game.registerAudioCatalog({
       version: 1,
-      audio: opts.commonAudio.map((a, index) => {
-        const role =
-          a.role === "bgm" ||
-          a.role === "sfx" ||
-          a.role === "ambience" ||
-          a.role === "voice" ||
-          a.role === "dialogue" ||
-          a.role === "tts"
-            ? a.role
-            : undefined;
-        const kind =
-          a.kind === "bgm" || a.kind === "sfx" || a.kind === "voice"
-            ? a.kind
-            : role === "bgm" || role === "sfx" || role === "voice"
-              ? role
+      audio: [
+        ...(opts.commonAudio ?? []).map((a, index) => {
+          const role:
+            | "bgm"
+            | "sfx"
+            | "ambience"
+            | "voice"
+            | "dialogue"
+            | "tts"
+            | undefined =
+            a.role === "bgm" ||
+            a.role === "sfx" ||
+            a.role === "ambience" ||
+            a.role === "voice" ||
+            a.role === "dialogue" ||
+            a.role === "tts"
+              ? a.role
               : undefined;
-        const id =
-          (typeof a.id === "string" && a.id.trim()) ||
-          (typeof a.assetId === "string" && a.assetId.trim()) ||
-          a.name ||
-          `audio_${index}`;
-        return {
-          id,
-          name: a.name,
-          url: a.url,
-          role,
-          kind,
-          label: a.label,
-          transcript: a.transcript,
-          durationMs: a.durationMs,
-          parentAssetId: a.parentAssetId,
-          volume: a.volume,
-          autoplay: a.autoplay,
-          looping: a.looping,
-        };
-      }),
+          const kind: "bgm" | "sfx" | "ambience" | "voice" | undefined =
+            a.kind === "bgm" ||
+            a.kind === "sfx" ||
+            a.kind === "ambience" ||
+            a.kind === "voice"
+              ? a.kind
+              : role === "bgm" ||
+                  role === "sfx" ||
+                  role === "ambience" ||
+                  role === "voice"
+                ? role
+                : undefined;
+          const id =
+            (typeof a.id === "string" && a.id.trim()) ||
+            (typeof a.assetId === "string" && a.assetId.trim()) ||
+            a.name ||
+            `audio_${index}`;
+          return {
+            id,
+            name: a.name,
+            url: a.url,
+            role,
+            kind,
+            label: a.label,
+            transcript: a.transcript,
+            durationMs: a.durationMs,
+            parentAssetId: a.parentAssetId,
+            volume: a.volume,
+            autoplay: a.autoplay,
+            looping: a.looping,
+          };
+        }),
+        ...characterDialogues.audio,
+      ],
+      dialogue: characterDialogues.dialogue,
     });
   }
 
@@ -1468,6 +1631,7 @@ export function bootstrapWorldFromAssets(
   }
 
   spawnMapCharacters(game, opts, start.map, definedArchetypes);
+  spawnMapProps(game, start.map, definedArchetypes);
 
   const activeBgmRef = { name: null as string | null };
   const transitionState = { busy: false };

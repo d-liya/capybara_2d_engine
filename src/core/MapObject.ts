@@ -162,6 +162,8 @@ export default class MapObject {
   private _obstacleInBackground: boolean;
   private _suppressStaticVisuals: boolean;
   private _suppressObstacleVisual: boolean;
+  /** Collision-only masks never expose obstacle art when overlays toggle. */
+  private _obstacleVisualLocked: boolean;
   /** Cleared by `kind: "erase"` mapOverlays that cover this sprite. */
   private _collisionDisabled: boolean;
   /** State/grid overlay with local collision temporarily owns walkability. */
@@ -241,8 +243,9 @@ export default class MapObject {
     this._suppressStaticVisuals =
       options.suppressStaticVisuals === true ||
       Boolean(data.spriteSheetUrl?.trim());
+    this._obstacleVisualLocked = collisionOnly;
     this._suppressObstacleVisual =
-      options.suppressObstacleVisual === true || collisionOnly;
+      options.suppressObstacleVisual === true || this._obstacleVisualLocked;
     this._collisionDisabled = false;
     this._overlayOwnsCollision = false;
     this._visualSuppressed = false;
@@ -308,7 +311,10 @@ export default class MapObject {
           });
       }
 
-      if (obstacleUrl && !this._suppressObstacleVisual) {
+      // Keep the cut-out loaded even when an active replacement overlay hides
+      // it. State overlays can return to "initial", at which point the base
+      // Y-sorted sprite must become visible again without a reload race.
+      if (obstacleUrl) {
         loadImage(obstacleUrl)
           .then((image) => {
             this._obstacleImage = image;
@@ -345,7 +351,11 @@ export default class MapObject {
    */
   suppressObstacleVisual(): void {
     this._suppressObstacleVisual = true;
-    this._obstacleImage = null;
+  }
+
+  /** Restore the extracted cut-out after a replacement overlay turns off. */
+  restoreObstacleVisual(): void {
+    this._suppressObstacleVisual = this._obstacleVisualLocked;
   }
 
   /**
