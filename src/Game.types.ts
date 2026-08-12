@@ -163,6 +163,68 @@ export interface PathPoint {
   y: number;
 }
 
+/** Built-in impact profiles used by {@link GameAPI.applyCombatImpact}. */
+export type CombatImpactKind = "light" | "heavy" | "player";
+
+/**
+ * One resolved combat contact. Damage and collision ownership remain in game
+ * code; this method supplies the immediate, tactile feedback after that hit is
+ * confirmed.
+ */
+export interface CombatImpactOptions {
+  /** Entity that was struck. */
+  targetId: EntityId;
+  /** Optional source; used to derive knockback direction. */
+  attackerId?: EntityId;
+  /** Exact normalized-world contact point. Defaults to the target centre. */
+  point?: PathPoint;
+  /** `player` includes brief invulnerability and a hard red edge flash. */
+  kind?: CombatImpactKind;
+  /** Optional generated/common SFX name played at contact. */
+  sound?: string;
+  /** Override the preset hitstop duration. Set 0 for none. */
+  hitstopMs?: number;
+  /** Override the preset camera trauma (0–1). Set 0 for none. */
+  trauma?: number;
+  /** Override the normalized-units-per-second knockback impulse. */
+  knockback?: number;
+  /** Override the target's white flash duration. */
+  flashMs?: number;
+  /** Override the short hurt lockout / knockback duration. */
+  stunMs?: number;
+  /** Player-only i-frame duration. Set 0 to opt out. */
+  invulnerableMs?: number;
+}
+
+/** Tunable defaults for each impact kind. Copy and override per game if needed. */
+export const DEFAULT_COMBAT_IMPACTS = {
+  light: {
+    hitstopMs: 35,
+    trauma: 0.12,
+    knockback: 120,
+    flashMs: 70,
+    stunMs: 110,
+    shakeMagnitude: 2,
+  },
+  heavy: {
+    hitstopMs: 90,
+    trauma: 0.38,
+    knockback: 280,
+    flashMs: 115,
+    stunMs: 210,
+    shakeMagnitude: 5,
+  },
+  player: {
+    hitstopMs: 60,
+    trauma: 0.24,
+    knockback: 180,
+    flashMs: 105,
+    stunMs: 180,
+    shakeMagnitude: 4,
+    invulnerableMs: 900,
+  },
+} as const;
+
 /** Public Game facade type. Same pattern as PathPoint. */
 export type FindPathStatus = "found" | "blocked" | "unreachable";
 
@@ -345,18 +407,19 @@ export interface LoadMapOptions {
 }
 
 /**
- * Options for `game.transitionMap` — soft dim, mid-fade work, load map, lift.
- * Defaults are a light blink (not a full theatrical blackout) since enterables
- * already show a Press E prompt.
+ * Options for `game.transitionMap` — a circular iris closes at the departure
+ * point, map-local work happens under the cover, then it opens at the spawn.
  */
 export interface TransitionMapOptions extends LoadMapOptions {
-  /** One-way fade duration in ms (default 140). */
+  /** One-way iris/fade duration in ms (default 260). */
   fadeMs?: number;
   /**
    * Peak overlay opacity while the map swaps (0–1, default 0.45).
-   * Use `1` for a full black cut when you want a heavier beat.
+   * Used only with `transitionStyle: "fade"`; use `1` for a full cut.
    */
   peakOpacity?: number;
+  /** Use the legacy stepped dim instead of the default circular iris. */
+  transitionStyle?: "iris" | "fade";
   /**
    * Runs at peak dim. Call `swap()` to apply `loadMap` (with `spawn`).
    * Clear map-local entities before `swap()`; respawn after.
@@ -548,7 +611,7 @@ export interface GameMapPanelData {
  * `src/data` instead of hand-building `panel`.
  *
  * Each `GameMapData` is one self-contained map. Swap maps with
- * `game.transitionMap(toMapData(...))` (fade) or `game.loadMap(...)` (instant).
+ * `game.transitionMap(toMapData(...))` (iris) or `game.loadMap(...)` (instant).
  */
 export interface GameMapData extends GameMapPanelData {
   name?: string;
@@ -802,10 +865,22 @@ export interface GameAPI {
   getDialogue(id: string): GeneratedDialogueEntry | undefined;
 
   /**
+   * Trigger the engine's default hit feedback after gameplay confirms a hit:
+   * hitstop, trauma-based camera shake, target flash, impact burst, knockback,
+   * optional SFX, and player i-frames/hurt frame.
+   *
+   * This does not change HP; combat systems retain ownership of damage rules.
+   */
+  applyCombatImpact(options: CombatImpactOptions): void;
+
+  /** Whether the entity is within the i-frame window set by a player impact. */
+  isEntityInvulnerable(id: EntityId): boolean;
+
+  /**
    * Replace the current map with another isolated map (instant).
    *
-   * Prefer `transitionMap` for doors / room travel — soft dim by default.
-   * Use raw `loadMap` for tools, tests, or when you already own the fade.
+   * Prefer `transitionMap` for doors / room travel — a circular iris by default.
+   * Use raw `loadMap` for tools, tests, or when you already own the transition.
    *
    * Existing resources, widgets, archetypes, and entities are preserved. Destroy
    * and respawn map-local entities in gameplay code if needed.
@@ -818,11 +893,13 @@ export interface GameAPI {
   loadMap(map: GameMapData, options?: LoadMapOptions): void;
 
   /**
-   * Soft dim, swap to another isolated map, then lift.
+   * Circular iris, swap to another isolated map, then open from the arrival.
    *
-   * Default door/room travel path (light blink — not a full blackout). Mid-fade
+   * Default door/room travel path. The iris closes around the player and opens
+   * at their destination. Mid-transition
    * work (clear `mapLocal`, respawn, audio) goes in `during` — call `swap()`
-   * when you want `loadMap` to run. Pass `peakOpacity: 1` for a hard cut.
+   * when you want `loadMap` to run. Pass `transitionStyle: "fade"` only for a
+   * deliberate legacy dim/cut.
    *
    * @example
    * await game.transitionMap(toMapData(mapExterior), {

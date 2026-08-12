@@ -1634,6 +1634,7 @@ export function bootstrapWorldFromAssets(
   spawnMapProps(game, start.map, definedArchetypes);
 
   const activeBgmRef = { name: null as string | null };
+  const activeAmbienceRef = new Set<string>();
   const transitionState = { busy: false };
   const arrivalRef = {
     mapId: null as string | null,
@@ -1676,15 +1677,20 @@ export function bootstrapWorldFromAssets(
       playClip(nextBgm, { loop: true, defaultVolume: DEFAULT_BGM_VOLUME });
     }
 
-    for (const bed of findMapAudio(opts.commonAudio, mapAssetId, "ambience")) {
-      if (bed.autoplay !== true) {
-        stopNamedAudio(bed.name);
-        continue;
-      }
+    const nextAmbience = findMapAudio(opts.commonAudio, mapAssetId, "ambience")
+      .filter((bed) => bed.autoplay === true);
+    const nextAmbienceNames = new Set(nextAmbience.map((bed) => bed.name));
+    for (const name of activeAmbienceRef) {
+      if (nextAmbienceNames.has(name)) continue;
+      stopNamedAudio(name);
+      activeAmbienceRef.delete(name);
+    }
+    for (const bed of nextAmbience) {
       playClip(bed, {
         loop: bed.looping !== false,
         defaultVolume: DEFAULT_AMBIENCE_VOLUME,
       });
+      activeAmbienceRef.add(bed.name);
     }
 
     for (const sfx of findMapAudio(opts.commonAudio, mapAssetId, "sfx")) {

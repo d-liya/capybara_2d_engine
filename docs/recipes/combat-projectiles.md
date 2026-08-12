@@ -245,7 +245,37 @@ For rectangular actors, store explicit `hitBox` or use `width`/`height` conventi
 
 ## Hit feedback effects
 
-The engine renders short visual feedback when gameplay patches these transient entity fields:
+Use one built-in call immediately after your combat code confirms and applies a
+hit. It keeps damage ownership in your game while making the physical feedback
+consistent everywhere:
+
+```ts
+const hp = Number(enemy.hp ?? 1) - Number(projectile.damage ?? 1);
+api.patch(enemyId, { hp });
+api.applyCombatImpact({
+  attackerId: playerId,
+  targetId: enemyId,
+  kind: hp <= 0 ? "heavy" : "light",
+  sound: "impact_hit", // optional: use a real name from src/data/common.json
+});
+```
+
+`applyCombatImpact` supplies the defaults described in the combat-feel guide:
+
+- trauma-squared camera shake and a short hitstop frame;
+- target flash and local sprite jitter;
+- a palette-safe impact burst at the contact point;
+- a decaying directional knockback impulse and brief hurt lockout;
+- optional impact SFX; and
+- on `kind: "player"`, hard screen-edge feedback, BGM ducking, sprite blink,
+  and `invulnerableUntilMs` i-frames.
+
+The defaults live in `DEFAULT_COMBAT_IMPACTS`, exported from `src/Game.ts`.
+Override one field on a specific contact (`hitstopMs`, `trauma`, `knockback`,
+`flashMs`, `stunMs`, or `invulnerableMs`) instead of duplicating the pipeline.
+
+The lower-level transient fields remain available when a special enemy needs a
+custom visual treatment:
 
 ```ts
 const now = performance.now();
@@ -268,7 +298,14 @@ Supported fields:
 
 These fields work on animated actor entities and static image entities. They are intentionally transient runtime feedback; do not save them in persistent save payloads.
 
-For melee attacks, apply the same patch when range/aim checks succeed. For player damage, patch the controlled player id to show the impact.
+For melee attacks, call `applyCombatImpact` when range/aim checks succeed. For
+player contact damage, ignore the hit while the controlled player has i-frames:
+
+```ts
+if (api.isEntityInvulnerable(playerId)) return;
+api.patch(playerId, { hp: Math.max(0, Number(player.hp ?? 1) - 1) });
+api.applyCombatImpact({ attackerId: enemyId, targetId: playerId, kind: "player" });
+```
 
 ## Cooldowns and reloads
 

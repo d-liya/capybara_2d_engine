@@ -67,15 +67,15 @@ function isTouchPrimaryDevice(): boolean {
 }
 
 /**
- * World-aligned enterable-zone affordance: soft floor glow + "Press E to enter"
- * (or tap on touch) prompt. Non-interactive — does not block movement.
+ * World-aligned enterable-zone affordance: a crisp location label and compact
+ * key cue. Non-interactive — it never blocks movement.
  */
 export function createMapTransitionPromptWidget(
   options?: WidgetMountOptions,
 ): Widget {
   let root: HTMLDivElement | null = null;
-  let glowEl: HTMLDivElement | null = null;
   let promptEl: HTMLDivElement | null = null;
+  let locationEl: HTMLDivElement | null = null;
   let keyBadgeEl: HTMLSpanElement | null = null;
   let textEl: HTMLSpanElement | null = null;
   let lastFullText = "";
@@ -96,45 +96,43 @@ export function createMapTransitionPromptWidget(
       root = document.createElement("div");
       root.className = "absolute inset-0 pointer-events-none overflow-hidden";
 
-      glowEl = document.createElement("div");
-      glowEl.className =
-        "absolute left-0 top-0 opacity-0 will-change-[transform,opacity]";
-
-      const glowInner = document.createElement("div");
-      glowInner.className = "capy-glow-pool h-full w-full";
-      glowEl.appendChild(glowInner);
-
       promptEl = document.createElement("div");
       promptEl.className = [
-        "absolute left-0 top-0 flex max-w-[min(280px,calc(100vw-24px))] items-center gap-2",
-        "capy-panel capy-fade px-3 py-2",
+        "absolute left-0 top-0 flex max-w-[min(280px,calc(100vw-24px))] flex-col items-center gap-1",
+        "capy-fade px-2 py-1",
         "font-['Geist Pixel',_sans-serif]",
         "opacity-0 will-change-[transform,opacity]",
       ].join(" ");
 
+      locationEl = document.createElement("div");
+      locationEl.className = "capy-world-label text-center text-[13px] leading-tight";
+
       keyBadgeEl = document.createElement("span");
       keyBadgeEl.className = [
-        "capy-key inline-flex min-w-[1.6rem] items-center justify-center",
-        "px-1.5 py-0.5 text-[11px] font-normal tracking-wide",
+        "capy-world-key text-[11px] font-normal tracking-wide",
       ].join(" ");
       keyBadgeEl.textContent = "E";
 
       textEl = document.createElement("span");
-      textEl.className = "capy-text text-[13px] font-normal leading-snug";
+      textEl.className = "capy-world-action text-[15px] font-normal leading-snug";
 
-      promptEl.append(keyBadgeEl, textEl);
-      root.append(glowEl, promptEl);
+      const actionEl = document.createElement("div");
+      actionEl.className = "flex items-center gap-2";
+      const arrowEl = document.createElement("div");
+      arrowEl.className = "capy-world-arrow";
+      actionEl.append(keyBadgeEl, textEl);
+      promptEl.append(locationEl, actionEl, arrowEl);
+      root.append(promptEl);
 
       return root;
     },
     update: ({ game, hudRoot, canvas, now }) => {
-      if (!root || !glowEl || !promptEl || !textEl || !keyBadgeEl) return;
+      if (!root || !promptEl || !locationEl || !textEl || !keyBadgeEl) return;
 
       const state = getPromptState(
         game as { getResource<T = unknown>(name: string): T },
       );
       if (!state?.active || !state.bounds) {
-        glowEl.style.opacity = "0";
         promptEl.style.opacity = "0";
         return;
       }
@@ -155,26 +153,12 @@ export function createMapTransitionPromptWidget(
       const top = Math.min(topLeft.y, bottomRight.y);
       const width = Math.max(24, Math.abs(bottomRight.x - topLeft.x));
       const height = Math.max(18, Math.abs(bottomRight.y - topLeft.y));
-      // Soft pad so the glow reads as a floor halo under the door, not a tight box.
-      const padX = width * 0.35;
-      const padY = height * 0.55;
-      const glowW = width + padX * 2;
-      const glowH = Math.max(height * 0.7, height + padY);
-      const glowX = left - padX;
-      const glowY = top + height - glowH * 0.55;
-
-      glowEl.style.width = `${Math.round(glowW)}px`;
-      glowEl.style.height = `${Math.round(glowH)}px`;
-      glowEl.style.transform = `translate3d(${Math.round(glowX)}px, ${Math.round(glowY)}px, 0)`;
-      glowEl.style.opacity = "1";
-
       const touch = isTouchPrimaryDevice();
-      keyBadgeEl.textContent = "E";
+      keyBadgeEl.textContent = touch ? "Tap" : "E";
+      locationEl.textContent = state.label;
+      locationEl.hidden = !state.label;
       const fullText =
-        state.promptText ||
-        (touch
-          ? `Tap E to enter${state.label ? `: ${state.label}` : ""}`
-          : `Press E to enter${state.label ? `: ${state.label}` : ""}`);
+        state.promptText || "Enter";
 
       if (lastFullText !== fullText) {
         lastFullText = fullText;

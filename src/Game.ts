@@ -1,5 +1,12 @@
 import GameMap from "./core/GameMap";
 import GameRuntime from "./core/GameRuntime";
+import {
+  COMBAT_FEEDBACK_RESOURCE,
+  createCombatFeedbackState,
+  createCombatFeedbackWidget,
+  type CombatFeedbackState,
+} from "./widgets/CombatFeedbackWidget";
+import { createNpcBubbleWidget } from "./widgets/NpcBubbleWidget";
 import { createTooltipWidget } from "./widgets/TooltipWidget";
 import { createTouchControlsWidget } from "./widgets/TouchControlsWidget";
 import {
@@ -21,6 +28,7 @@ export {
   getAudio,
   getAudioEntry,
   getAudioUrl,
+  duckAudioChannel,
   listAudioNames,
   playAudio,
   playDialogue,
@@ -46,9 +54,11 @@ export {
 } from "./data/props";
 
 export type * from "./Game.types";
+export { DEFAULT_COMBAT_IMPACTS } from "./Game.types";
 
 import {
   getAudioEntry,
+  duckAudioChannel,
   playAudio as corePlayAudio,
   registerAudioAssets,
   stopAudio as coreStopAudio,
@@ -60,6 +70,7 @@ import type { CommonAssetEntry, CommonAssetRole } from "./data/common";
 import type {
   AudioPlaybackHandle,
   AudioPlayOptions,
+  CombatImpactOptions,
   GameAPI,
   GameConfig,
   GeneratedAssetCatalog,
@@ -68,7 +79,8 @@ import type {
   LoadMapOptions,
   TransitionMapOptions,
 } from "./Game.types";
-import { runScreenFade } from "./utils/screenFade";
+import { DEFAULT_COMBAT_IMPACTS } from "./Game.types";
+import { runScreenFade, type ScreenTransitionOrigin } from "./utils/screenFade";
 
 const dialogueById = new Map<string, GeneratedDialogueEntry>();
 
@@ -185,7 +197,15 @@ export function createGame(config: GameConfig): GameAPI {
   });
 
   // Default widgets mounted here
+  runtime.registerResource(
+    COMBAT_FEEDBACK_RESOURCE,
+    createCombatFeedbackState(),
+  );
+  runtime.registerWidget(createCombatFeedbackWidget);
   runtime.registerWidget(createTooltipWidget);
+  // NPC barks and thoughts are world feedback, so their renderer belongs to
+  // the base HUD rather than requiring every scene to remember to mount it.
+  runtime.registerWidget(createNpcBubbleWidget);
   if (config.touchControls !== false) {
     const touchOptions =
       config.touchControls && typeof config.touchControls === "object"
@@ -221,6 +241,30 @@ export function createGame(config: GameConfig): GameAPI {
         nextStaticWorldContext,
       );
     }
+  };
+
+  const transitionOriginFor = (
+    spawn?: LoadMapOptions["spawn"],
+  ): ScreenTransitionOrigin => {
+    const canvas = document.getElementById(config.canvasId) as HTMLCanvasElement | null;
+    const canvasRect = canvas?.getBoundingClientRect();
+    let x = spawn?.x;
+    let y = spawn?.y;
+
+    if (x === undefined || y === undefined) {
+      const controlled = runtime.getControlledEntity();
+      const entity = controlled ? runtime.get(controlled) : null;
+      if (entity) {
+        x = Number(entity.x ?? 500) + Number(entity.width ?? 0) / 2;
+        y = Number(entity.y ?? 500) + Number(entity.height ?? 0);
+      }
+    }
+
+    if (x === undefined || y === undefined || !canvasRect) {
+      return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    }
+    const point = runtime.normalizedToCanvasPoint(x, y);
+    return { x: canvasRect.left + point.x, y: canvasRect.top + point.y };
   };
 
   const api: GameAPI = {
@@ -275,12 +319,87 @@ export function createGame(config: GameConfig): GameAPI {
       }
       return undefined;
     },
+    applyCombatImpact: (options: CombatImpactOptions) => {
+      const target = runtime.get(options.targetId);
+      if (!target) return;
+
+      const controlled = runtime.getControlledEntity();
+      const kind = options.kind ??
+        (options.targetId === controlled ? "player" : "light");
+      const preset = DEFAULT_COMBAT_IMPACTS[kind];
+      const now = performance.now();
+      const targetX = Number(target.x ?? 0) + Number(target.width ?? 0) / 2;
+      const targetY = Number(target.y ?? 0) + Number(target.height ?? 0) / 2;
+      const attacker = options.attackerId ? runtime.get(options.attackerId) : null;
+      const attackerX = attacker
+        ? Number(attacker.x ?? targetX) + Number(attacker.width ?? 0) / 2
+        : targetX - Number(target.facingX ?? 1);
+      const attackerY = attacker
+        ? Number(attacker.y ?? targetY) + Number(attacker.height ?? 0) / 2
+        : targetY;
+      let directionX = targetX - attackerX;
+      let directionY = targetY - attackerY;
+      const directionLength = Math.hypot(directionX, directionY) || 1;
+      directionX /= directionLength;
+      directionY /= directionLength;
+
+      const hitstopMs = options.hitstopMs ?? preset.hitstopMs;
+      const trauma = options.trauma ?? preset.trauma;
+      const flashMs = options.flashMs ?? preset.flashMs;
+      const stunMs = options.stunMs ?? preset.stunMs;
+      const knockback = options.knockback ?? preset.knockback;
+      const shakeMagnitude = preset.shakeMagnitude;
+      const contact = options.point ?? { x: targetX, y: targetY };
+
+      runtime.patchEntity(options.targetId, {
+        hitFlashUntilMs: now + Math.max(0, flashMs),
+        hitShakeUntilMs: now + Math.max(0, stunMs),
+        hitGlitchUntilMs: kind === "heavy" ? now + 55 : 0,
+        hitFlashIntensity: kind === "heavy" ? 1 : 0.78,
+        hitShakeMagnitude: shakeMagnitude,
+        hurtUntilMs: now + Math.max(0, stunMs),
+        impactVelocityX: directionX * Math.max(0, knockback),
+        impactVelocityY: directionY * Math.max(0, knockback),
+        impactImpulseUntilMs: now + Math.max(0, stunMs),
+      });
+      runtime.addHitstop(hitstopMs);
+      runtime.addCameraTrauma(trauma);
+      runtime.addImpactBurst(
+        contact.x,
+        contact.y,
+        directionX,
+        directionY,
+        kind === "heavy",
+      );
+
+      if (kind === "player") {
+        const invulnerableMs = options.invulnerableMs ??
+          DEFAULT_COMBAT_IMPACTS.player.invulnerableMs;
+        runtime.patchEntity(options.targetId, {
+          invulnerableUntilMs: now + Math.max(0, invulnerableMs),
+        });
+        const feedback = runtime.getResource<CombatFeedbackState>(
+          COMBAT_FEEDBACK_RESOURCE,
+        );
+        feedback.playerHurtUntilMs = Math.max(
+          feedback.playerHurtUntilMs,
+          now + Math.max(0, flashMs + 70),
+        );
+        duckAudioChannel("bgm", 0.7, 140);
+      }
+
+      if (options.sound) {
+        corePlayAudio(options.sound, { channel: "sfx", restart: true });
+      }
+    },
+    isEntityInvulnerable: (id) => runtime.isEntityInvulnerable(id),
     loadMap: (mapData, options = {}) => {
       applyLoadMap(mapData, options);
     },
     transitionMap: async (mapData, options = {}) => {
-      const { during, fadeMs, peakOpacity, ...loadOptions } =
+      const { during, fadeMs, peakOpacity, transitionStyle, ...loadOptions } =
         options as TransitionMapOptions;
+      const closeOrigin = transitionOriginFor();
       await runScreenFade(
         () => {
           const swap = () => {
@@ -292,7 +411,15 @@ export function createGame(config: GameConfig): GameAPI {
             swap();
           }
         },
-        { fadeMs, peakOpacity },
+        {
+          fadeMs,
+          peakOpacity,
+          style: transitionStyle,
+          closeOrigin,
+          // Resolve after the map and player spawn are swapped, so the opening
+          // iris expands from the destination rather than the old camera.
+          openOrigin: () => transitionOriginFor(loadOptions.spawn),
+        },
       );
     },
     defineArchetype: (name, defaults) => {

@@ -131,6 +131,16 @@ interface PendingFeetAnchorPlacement {
   usedY: number;
 }
 
+interface ImpactBurst {
+  x: number;
+  y: number;
+  directionX: number;
+  directionY: number;
+  startedAtMs: number;
+  untilMs: number;
+  heavy: boolean;
+}
+
 const KEY_MAP: Record<string, keyof MovementInput> = {
   ArrowUp: "up",
   KeyW: "up",
@@ -197,6 +207,12 @@ export default class GameRuntime {
   private _pathGridCache: Map<string, PathfindingGrid>;
   private _entityNavigation: Map<EntityId, EntityNavigationState>;
   private _entitySpawnTimes: Map<EntityId, number>;
+  private _hitstopUntilMs: number;
+  private _hitstopRenderNowMs: number;
+  private _cameraTrauma: number;
+  private _cameraShakeX: number;
+  private _cameraShakeY: number;
+  private _impactBursts: ImpactBurst[];
 
   constructor(
     canvasId: string,
@@ -272,6 +288,12 @@ export default class GameRuntime {
     this._pathGridCache = new Map();
     this._entityNavigation = new Map();
     this._entitySpawnTimes = new Map();
+    this._hitstopUntilMs = 0;
+    this._hitstopRenderNowMs = 0;
+    this._cameraTrauma = 0;
+    this._cameraShakeX = 0;
+    this._cameraShakeY = 0;
+    this._impactBursts = [];
 
     this.registerResource(UI_RESOURCE, createDefaultUiState());
     this.input = new InputController(this, KEY_MAP);
@@ -638,6 +660,47 @@ export default class GameRuntime {
     return this.getEntity(id);
   }
 
+  /** Freeze simulation briefly while leaving rendering and camera shake alive. */
+  addHitstop(durationMs: number): void {
+    const duration = Math.max(0, Math.round(durationMs));
+    if (!duration) return;
+    const now = performance.now();
+    this._hitstopRenderNowMs = now;
+    this._hitstopUntilMs = Math.max(this._hitstopUntilMs, now + duration);
+  }
+
+  /** Add non-linear camera trauma. Values are clamped to the 0–1 range. */
+  addCameraTrauma(amount: number): void {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    this._cameraTrauma = Math.min(1, this._cameraTrauma + amount);
+  }
+
+  /** Queue a palette-safe built-in impact burst at a normalized world point. */
+  addImpactBurst(
+    x: number,
+    y: number,
+    directionX: number,
+    directionY: number,
+    heavy = false,
+  ): void {
+    const length = Math.hypot(directionX, directionY) || 1;
+    const now = performance.now();
+    this._impactBursts.push({
+      x,
+      y,
+      directionX: directionX / length,
+      directionY: directionY / length,
+      startedAtMs: now,
+      untilMs: now + (heavy ? 150 : 95),
+      heavy,
+    });
+  }
+
+  isEntityInvulnerable(id: EntityId): boolean {
+    const entity = this._entities.get(id);
+    return Number(entity?.invulnerableUntilMs ?? 0) > performance.now();
+  }
+
   getEntityFeet(id: EntityId): PathPoint | null {
     const entity = this._entities.get(id);
     if (!entity) return null;
@@ -664,8 +727,8 @@ export default class GameRuntime {
     const worldX = (normalizedX / NORM) * this.cameraController.panelPixelWidth;
     const worldY =
       (normalizedY / NORM) * this.cameraController.panelPixelHeight;
-    const canvasX = worldX * this.camera.zoom + this.camera.x;
-    const canvasY = worldY * this.camera.zoom + this.camera.y;
+    const canvasX = worldX * this.camera.zoom + this.camera.x + this._cameraShakeX;
+    const canvasY = worldY * this.camera.zoom + this.camera.y + this._cameraShakeY;
     const scale = this.viewport.cssScale ?? 1;
 
     return {
@@ -689,8 +752,10 @@ export default class GameRuntime {
       1;
     const canvasX = (clientX - rect.left) / scale;
     const canvasY = (clientY - rect.top) / scale;
-    const worldPixelX = (canvasX - this.camera.x) / this.camera.zoom;
-    const worldPixelY = (canvasY - this.camera.y) / this.camera.zoom;
+    const worldPixelX =
+      (canvasX - this.camera.x - this._cameraShakeX) / this.camera.zoom;
+    const worldPixelY =
+      (canvasY - this.camera.y - this._cameraShakeY) / this.camera.zoom;
     const x = (worldPixelX / this.map.panelPixelWidth) * NORM;
     const y = (worldPixelY / this.map.panelPixelHeight) * NORM;
 
@@ -1118,6 +1183,92 @@ export default class GameRuntime {
     this.cameraFollowEnabled = this.cameraController.cameraFollowEnabled;
   }
 
+  private _updateImpactImpulses(dt: number, now: number): void {
+    for (const [id, entity] of this._entities) {
+      const until = Number(entity.impactImpulseUntilMs);
+      const vx = Number(entity.impactVelocityX);
+      const vy = Number(entity.impactVelocityY);
+      if (!Number.isFinite(until) || until <= now) {
+        if (
+          (Number.isFinite(vx) && Math.abs(vx) > 0.001) ||
+          (Number.isFinite(vy) && Math.abs(vy) > 0.001)
+        ) {
+          this.patchEntity(id, { impactVelocityX: 0, impactVelocityY: 0 });
+        }
+        continue;
+      }
+      if (!Number.isFinite(vx) && !Number.isFinite(vy)) continue;
+      const x = Number(entity.x ?? 0) + (Number.isFinite(vx) ? vx : 0) * dt;
+      const y = Number(entity.y ?? 0) + (Number.isFinite(vy) ? vy : 0) * dt;
+      // Fast exponential falloff makes this an impulse, not a second movement mode.
+      const damping = Math.pow(0.018, dt);
+      this.patchEntity(id, {
+        x,
+        y,
+        renderY: y + Number(entity.height ?? 0),
+        impactVelocityX: (Number.isFinite(vx) ? vx : 0) * damping,
+        impactVelocityY: (Number.isFinite(vy) ? vy : 0) * damping,
+      });
+    }
+  }
+
+  private _updateCameraShake(dt: number, now: number): void {
+    this._cameraTrauma = Math.max(0, this._cameraTrauma - dt * 2.8);
+    const amount = this._cameraTrauma * this._cameraTrauma;
+    if (!amount) {
+      this._cameraShakeX = 0;
+      this._cameraShakeY = 0;
+      return;
+    }
+    // Two incommensurate stepped waves avoid a repeated left/right wobble.
+    const phase = now * 0.075;
+    this._cameraShakeX = Math.round(Math.sin(phase * 1.71) * 12 * amount);
+    this._cameraShakeY = Math.round(Math.cos(phase * 2.29) * 8 * amount);
+  }
+
+  private _drawImpactBursts(
+    ctx: CanvasRenderingContext2D,
+    now: number,
+    worldNormW: number,
+    worldNormH: number,
+    worldPixelW: number,
+    worldPixelH: number,
+  ): void {
+    this._impactBursts = this._impactBursts.filter((burst) => burst.untilMs > now);
+    for (const burst of this._impactBursts) {
+      const progress = Math.min(
+        1,
+        Math.max(0, (now - burst.startedAtMs) / (burst.untilMs - burst.startedAtMs)),
+      );
+      const alpha = progress < 0.34 ? 1 : progress < 0.68 ? 0.66 : 0.33;
+      const point = toPixel(
+        burst.x,
+        burst.y,
+        worldNormW,
+        worldNormH,
+        worldPixelW,
+        worldPixelH,
+      );
+      const reach = (burst.heavy ? 28 : 18) * (1 - progress * 0.35);
+      const sideX = -burst.directionY;
+      const sideY = burst.directionX;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "#fffbed";
+      ctx.fillRect(point.x - 4, point.y - 4, 8, 8);
+      ctx.fillStyle = "#efa950";
+      for (const side of [-1, 1]) {
+        ctx.fillRect(
+          Math.round(point.x + burst.directionX * reach + sideX * side * reach * 0.45) - 3,
+          Math.round(point.y + burst.directionY * reach + sideY * side * reach * 0.45) - 3,
+          6,
+          6,
+        );
+      }
+      ctx.restore();
+    }
+  }
+
   _loop(now: number): void {
     if (this._destroyed) {
       return;
@@ -1135,12 +1286,20 @@ export default class GameRuntime {
       this.clearMovementInput();
     }
 
-    this._updatePlayer(controlsBlocked ? NO_MOVEMENT_INPUT : this.keys, dt);
-    this._updateNavigation(dt);
-    for (const system of this._systems.values()) {
-      system(dt, this);
+    const hitstopped = now < this._hitstopUntilMs;
+    if (!hitstopped) {
+      this._updatePlayer(controlsBlocked ? NO_MOVEMENT_INPUT : this.keys, dt);
+      this._updateNavigation(dt);
+      this._updateImpactImpulses(dt, now);
+      for (const system of this._systems.values()) {
+        system(dt, this);
+      }
+      this._updateCamera(dt);
     }
-    this._updateCamera(dt);
+    // Trauma uses real time so the camera continues to sell the force during
+    // a hitstop frame while actors and gameplay remain frozen.
+    this._updateCameraShake(dt, now);
+    const renderNow = hitstopped ? this._hitstopRenderNowMs : now;
 
     const dpr = this.viewport.devicePixelRatio || 1;
 
@@ -1155,13 +1314,13 @@ export default class GameRuntime {
     // Keep gameplay/camera math as floats, but snap the final render transform
     // to device pixels so connected panels and props don't shimmer or expose
     // subpixel seams while the camera follows the player.
-    const snapX = Math.round(this.camera.x * dpr) / dpr;
-    const snapY = Math.round(this.camera.y * dpr) / dpr;
+    const snapX = Math.round((this.camera.x + this._cameraShakeX) * dpr) / dpr;
+    const snapY = Math.round((this.camera.y + this._cameraShakeY) * dpr) / dpr;
     ctx.translate(snapX, snapY);
     ctx.scale(this.camera.zoom, this.camera.zoom);
 
     if (!this.hideMapBackground) {
-      map.drawBackground(ctx, now);
+      map.drawBackground(ctx, renderNow);
     }
 
     const queue: QueueRenderable[] = [
@@ -1174,10 +1333,18 @@ export default class GameRuntime {
     const worldPixelW = map.worldPixelWidth;
     const worldPixelH = map.worldPixelHeight;
     for (const item of queue) {
-      item.draw(ctx, now, worldNormW, worldNormH, worldPixelW, worldPixelH);
+      item.draw(ctx, renderNow, worldNormW, worldNormH, worldPixelW, worldPixelH);
     }
-    map.drawOverlay(ctx, now);
-    map.drawAtmosphere(ctx, now);
+    this._drawImpactBursts(
+      ctx,
+      now,
+      worldNormW,
+      worldNormH,
+      worldPixelW,
+      worldPixelH,
+    );
+    map.drawOverlay(ctx, renderNow);
+    map.drawAtmosphere(ctx, renderNow);
 
     if (this.debug) {
       map.drawDebug(ctx);
@@ -2465,15 +2632,19 @@ export default class GameRuntime {
     if (spawnAlpha <= 0) {
       return;
     }
+    const invulnerableUntil = Number(entity.invulnerableUntilMs);
+    const invulnerable =
+      Number.isFinite(invulnerableUntil) && invulnerableUntil > now;
+    const blinkAlpha = invulnerable && Math.floor(now / 70) % 2 === 0 ? 0.35 : 1;
 
     const drawWithSpawnAlpha = () => {
-      if (spawnAlpha >= 1) {
+      if (spawnAlpha >= 1 && blinkAlpha >= 1) {
         drawBase();
         return;
       }
 
       ctx.save();
-      ctx.globalAlpha *= spawnAlpha;
+      ctx.globalAlpha *= spawnAlpha * blinkAlpha;
       drawBase();
       ctx.restore();
     };

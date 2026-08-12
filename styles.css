@@ -13,25 +13,25 @@
    `static` keeps every token in the build so raw CSS and inline styles can read
    them even when no Tailwind utility happens to reference the color. */
 @theme static {
-  --color-capy-ink: #150e21;
-  --color-capy-shadow: #251a38;
-  --color-capy-panel: #33264a;
-  --color-capy-panel-lit: #4b3a66;
-  --color-capy-panel-shade: #201736;
-  --color-capy-slot: #1b1430;
-  --color-capy-rim: #7a5f9c;
-  --color-capy-parchment: #f6e7c6;
-  --color-capy-parchment-dim: #bda98c;
-  --color-capy-accent: #ffc558;
-  --color-capy-accent-deep: #d2762a;
+  --color-capy-ink: #293746;
+  --color-capy-shadow: #46566a;
+  --color-capy-panel: #e8e7da;
+  --color-capy-panel-lit: #fffbed;
+  --color-capy-panel-shade: #bbc2ba;
+  --color-capy-slot: #b5c0bc;
+  --color-capy-rim: #78929a;
+  --color-capy-parchment: #293746;
+  --color-capy-parchment-dim: #687681;
+  --color-capy-accent: #efa950;
+  --color-capy-accent-deep: #c97048;
 }
 
 :root {
   --capy-contour: 2px;
-  --capy-radius: 4px;
+  --capy-radius: 6px;
   /* Hard-edged cast shadow, key light from the upper left. Never blurred. */
-  --capy-cast: 4px 4px 0 0 rgba(21, 14, 33, 0.55);
-  --capy-cast-sm: 3px 3px 0 0 rgba(21, 14, 33, 0.5);
+  --capy-cast: 4px 4px 0 0 rgba(41, 55, 70, 0.5);
+  --capy-cast-sm: 3px 3px 0 0 rgba(41, 55, 70, 0.45);
 }
 
 body {
@@ -111,7 +111,7 @@ canvas {
   /* Floating joystick ring. The one surface allowed flat alpha, because it sits
      directly over walkable world art — still a single flat tone, no gradient. */
   .capy-dial {
-    background-color: rgba(27, 20, 48, 0.72);
+    background-color: rgba(181, 192, 188, 0.78);
     border: var(--capy-contour) solid var(--color-capy-ink);
     box-shadow:
       inset 0 2px 0 0 var(--color-capy-panel-shade),
@@ -142,12 +142,12 @@ canvas {
 
   .capy-text {
     color: var(--color-capy-parchment);
-    text-shadow: 1px 1px 0 var(--color-capy-ink);
+    text-shadow: 1px 1px 0 rgba(255, 251, 237, 0.8);
   }
 
   .capy-text-dim {
     color: var(--color-capy-parchment-dim);
-    text-shadow: 1px 1px 0 var(--color-capy-ink);
+    text-shadow: 1px 1px 0 rgba(255, 251, 237, 0.7);
   }
 
   /* Two-tone hard rule: lit line over shade line, matching the key light. */
@@ -165,12 +165,108 @@ canvas {
 
   /* Soft floor cue under enterables — Press E is the main affordance. */
   .capy-glow-pool {
-    border-radius: 9999px;
-    background-color: rgba(255, 197, 88, 0.12);
+    border-radius: var(--capy-radius);
+    background-color: rgba(239, 169, 80, 0.14);
     box-shadow:
-      0 0 0 5px rgba(255, 197, 88, 0.08),
-      0 0 0 10px rgba(210, 118, 42, 0.04);
+      0 0 0 5px rgba(239, 169, 80, 0.09),
+      0 0 0 10px rgba(201, 112, 72, 0.05);
     animation: capy-glow-step 2s steps(4, end) infinite;
+  }
+
+  /* Story speech is a light painted-paper card, tied to the speaker with a
+     chunky tail. It intentionally reads as an in-world JRPG bubble rather
+     than a permanent dark HUD panel. */
+  .capy-dialogue {
+    background-color: var(--color-capy-panel);
+    border: 3px solid var(--color-capy-ink);
+    border-radius: 10px;
+    box-shadow:
+      inset 0 2px 0 0 var(--color-capy-panel-lit),
+      inset 0 -3px 0 0 var(--color-capy-panel-shade),
+      4px 4px 0 0 rgba(41, 55, 70, 0.45);
+  }
+
+  .capy-dialogue-name {
+    color: var(--color-capy-parchment-dim);
+    text-shadow: 1px 1px 0 var(--color-capy-panel-lit);
+  }
+
+  .capy-dialogue-tail {
+    background-color: var(--color-capy-panel);
+    border-color: var(--color-capy-ink);
+  }
+
+  /* Ambient barks sit in the scene with no card behind them, like a nearby
+     sign, passerby, or environmental callout. */
+  .capy-bark {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0 8px;
+    text-align: center;
+  }
+
+  .capy-bark .capy-dialogue-name,
+  .capy-bark .capy-dialogue-tail {
+    display: none;
+  }
+
+  .capy-bark .capy-text {
+    color: var(--color-capy-panel-lit);
+    font-size: 15px;
+    line-height: 1.25;
+    text-shadow:
+      2px 0 0 var(--color-capy-ink),
+      -2px 0 0 var(--color-capy-ink),
+      0 2px 0 var(--color-capy-ink),
+      0 -2px 0 var(--color-capy-ink);
+  }
+
+  .capy-world-label {
+    color: var(--color-capy-panel-lit);
+    text-shadow:
+      2px 0 0 var(--color-capy-ink),
+      -2px 0 0 var(--color-capy-ink),
+      0 2px 0 var(--color-capy-ink),
+      0 -2px 0 var(--color-capy-ink);
+  }
+
+  .capy-world-action {
+    color: var(--color-capy-panel-lit);
+    text-shadow:
+      2px 0 0 var(--color-capy-ink),
+      -2px 0 0 var(--color-capy-ink),
+      0 2px 0 var(--color-capy-ink),
+      0 -2px 0 var(--color-capy-ink);
+  }
+
+  .capy-world-key {
+    display: inline-flex;
+    min-width: 1.25em;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-capy-panel-lit);
+    border: 2px solid var(--color-capy-panel-lit);
+    border-radius: 3px;
+    padding: 0 0.12em;
+    line-height: 1.1;
+    text-shadow: 1px 1px 0 var(--color-capy-ink);
+  }
+
+  .capy-world-arrow {
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 7px solid var(--color-capy-panel-lit);
+  }
+
+  /* Player damage is a short hard frame, never a soft screen-wide vignette. */
+  .capy-hurt-frame {
+    border: 8px solid var(--color-capy-accent-deep);
+    box-shadow: inset 0 0 0 2px var(--color-capy-panel-lit);
+    transition: opacity 50ms steps(2, end);
   }
 }
 

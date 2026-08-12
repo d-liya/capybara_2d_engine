@@ -21,6 +21,8 @@ const catalog = new Map<string, CommonAssetEntry>();
 const cache = new Map<string, HTMLAudioElement>();
 const activeByChannel = new Map<AudioChannel, Set<HTMLAudioElement>>();
 const activeByName = new Map<string, Set<HTMLAudioElement>>();
+const channelDuckUntilMs = new Map<AudioChannel, number>();
+const channelDuckGain = new Map<AudioChannel, number>();
 
 /** Default gain when callers omit `volume` (and the catalog has none). */
 const DEFAULT_VOLUME_BY_ROLE: Partial<Record<CommonAssetRole, number>> = {
@@ -54,6 +56,16 @@ function isAudioEntry(entry: CommonAssetEntry): boolean {
 
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
+}
+
+function currentDuckGain(channel: AudioChannel): number {
+  const until = channelDuckUntilMs.get(channel) ?? 0;
+  if (until <= performance.now()) {
+    channelDuckUntilMs.delete(channel);
+    channelDuckGain.delete(channel);
+    return 1;
+  }
+  return channelDuckGain.get(channel) ?? 1;
 }
 
 function smoothstep(t: number): number {
@@ -101,6 +113,7 @@ function loopEdgeFactor(playback: HTMLAudioElement): number {
 function startLoopEdgeFade(
   playback: HTMLAudioElement,
   targetVolume: number,
+  channel: AudioChannel,
 ): void {
   stopLoopEdgeFade(playback);
 
@@ -109,7 +122,9 @@ function startLoopEdgeFade(
     if (!state) return;
 
     if (!playback.paused) {
-      playback.volume = clamp01(state.targetVolume * loopEdgeFactor(playback));
+      playback.volume = clamp01(
+        state.targetVolume * loopEdgeFactor(playback) * currentDuckGain(channel),
+      );
     }
 
     state.rafId = requestAnimationFrame(tick);
@@ -117,7 +132,9 @@ function startLoopEdgeFade(
 
   const state: LoopEdgeFade = { targetVolume, rafId: 0 };
   loopEdgeFades.set(playback, state);
-  playback.volume = clamp01(targetVolume * loopEdgeFactor(playback));
+  playback.volume = clamp01(
+    targetVolume * loopEdgeFactor(playback) * currentDuckGain(channel),
+  );
   state.rafId = requestAnimationFrame(tick);
 }
 
@@ -270,13 +287,34 @@ export function playAudio(
   const channel = channelFor(entry, options.channel);
   trackActive(name, channel, playback);
   if (loop) {
-    startLoopEdgeFade(playback, targetVolume);
+    startLoopEdgeFade(playback, targetVolume, channel);
   } else {
     stopLoopEdgeFade(playback);
     playback.volume = targetVolume;
   }
   playback.play().catch(() => {});
   return playback;
+}
+
+/**
+ * Briefly lower an active mixer channel. Primarily used by player-hit feedback
+ * so the impact sound reads clearly over music without muting the world.
+ */
+export function duckAudioChannel(
+  channel: AudioChannel,
+  gain = 0.7,
+  durationMs = 140,
+): void {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+  const clampedGain = clamp01(gain);
+  channelDuckGain.set(
+    channel,
+    Math.min(channelDuckGain.get(channel) ?? 1, clampedGain),
+  );
+  channelDuckUntilMs.set(
+    channel,
+    Math.max(channelDuckUntilMs.get(channel) ?? 0, performance.now() + durationMs),
+  );
 }
 
 export function stopAudio(name: string): void {

@@ -29,20 +29,19 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
   function createNode(npcId: string): BubbleNode {
     const item = document.createElement("div");
     item.className = [
-      "absolute left-0 top-0 pointer-events-none w-[260px]",
+      "absolute left-0 top-0 pointer-events-none w-[280px]",
       "font-['Geist Pixel',_sans-serif]",
       "capy-fade opacity-0 will-change-[transform,opacity]",
     ].join(" ");
     item.dataset.npcBubbleId = npcId;
 
     const card = document.createElement("div");
-    card.className = "capy-panel relative w-[260px] px-4 py-3";
+    card.className = "capy-dialogue relative w-[280px] px-4 py-3";
 
     const name = document.createElement("div");
     name.className = [
-      "mb-1.5 flex items-center gap-2",
+      "capy-dialogue-name mb-1.5 flex items-center gap-2",
       "text-[10px] font-normal uppercase tracking-[0.16em]",
-      "text-capy-accent [text-shadow:1px_1px_0_var(--color-capy-ink)]",
       "after:h-[2px] after:flex-1 after:bg-capy-rim",
     ].join(" ");
 
@@ -53,8 +52,8 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
     // Hard-edged notch built from the panel tones, not a blurred glass wedge.
     const tail = document.createElement("div");
     tail.className = [
-      "absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-2 rotate-45",
-      "border-b-2 border-r-2 border-capy-ink bg-capy-panel",
+      "capy-dialogue-tail absolute left-1/2 top-full h-3 w-3 -translate-x-1/2 -translate-y-2 rotate-45",
+      "border-b-[3px] border-r-[3px]",
     ].join(" ");
 
     card.append(name, text, tail);
@@ -139,9 +138,10 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
           node.revealStartedAt = now;
         }
 
+        node.card.classList.toggle("capy-bark", isBarkVisible);
         node.name.textContent = npc.displayName;
         node.text.textContent = revealText(text, node.revealStartedAt, now);
-        const x = point.x + canvasToHudX - 130;
+        const x = point.x + canvasToHudX - 140;
         const y = point.y + canvasToHudY - node.root.offsetHeight - 64;
         node.root.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
         node.root.style.opacity = "1";

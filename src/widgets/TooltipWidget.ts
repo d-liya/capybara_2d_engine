@@ -151,12 +151,12 @@ export function createTooltipWidget(): Widget {
 
       cardEl = document.createElement("div");
       cardEl.className = [
-        "capy-panel capy-fade px-3 py-2",
+        "capy-world-label capy-fade px-2 py-1 text-center",
         "opacity-0 will-change-[opacity]",
       ].join(" ");
 
       titleEl = document.createElement("div");
-      titleEl.className = "capy-text text-sm font-normal leading-tight";
+      titleEl.className = "text-sm font-normal leading-tight";
 
       bodyEl = document.createElement("div");
       bodyEl.className =
