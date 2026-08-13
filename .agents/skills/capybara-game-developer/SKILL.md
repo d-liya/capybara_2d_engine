@@ -10,7 +10,7 @@ metadata:
 
 Start from repo-root `AGENTS.md` (living **Current state**). This pack is the deeper engine reference — not a required preload before writing gameplay.
 
-Art/world assets arrive via Studio `patch_world` or Maps / Jobs sync. Your lane is gameplay against the synced projection (`bootstrapWorldFromAssets` + `configureGameplay`).
+Art/world assets arrive via Studio `generate_asset_batch` / `save_world_state` or Maps / Jobs sync. Your lane is gameplay against the synced projection (`bootstrapWorldFromAssets` + `configureGameplay`).
 
 When a hosted sandbox also injects `system.md`, treat that as the operational contract. Do not contradict it on sync/bootstrap facts.
 

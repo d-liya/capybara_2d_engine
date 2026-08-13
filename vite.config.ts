@@ -3,6 +3,8 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [tailwindcss()],
+  // Relative so Play works at /workspace/{chatId}/ as well as a published subdomain.
+  base: "./",
   server: {
     host: "0.0.0.0",
     port: 3000,
