@@ -7,7 +7,6 @@ import {
   type CombatFeedbackState,
 } from "./widgets/CombatFeedbackWidget";
 import { createNpcBubbleWidget } from "./widgets/NpcBubbleWidget";
-import { createTooltipWidget } from "./widgets/TooltipWidget";
 import { createTouchControlsWidget } from "./widgets/TouchControlsWidget";
 import {
   createStaticWorldContextFromGameMapData,
@@ -52,6 +51,14 @@ export {
   type PropData,
   type PropItem,
 } from "./data/props";
+export {
+  installTypewriterAudioUnlock,
+  isTypewriterSoundCharacter,
+  playTypewriterBlip,
+  playTypewriterStartClip,
+  typewriterCharacterCount,
+  unlockTypewriterAudio,
+} from "./utils/typewriter";
 
 export type * from "./Game.types";
 export { DEFAULT_COMBAT_IMPACTS } from "./Game.types";
@@ -202,7 +209,6 @@ export function createGame(config: GameConfig): GameAPI {
     createCombatFeedbackState(),
   );
   runtime.registerWidget(createCombatFeedbackWidget);
-  runtime.registerWidget(createTooltipWidget);
   // NPC barks and thoughts are world feedback, so their renderer belongs to
   // the base HUD rather than requiring every scene to remember to mount it.
   runtime.registerWidget(createNpcBubbleWidget);

@@ -5,9 +5,11 @@ import {
   preloadDataAssets,
   setupOrientationReload,
 } from "./utils/common";
-import { allDataFiles } from "./data";
+import { allDataFiles, intro } from "./data";
 import { createMainScene } from "./scenes/mainScene";
 import { enableAnalyticsByDefault } from "./sdk";
+import { createOpeningIntro } from "./utils/openingIntro";
+import { installTypewriterAudioUnlock } from "./utils/typewriter";
 
 async function bootstrap() {
   setupOrientationReload();
@@ -19,6 +21,8 @@ async function bootstrap() {
 
   const canvas = document.getElementById("game") as HTMLCanvasElement;
   const loadingGate = createLoadingGate(canvas, { dataFiles: allDataFiles });
+  installTypewriterAudioUnlock();
+  const openingIntro = createOpeningIntro(intro);
 
   // Starter scene — SVG floor + box player until generated maps/characters exist.
   createMainScene({
@@ -28,7 +32,9 @@ async function bootstrap() {
   });
 
   await loadingGate.waitForCompletion();
+  openingIntro.prepare();
   loadingGate.teardown();
+  await openingIntro.play();
 }
 
 bootstrap();

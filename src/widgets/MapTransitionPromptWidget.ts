@@ -1,5 +1,6 @@
 import type { Widget } from "../core/WidgetManager";
 import type { WidgetMountOptions } from "../types/UiState";
+import { typewriterCharacterCount } from "../utils/typewriter";
 
 /** Resource written by bootstrap proximity system. */
 export const MAP_TRANSITION_PROMPT_RESOURCE = "mapTransitionPrompt";
@@ -51,12 +52,8 @@ function canvasLocalToHudLocal(
 function revealText(fullText: string, startedAt: number, now: number): string {
   if (!fullText) return "";
   // Fast reveal for short gameplay prompts.
-  const charsPerSecond = 64;
-  const visibleChars = Math.max(
-    1,
-    Math.floor(((now - startedAt) / 1000) * charsPerSecond),
-  );
-  return fullText.slice(0, Math.min(fullText.length, visibleChars));
+  const visibleChars = typewriterCharacterCount(fullText, now - startedAt, 16);
+  return fullText.slice(0, visibleChars);
 }
 
 function isTouchPrimaryDevice(): boolean {

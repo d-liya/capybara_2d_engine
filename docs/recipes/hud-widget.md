@@ -93,6 +93,8 @@ isInteractive: () => false,
 ## Layout
 
 - `absolute` inside `#hud-root`; avoid `position: fixed` for gameplay HUDs.
+- For a persistent HUD with isolated controls, keep an `absolute` full-screen root non-interactive and apply `pointer-events-auto` only to the visible panel/buttons. For a modal, use an interactive `absolute inset-0` root and block world input.
+- `blocksWorldInput` stops movement but does not automatically consume named keyboard actions. Modal `onKeyDown` handlers compare `event.code` with exact browser codes such as `KeyE`, `Space`, `Enter`, or `Escape`, handle their advance/close action, and return `true`.
 - Blocking overlays such as dialogue, shops, menus, title screens, and result screens should use the modal z-index band (`700-899`). Persistent HUD chrome should stay below that, and world-aligned markers/pointers should stay below persistent HUD chrome.
 - For persistent edge-anchored HUDs, choose `cameraEdgePadding` at least as large as the always-visible bar thickness plus margin.
 

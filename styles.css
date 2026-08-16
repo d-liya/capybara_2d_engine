@@ -35,8 +35,8 @@
 }
 
 body {
-  /* Letterbox reads as part of the world's color grade, not a pure-black void. */
-  background: var(--color-capy-ink);
+  /* Match the loading/intro field so letterboxing never forms a second panel. */
+  background: #0c0c0c;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -54,14 +54,14 @@ body {
 }
 #game-shell {
   position: relative;
-  background: var(--color-capy-ink);
+  background: #0c0c0c;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
 }
 canvas {
   display: block;
-  background: var(--color-capy-ink);
+  background: #0c0c0c;
   /* High-res map art: smooth resampling. Pixel-art games can override to `pixelated`. */
   image-rendering: auto;
   -webkit-user-select: none;

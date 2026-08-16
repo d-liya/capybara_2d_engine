@@ -1,6 +1,11 @@
 import type { Widget } from "../core/WidgetManager";
 import { NPC_STATE_RESOURCE, type NpcPrimitivesState } from "../npc-primitives/types";
 import type { WidgetMountOptions } from "../types/UiState";
+import {
+  isTypewriterSoundCharacter,
+  playTypewriterBlip,
+  typewriterCharacterCount,
+} from "../utils/typewriter";
 
 interface BubbleNode {
   root: HTMLDivElement;
@@ -10,6 +15,7 @@ interface BubbleNode {
   tail: HTMLDivElement;
   lastFullText: string;
   revealStartedAt: number;
+  lastRevealedCount: number;
 }
 
 function getNpcStateSafe(game: {
@@ -67,23 +73,10 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
       tail,
       lastFullText: "",
       revealStartedAt: 0,
+      lastRevealedCount: 0,
     };
     nodes.set(npcId, node);
     return node;
-  }
-
-  function revealText(
-    fullText: string,
-    startedAt: number,
-    now: number,
-  ): string {
-    if (!fullText) return "";
-    const charsPerSecond = fullText.length <= 28 ? 46 : 38;
-    const visibleChars = Math.max(
-      1,
-      Math.floor(((now - startedAt) / 1000) * charsPerSecond),
-    );
-    return fullText.slice(0, Math.min(fullText.length, visibleChars));
   }
 
   return {
@@ -136,11 +129,28 @@ export function createNpcBubbleWidget(options?: WidgetMountOptions): Widget {
         if (node.lastFullText !== text) {
           node.lastFullText = text;
           node.revealStartedAt = now;
+          node.lastRevealedCount = 0;
         }
 
-        node.card.classList.toggle("capy-bark", isBarkVisible);
         node.name.textContent = npc.displayName;
-        node.text.textContent = revealText(text, node.revealStartedAt, now);
+        const characterDelayMs = text.length <= 28 ? 22 : 26;
+        const revealedCount = typewriterCharacterCount(
+          text,
+          now - node.revealStartedAt,
+          characterDelayMs,
+        );
+        const newlyRevealed = revealedCount - node.lastRevealedCount;
+        if (newlyRevealed > 0 && newlyRevealed <= 4) {
+          const newCharacters = text.slice(node.lastRevealedCount, revealedCount);
+          for (let index = newCharacters.length - 1; index >= 0; index -= 1) {
+            if (isTypewriterSoundCharacter(newCharacters[index])) {
+              playTypewriterBlip(520);
+              break;
+            }
+          }
+        }
+        node.lastRevealedCount = revealedCount;
+        node.text.textContent = text.slice(0, revealedCount);
         const x = point.x + canvasToHudX - 140;
         const y = point.y + canvasToHudY - node.root.offsetHeight - 64;
         node.root.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;

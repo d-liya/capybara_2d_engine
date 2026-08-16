@@ -126,6 +126,16 @@ If `ui` is omitted, the widget stays mounted and visible (useful for layout prev
 
 The manager sets `hidden` and `pointer-events` after each `update`.
 
+Pointer input and world-input blocking are separate decisions:
+
+- A passive widget uses `isInteractive: () => false` and has no interactive descendants.
+- A persistent HUD with a few controls may keep its full-screen root non-interactive and put `pointer-events-auto` only on its buttons, slots, or panel. This preserves clicks on the uncovered playfield.
+- A modal uses `isInteractive: () => true` and `blocksWorldInput: () => true` because its interaction surface intentionally covers the playfield.
+
+`blocksWorldInput` stops movement, not every named input action. A modal implements `onKeyDown`, compares `event.code` with exact browser codes such as `KeyE`, `Space`, `Enter`, or `Escape`, performs the modal action, and returns `true` so the same key does not also reach gameplay.
+
+Widgets receive isolated `api.state` objects. `update()` still runs while a widget is hidden, so hidden updates may synchronize DOM state but must not autofocus, emit gameplay events, or start player-visible effects merely because a frame ran.
+
 Default touch controls live in `src/widgets/TouchControlsWidget.ts` (floating joystick + action buttons, mounted by `createGame` unless `touchControls: false`). See `docs/recipes/mobile-touch-controls.md`.
 
 ### Z-index layering
@@ -316,7 +326,7 @@ export type MyGameUiPatch = {
 ## Widget anatomy
 
 ```ts
-import type { WidgetMountOptions } from "../types/UiState";
+import type { WidgetMountOptions } from "../Game";
 
 export function createMyWidget(options?: WidgetMountOptions) {
   return {
@@ -335,6 +345,7 @@ export function createMyWidget(options?: WidgetMountOptions) {
       // sync DOM only; reveal player-facing text with a typing/typewriter effect
     },
 
+    isInteractive: () => false,
     blocksWorldInput: () => false,
   };
 }
@@ -368,6 +379,7 @@ game.patchUi({ overlays: { modal: false }, panels: { hudA: true } });
 ## Positioning
 
 - Use `absolute` inside `#hud-root`; avoid `position: fixed` for gameplay HUDs.
+- Use `absolute inset-0` for a modal root and an absolute screen-edge anchor for a persistent panel. The HUD root follows `#game-shell`, which may be smaller than the browser viewport when the canvas is letterboxed.
 - Choose `zIndex` from the widget role. World-aligned pointers/markers should stay below persistent HUD panels and blocking overlays.
 - Decorative inner nodes may use `pointer-events-none`; the engine sets root `pointer-events` from `isInteractive`.
 

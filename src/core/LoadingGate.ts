@@ -541,7 +541,11 @@ function findFirstMapImageUrl(dataFiles: unknown[]): string | null {
     if (!looksLikeMapData(obj)) continue;
     const url = obj.url;
     if (typeof url !== "string" || url.length === 0) continue;
-    if (IMAGE_URL_RE.test(url) || url.startsWith("http") || url.startsWith("/")) {
+    if (
+      IMAGE_URL_RE.test(url) ||
+      url.startsWith("http") ||
+      url.startsWith("/")
+    ) {
       return url;
     }
   }

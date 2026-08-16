@@ -65,7 +65,8 @@ export default class WidgetManager<
   private hudRoot: HTMLElement;
   private widgets: Widget<TGame>[];
   private _game: TGame;
-  state: Record<string, unknown>;
+  private initialWidgetState: Record<string, unknown>;
+  private widgetStates: WeakMap<Widget<TGame>, Record<string, unknown>>;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -77,9 +78,10 @@ export default class WidgetManager<
       typeof hudRoot === "string" ? document.getElementById(hudRoot) : hudRoot;
     this.widgets = [];
     this._game = null as TGame;
-    this.state = {
+    this.initialWidgetState = {
       ...(config.state ?? {}),
     };
+    this.widgetStates = new WeakMap();
 
     if (!this.hudRoot) {
       throw new Error("WidgetManager requires a valid HUD root element.");
@@ -101,7 +103,7 @@ export default class WidgetManager<
     this.widgets.push(widget);
     this.widgets.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
 
-    const api = this._api();
+    const api = this._api(widget);
     if (typeof widget.mount === "function") {
       const element = widget.mount(api);
       if (element instanceof HTMLElement) {
@@ -188,18 +190,23 @@ export default class WidgetManager<
     return this._resolvePresentation(widget, api).visible;
   }
 
-  setState(patch: Record<string, unknown>): void {
-    this.state = {
-      ...this.state,
-      ...patch,
-    };
-  }
-
   setGame(game: TGame): void {
     this._game = game;
   }
 
-  _api(game: TGame | null = null, now = performance.now()): WidgetAPI<TGame> {
+  private _stateFor(widget: Widget<TGame>): Record<string, unknown> {
+    const current = this.widgetStates.get(widget);
+    if (current) return current;
+    const initial = { ...this.initialWidgetState };
+    this.widgetStates.set(widget, initial);
+    return initial;
+  }
+
+  _api(
+    widget: Widget<TGame>,
+    game: TGame | null = null,
+    now = performance.now(),
+  ): WidgetAPI<TGame> {
     if (game !== null) this._game = game;
     const mgr = this;
     return {
@@ -209,33 +216,38 @@ export default class WidgetManager<
         return mgr._game;
       },
       get state() {
-        return mgr.state;
+        return mgr._stateFor(widget);
       },
       now,
-      setState: (patch) => mgr.setState(patch),
+      setState: (patch) => {
+        mgr.widgetStates.set(widget, {
+          ...mgr._stateFor(widget),
+          ...patch,
+        });
+      },
     };
   }
 
   /** Apply typed visibility + pointer state after widget content updates. */
   syncPresentation(now: number, game: TGame): void {
-    const api = this._api(game, now);
     for (const widget of this.widgets) {
+      const api = this._api(widget, game, now);
       this._applyPresentation(widget, api);
     }
   }
 
   update(now: number, game: TGame): void {
-    const api = this._api(game, now);
     for (const widget of this.widgets) {
+      const api = this._api(widget, game, now);
       if (typeof widget.update === "function") widget.update(api);
     }
     this.syncPresentation(now, game);
   }
 
   handleKey(event: KeyboardEvent, game: TGame): boolean {
-    const api = this._api(game);
     for (let i = this.widgets.length - 1; i >= 0; i -= 1) {
       const widget = this.widgets[i];
+      const api = this._api(widget, game);
       if (!this._isWidgetVisible(widget, api)) continue;
       const handler =
         event.type === "keydown" ? widget.onKeyDown : widget.onKeyUp;
@@ -248,8 +260,8 @@ export default class WidgetManager<
   }
 
   blocksWorldInput(game: TGame): boolean {
-    const api = this._api(game);
     return this.widgets.some((widget) => {
+      const api = this._api(widget, game);
       if (!this._isWidgetVisible(widget, api)) return false;
       if (typeof widget.blocksWorldInput !== "function") return false;
       return widget.blocksWorldInput(api) === true;
@@ -257,14 +269,15 @@ export default class WidgetManager<
   }
 
   destroy(game: TGame | null = null): void {
-    const api = this._api(game);
     for (const widget of this.widgets) {
+      const api = this._api(widget, game);
       if (typeof widget.destroy === "function") widget.destroy(api);
       if (widget._element?.parentNode === this.hudRoot) {
         this.hudRoot.removeChild(widget._element);
       }
     }
     this.widgets = [];
+    this.widgetStates = new WeakMap();
   }
 }
 
