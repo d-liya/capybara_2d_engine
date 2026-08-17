@@ -595,19 +595,14 @@ export default class GameRuntime {
     options: EntityAnimationOptions = {},
   ): void {
     const entity = this._entities.get(id);
-    if (entity?.activeAnimation === animationName) {
-      const actor = this._entityActors.get(id);
-      if (actor) {
-        actor.setActiveAnimation(animationName, options.transitionMs);
-      }
-      return;
-    }
-
     const actor = this._entityActors.get(id);
     if (actor) {
-      actor.setActiveAnimation(animationName, options.transitionMs);
+      actor.setActiveAnimation(animationName, options);
     }
-    this.patchEntity(id, { activeAnimation: animationName });
+    if (!entity) return;
+    this.patchEntity(id, {
+      activeAnimation: actor?.activeAnimationName ?? animationName,
+    });
   }
 
   setEntitySpriteSheets(
@@ -618,6 +613,8 @@ export default class GameRuntime {
       frame_count?: number | string;
       width?: number;
       height?: number;
+      playback?: "loop" | "once";
+      returnTo?: string;
     }>,
     options: EntitySpriteTransitionOptions = {},
   ): void {
@@ -2468,9 +2465,11 @@ export default class GameRuntime {
         if (boundAnimation !== activeAnimation) {
           actor.setActiveAnimation(
             activeAnimation,
-            Number.isFinite(animationTransitionMs)
-              ? animationTransitionMs
-              : undefined,
+            {
+              transitionMs: Number.isFinite(animationTransitionMs)
+                ? animationTransitionMs
+                : undefined,
+            },
           );
           this._entityBoundAnimations.set(id, activeAnimation);
         }
@@ -2724,6 +2723,7 @@ export default class GameRuntime {
       const facingX = Number(entity.facingX);
       if (Number.isFinite(facingX)) actor.setFacingX(facingX);
       this._setEntityPosition(id, actor.x, actor.y, actor.renderY);
+      this._syncActorVisualState(id, actor);
 
       renderables.push({
         renderY: actor.renderY,

@@ -19,6 +19,8 @@ export interface SpriteSheet {
   frame_count?: number | string;
   width?: number;
   height?: number;
+  playback?: "loop" | "once";
+  returnTo?: string;
 }
 
 interface SpriteTrim {
@@ -39,6 +41,8 @@ interface Animation {
   image: HTMLImageElement | null;
   frameCount: number;
   trim: SpriteTrim | null;
+  playback: "loop" | "once";
+  returnTo: string | null;
 }
 
 export interface SpriteConfig {
@@ -247,6 +251,8 @@ export default class Actor {
    * walk strip when there is no separate idle art).
    */
   protected _holdFrame: number | null;
+  protected _playbackMode: "loop" | "once";
+  protected _returnAnimation: string | null;
   protected _shadow: ActorShadowConfig;
   protected _imageFit: ImageFitMode;
   protected _footboxMode: FootboxMode;
@@ -301,6 +307,8 @@ export default class Actor {
     this._moveClipBase = "walk";
     this._hasDirectionalIdle = false;
     this._holdFrame = null;
+    this._playbackMode = "loop";
+    this._returnAnimation = null;
     this._shadow = normalizeActorShadowConfig(options.shadow);
     this._imageFit = "contain";
     this._footboxMode = "auto";
@@ -413,6 +421,11 @@ export default class Actor {
         this._resolveAnimationKey(activeAnimation) ?? this._idleAnimKey;
       this._holdFrame = null;
     }
+    const active = this._animations[this._activeAnimation];
+    this._playbackMode = active?.playback ?? "loop";
+    this._returnAnimation = this._playbackMode === "once"
+      ? active?.returnTo ?? null
+      : null;
     this._animStartedAt = performance.now();
   }
 
@@ -553,6 +566,15 @@ export default class Actor {
     const normalized = this._normalizeAnimationKey(name);
     if (!normalized) return null;
     if (this._animations[normalized]) return normalized;
+    if (this._directionalMode && !parseFacingSuffix(normalized)) {
+      const facingOrder: ActorFacingDir[] = this._facingDir === "left"
+        ? ["left", "right", "front", "back"]
+        : [this._facingDir, "front", "right", "back", "left"];
+      for (const facing of facingOrder) {
+        const directional = `${normalized}_${facing}`;
+        if (this._animations[directional]) return directional;
+      }
+    }
     return (
       Object.keys(this._animations).find((key) => key.includes(normalized)) ??
       null
@@ -562,13 +584,24 @@ export default class Actor {
   private _transitionToAnimation(
     animationName: string,
     _transitionMs = this._animationTransitionMs,
+    playback?: "loop" | "once",
+    returnTo?: string,
+    restart = false,
   ): void {
     const nextAnimation = this._resolveAnimationKey(animationName);
-    if (!nextAnimation || nextAnimation === this._activeAnimation) {
+    if (!nextAnimation || (!restart && nextAnimation === this._activeAnimation)) {
       return;
     }
 
     this._activeAnimation = nextAnimation;
+    const animation = this._animations[nextAnimation];
+    this._playbackMode = playback ?? animation?.playback ?? "loop";
+    this._returnAnimation = this._playbackMode === "once"
+      ? playback !== undefined || returnTo !== undefined
+        ? returnTo?.trim() || null
+        : animation?.returnTo ?? null
+      : null;
+    this._holdFrame = null;
     this._animStartedAt = performance.now();
   }
 
@@ -658,8 +691,21 @@ export default class Actor {
     }
   }
 
-  setActiveAnimation(animationName: string, transitionMs?: number): void {
-    this._transitionToAnimation(animationName, transitionMs);
+  setActiveAnimation(
+    animationName: string,
+    options: {
+      transitionMs?: number;
+      playback?: "loop" | "once";
+      returnTo?: string;
+    } = {},
+  ): void {
+    this._transitionToAnimation(
+      animationName,
+      options.transitionMs,
+      options.playback,
+      options.returnTo,
+      true,
+    );
   }
 
   /**
@@ -687,11 +733,25 @@ export default class Actor {
 
   _buildAnimation(sheet: SpriteSheet | undefined): Animation {
     if (!sheet || !sheet.url) {
-      return { image: null, frameCount: 1, trim: null };
+      return {
+        image: null,
+        frameCount: 1,
+        trim: null,
+        playback: "loop",
+        returnTo: null,
+      };
     }
 
     const frameCount = Math.max(1, Number(sheet.frame_count) || 1);
-    const anim: Animation = { image: null, frameCount, trim: null };
+    const anim: Animation = {
+      image: null,
+      frameCount,
+      trim: null,
+      playback: sheet.playback === "once" ? "once" : "loop",
+      returnTo: typeof sheet.returnTo === "string" && sheet.returnTo.trim()
+        ? sheet.returnTo.trim()
+        : null,
+    };
 
     loadImage(sheet.url, { crossOrigin: "anonymous" })
       .then((image) => {
@@ -904,6 +964,14 @@ export default class Actor {
     const moving = Math.abs(dx) > MOVE_DIR_EPS || Math.abs(dy) > MOVE_DIR_EPS;
     this._isMoving = moving;
 
+    if (this._playbackMode === "once") {
+      const animation = this._animations[this._activeAnimation];
+      const elapsed = Math.max(0, performance.now() - this._animStartedAt);
+      const complete = elapsed >= (animation?.frameCount ?? 1) * this._frameDurationMs;
+      if (!complete || !this._returnAnimation) return;
+      this._transitionToAnimation(this._returnAnimation, 0, undefined, undefined, true);
+    }
+
     if (this._directionalMode) {
       if (moving) this._updateFacingFromDelta(dx, dy);
       this._applyDirectionalLocomotion(moving);
@@ -1013,6 +1081,21 @@ export default class Actor {
     }
 
     const elapsed = Math.max(0, now - this._animStartedAt);
+    if (this._playbackMode === "once") {
+      const frame = Math.floor(elapsed / this._frameDurationMs);
+      if (frame < animation.frameCount) return frame;
+      if (this._returnAnimation) {
+        this._transitionToAnimation(
+          this._returnAnimation,
+          0,
+          undefined,
+          undefined,
+          true,
+        );
+        return 0;
+      }
+      return Math.max(0, animation.frameCount - 1);
+    }
     return Math.floor(elapsed / this._frameDurationMs) % animation.frameCount;
   }
 

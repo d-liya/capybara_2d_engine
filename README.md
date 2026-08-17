@@ -36,8 +36,6 @@ Capybara v2 moves asset generation into a web interface: start there to generate
 1. Generate your worlds and assets at [capybara.build](https://www.capybara.build)
 2. Export the code
 3. Use your coding agent to wire up gameplay and make changes
-4. Sync changes back and forth between local and cloud as you go (see below)
-5. Publish directly from your coding agent when ready
 
 The engine also works as a **standalone product** — you can run it, write gameplay code, and ship without generating any new assets.
 
@@ -55,19 +53,3 @@ npm run dev
 ### Assets look wrong?
 
 **Check the original file in `src/data` before regenerating.** Generated art is usually fine — coding agents often wire it in with the wrong aspect ratio.
-
-## Push, pull & publish to Capybara
-
-When you download an HTML export from [capybara.build](https://www.capybara.build), the zip includes a `.env` with a chat-scoped API key and this project's `.git` history.
-
-```bash
-npm run pull     # fetch + merge latest code from Capybara
-npm run push     # merge cloud first, then upload local commits
-npm run publish  # push, build locally, upload dist/, print live / game / app links
-```
-
-`pull` / `push` merge with the cloud (they do not overwrite your `origin`). On conflict they write `.capybara/sync-status.json` and exit `2` so a coding agent can resolve markers, commit, and re-run.
-
-For new generated assets (maps, characters, props, audio, HUD), create them on [capybara.build](https://www.capybara.build) then `npm run pull`.
-
-The API key only works for these CLI endpoints. Do not commit `.env`.

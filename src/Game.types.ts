@@ -362,6 +362,10 @@ export type PropPlacementInput =
 /** Public Game facade type. Same pattern as PathPoint. */
 export interface EntityAnimationOptions {
   transitionMs?: number;
+  /** Loop continuously, or play once. Defaults to the sheet metadata, then loop. */
+  playback?: "loop" | "once";
+  /** For one-shot playback, switch to this clip when complete; omit to hold the final frame. */
+  returnTo?: string;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -383,6 +387,8 @@ export interface EntitySpriteSheet {
   frame_count?: number | string;
   width?: number;
   height?: number;
+  playback?: "loop" | "once";
+  returnTo?: string;
 }
 
 /** Public Game facade type. Same pattern as PathPoint. */
@@ -1113,7 +1119,9 @@ export interface GameAPI {
    * Switch an animated entity to a named spritesheet animation.
    *
    * @example
-   * game.setEntityAnimation(playerId, "char_farmer_walk");
+   * game.setEntityAnimation(playerId, "walk");
+   * game.setEntityAnimation(playerId, "cast", { playback: "once", returnTo: "idle" });
+   * game.setEntityAnimation(enemyId, "defeat", { playback: "once" });
    */
   setEntityAnimation(
     id: EntityId,

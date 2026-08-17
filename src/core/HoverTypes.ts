@@ -73,6 +73,8 @@ export type PropPlacementInput =
 
 export interface EntityAnimationOptions {
   transitionMs?: number;
+  playback?: "loop" | "once";
+  returnTo?: string;
 }
 
 export interface EntitySpriteTransitionOptions extends EntityAnimationOptions {

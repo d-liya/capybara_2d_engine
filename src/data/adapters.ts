@@ -27,6 +27,8 @@ export interface GeneratedSpriteSheet {
   frame_count?: number;
   width?: number;
   height?: number;
+  playback?: "loop" | "once";
+  returnTo?: string;
 }
 
 /**
@@ -51,6 +53,10 @@ export interface GeneratedDirectionalSheet {
   animation?: string;
   facing?: string;
   url: string;
+  playbackMode?: "loop" | "once";
+  endingMode?: "recover_to_start" | "hold_end";
+  startPoseKey?: string;
+  startPoseDescription?: string;
   metadata?: {
     width?: number;
     height?: number;
@@ -204,6 +210,10 @@ function pushDirectionalSheet(
     frame_count: frameCount,
     width,
     height,
+    playback: entry.playbackMode === "once" ? "once" : "loop",
+    ...(entry.playbackMode === "once" && entry.endingMode !== "hold_end"
+      ? { returnTo: "idle" }
+      : {}),
   });
 }
 
