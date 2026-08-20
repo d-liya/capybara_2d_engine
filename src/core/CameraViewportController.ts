@@ -205,7 +205,16 @@ export default class CameraViewportController {
       this.canvas.closest("#game-shell") ?? this.canvas.parentElement;
     const shell = shellEl instanceof HTMLElement ? shellEl : null;
 
-    if (shouldFollow) {
+    // True cover: canvas CSS box is at least as large as the window, so the
+    // shell fills the viewport and clips overflow. `#hud-root` (inset: 0 on
+    // the shell) then matches the visible screen.
+    //
+    // Letterboxed follow (common when maxViewportScale caps below cover):
+    // size the shell to the canvas instead. Otherwise the HUD spans the full
+    // window while the scene sits as a smaller centered rect.
+    const coversViewport = shouldFollow && cssW >= vw && cssH >= vh;
+
+    if (coversViewport) {
       this.canvas.style.position = "absolute";
       this.canvas.style.left = "50%";
       this.canvas.style.top = "50%";
@@ -223,8 +232,13 @@ export default class CameraViewportController {
     this.canvas.style.top = "";
     this.canvas.style.transform = "";
     if (shell) {
-      shell.style.width = "";
-      shell.style.height = "";
+      if (shouldFollow) {
+        shell.style.width = `${cssW}px`;
+        shell.style.height = `${cssH}px`;
+      } else {
+        shell.style.width = "";
+        shell.style.height = "";
+      }
       shell.style.overflow = "";
     }
   }
