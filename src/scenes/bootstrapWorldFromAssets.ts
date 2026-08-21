@@ -1,13 +1,12 @@
 /**
  * Auto-wire a playable world from Maps-compiled `src/data/*` JSON.
  *
- * Spawns character and prop placements, sets the controlled player, starts BGM,
+ * Registers calibrated character archetypes, spawns authored props, starts BGM,
  * and binds a default interact action for state overlays / gameplay VFX /
  * enterable map transitions. Forward enterables also get a synthetic return
  * link at `destinationSpawnBox2d` when the destination map has no authored
  * exit back — so arriving players can walk out, then re-enter to go back.
- * Custom gameplay systems should build on top of this — do not re-spawn
- * placements by hand.
+ * Gameplay code owns the player/NPC cast and their explicit feet positions.
  */
 import {
   createGame,
@@ -15,7 +14,6 @@ import {
   playAudio,
   stopAudio,
   type GameAPI,
-  type GeneratedCharacterPlacement,
   type GeneratedPropPlacement,
   type MapOverlayTarget,
   type MapPlacementTarget,
@@ -134,6 +132,8 @@ type AuthoredPlacement = {
   destinationMapAssetId?: string;
   /** Spawn footprint on the destination map `[ymin,xmin,ymax,xmax]` 0–1000. */
   destinationSpawnBox2d?: number[];
+  /** Boolean storyVariables key that must be true before this transition opens. */
+  unlockVariable?: string;
   interactionType?: string;
 };
 
@@ -293,7 +293,7 @@ export type BootstrapMapEntry = {
 };
 
 export type BootstrapCharacterEntry = {
-  /** Matches characterPlacements.assetId when possible; also used as archetype name */
+  /** Stable generated asset id. */
   id: string;
   character: AnyGeneratedCharacter;
   /** Optional stable key used as archetype name override */
@@ -306,13 +306,55 @@ export type BootstrapArchetypeDefaults = {
   frameDurationMs?: number;
 };
 
+export const BOOTSTRAP_MAP_RESOURCE = "bootstrapMap";
+export const MAP_ENTERED_EVENT = "map:entered";
+/** Canonical boolean progression record consumed by authored transition gates. */
+export const STORY_VARIABLES_RESOURCE = "storyVariables";
+export const MAP_TRANSITION_BLOCKED_EVENT = "map:transition-blocked";
+
+export type BootstrapMapState = {
+  mapId: string;
+  mapAssetId: string;
+};
+
+export type MapTransitionBlockedEvent = {
+  transitionId: string;
+  unlockVariable: string;
+  destinationMapId: string;
+  currentMapId: string;
+};
+
+function transitionUnlockVariable(
+  placement: AuthoredPlacement | null | undefined,
+): string {
+  return typeof placement?.unlockVariable === "string"
+    ? placement.unlockVariable.trim()
+    : "";
+}
+
+function isAuthoredTransitionUnlocked(
+  game: GameAPI,
+  placement: AuthoredPlacement | null | undefined,
+): boolean {
+  const variable = transitionUnlockVariable(placement);
+  if (!variable) return true;
+  const storyVariables = game.getResource<unknown>(STORY_VARIABLES_RESOURCE);
+  if (
+    !storyVariables ||
+    typeof storyVariables !== "object" ||
+    Array.isArray(storyVariables)
+  ) {
+    return false;
+  }
+  return (storyVariables as Record<string, unknown>)[variable] === true;
+}
+
 export type BootstrapWorldOptions = {
   canvasId?: string;
   maps: BootstrapMapEntry[];
   characters?: BootstrapCharacterEntry[];
   /**
-   * Prefer this map id on boot. Falls back to first map with a player
-   * placement, else maps[0].
+   * Prefer this map id on boot. Falls back to maps[0].
    */
   startMapId?: string;
   /** common.json-style audio catalog (or registerAudioCatalog payload). */
@@ -350,15 +392,8 @@ export type BootstrapWorldOptions = {
    */
   touchControls?: false | TouchControlsConfig;
   onAudioReady?: (start: () => void) => void;
-  /** Called after the first map + entities are live. */
+  /** Called after the first map and generated world services are live. */
   onBootstrapped?: (game: GameAPI) => void;
-  /**
-   * Optional override for character spawn archetype selection.
-   * Return null to skip spawning that placement.
-   */
-  resolveCharacterArchetype?: (
-    placement: GeneratedCharacterPlacement,
-  ) => string | null | undefined;
   /** Override default player/npc archetype fields (speed, radius, …). */
   archetypeDefaults?: {
     player?: BootstrapArchetypeDefaults;
@@ -434,55 +469,31 @@ function panelPixelSize(game: GameAPI): PanelPixels {
   };
 }
 
-function placementBoxSize(placement: GeneratedCharacterPlacement): {
-  width: number;
-  height: number;
-} | null {
-  const box = placement.box_2d;
-  const fromBoxW =
-    Array.isArray(box) && box.length >= 4 ? Math.max(0, box[3]! - box[1]!) : 0;
-  const fromBoxH =
-    Array.isArray(box) && box.length >= 4 ? Math.max(0, box[2]! - box[0]!) : 0;
-  const width =
-    typeof placement.width === "number" &&
-    Number.isFinite(placement.width) &&
-    placement.width > 0
-      ? placement.width
-      : fromBoxW;
-  const height =
-    typeof placement.height === "number" &&
-    Number.isFinite(placement.height) &&
-    placement.height > 0
-      ? placement.height
-      : fromBoxH;
-  if (width <= 0 || height <= 0) return null;
-  return { width, height };
-}
-
-/**
- * Size a character entity from its editor placement box.
- * Matches map-edit: the box_2d is the entity bounds and `imageFit: "contain"`
- * letterboxes the art inside (same as CSS `object-contain` on the still).
- * Do not pre-shrink by source aspect — that diverged when metadata aspect
- * (or the 76×114 fallback) disagreed with the real plate.
- */
-function sizeFromPlacement(
-  placement: GeneratedCharacterPlacement,
-  game: GameAPI,
+function calibratedCharacterSize(
+  character: AnyGeneratedCharacter,
+  panel: PanelPixels,
 ): { width: number; height: number } {
-  const box = placementBoxSize(placement);
-  if (!box) return defaultCharacterSize(panelPixelSize(game));
-  return box;
+  const width = Number(character.entityWidth);
+  const height = Number(character.entityHeight);
+  if (
+    Number.isFinite(width) &&
+    width > 0 &&
+    Number.isFinite(height) &&
+    height > 0
+  ) {
+    return { width, height };
+  }
+  return defaultCharacterSize(panel);
 }
 
-function radiusForSize(
+function radiusForCharacterSize(
   size: { width: number; height: number },
   role: "player" | "npc",
   panel: PanelPixels,
 ): number {
   const base = role === "player" ? PLAYER_RADIUS : NPC_RADIUS;
-  const ref = defaultCharacterSize(panel);
-  const scaled = (base * size.height) / ref.height;
+  const fallback = defaultCharacterSize(panel);
+  const scaled = (base * size.height) / fallback.height;
   return Math.max(8, Number.isFinite(scaled) ? scaled : base);
 }
 
@@ -581,14 +592,6 @@ function pickStartMap(opts: BootstrapWorldOptions): BootstrapMapEntry {
   if (opts.startMapId) {
     const found = opts.maps.find((m) => m.id === opts.startMapId);
     if (found) return found;
-  }
-  for (const entry of opts.maps) {
-    const placements = entry.map.characterPlacements ?? [];
-    if (placements.some((p) => p.role === "player")) return entry;
-    const playerId = entry.map.playerCharacterId;
-    if (playerId && placements.some((p) => p.assetId === playerId)) {
-      return entry;
-    }
   }
   return opts.maps[0]!;
 }
@@ -763,22 +766,6 @@ function clearMapLocal(game: GameAPI): void {
   }
 }
 
-function playerPlacementOnMap(
-  map: GeneratedMap,
-): GeneratedCharacterPlacement | null {
-  const placements = (map.characterPlacements ??
-    []) as GeneratedCharacterPlacement[];
-  const playerIdMeta =
-    typeof map.playerCharacterId === "string" ? map.playerCharacterId : null;
-  const byRole = placements.find((p) => p.role === "player");
-  if (byRole) return byRole;
-  if (playerIdMeta) {
-    const byId = placements.find((p) => p.assetId === playerIdMeta);
-    if (byId) return byId;
-  }
-  return null;
-}
-
 function resolveTransitionSpawn(opts: {
   destinationMap: GeneratedMap;
   enterableAuthored: AuthoredPlacement | null | undefined;
@@ -806,134 +793,8 @@ function resolveTransitionSpawn(opts: {
     }
   }
 
-  // 3) User-authored player placement on the destination map.
-  const playerPlacement = playerPlacementOnMap(opts.destinationMap);
-  if (
-    playerPlacement &&
-    Array.isArray(playerPlacement.box_2d) &&
-    playerPlacement.box_2d.length >= 4
-  ) {
-    return feetFromBox(playerPlacement.box_2d);
-  }
-
-  // 4) Legacy: keep current feet.
+  // 3) Keep current feet when no authored arrival anchor exists.
   return opts.fallbackFeet;
-}
-
-/**
- * Spawn map-local NPCs. The controlled player is spawned once as a non-mapLocal
- * entity on initial boot; later maps only contribute player placement markers
- * used by transition spawn resolution — never a second player instance.
- */
-function spawnMapCharacters(
-  game: GameAPI,
-  opts: BootstrapWorldOptions,
-  map: GeneratedMap,
-  definedArchetypes: Set<string>,
-  options?: { preserveExistingPlayer?: boolean },
-): string | null {
-  const placements = (map.characterPlacements ??
-    []) as GeneratedCharacterPlacement[];
-  const chars = opts.characters ?? [];
-  const byAssetId = new Map<string, BootstrapCharacterEntry>();
-  for (const entry of chars) {
-    byAssetId.set(entry.id, entry);
-    const assetId = characterAssetId(entry);
-    if (assetId) byAssetId.set(assetId, entry);
-  }
-  const playerIdMeta =
-    typeof map.playerCharacterId === "string" ? map.playerCharacterId : null;
-
-  const existingControlled = game.getControlledEntity();
-  const preservePlayer =
-    options?.preserveExistingPlayer === true && existingControlled != null;
-
-  let controlledId: string | null = preservePlayer ? existingControlled : null;
-  let firstSpawnedId: string | null = null;
-
-  for (const placement of placements) {
-    const resolved = opts.resolveCharacterArchetype?.(placement);
-    if (resolved === null) continue;
-
-    const charEntry = byAssetId.get(placement.assetId);
-    const archetype =
-      (typeof resolved === "string" && resolved.trim()) ||
-      (charEntry?.archetype?.trim()
-        ? charEntry.archetype.trim()
-        : archetypeNameForAssetId(
-            charEntry ? characterAssetId(charEntry) : placement.assetId,
-          ));
-
-    if (!definedArchetypes.has(archetype)) {
-      console.warn(
-        `[bootstrapWorldFromAssets] skip placement "${placement.label}" — unknown archetype ${archetype}`,
-      );
-      continue;
-    }
-
-    const box = placement.box_2d;
-    if (!Array.isArray(box) || box.length < 4) continue;
-    const feet = feetFromBox(box);
-    const panel = panelPixelSize(game);
-    const size = sizeFromPlacement(placement, game);
-    const role =
-      placement.role === "player" || placement.role === "npc"
-        ? placement.role
-        : playerIdMeta && placement.assetId === playerIdMeta
-          ? "player"
-          : "npc";
-
-    // Exactly one player entity: skip player markers when one already exists.
-    if (role === "player" && preservePlayer) {
-      continue;
-    }
-
-    let entityId: string;
-    try {
-      entityId = game.spawnAtFeet(archetype, feet.x, feet.y, {
-        label: placement.label,
-        // Player persists across maps; NPCs are map-local.
-        mapLocal: role !== "player",
-        kind: role === "player" ? "player" : "npc",
-        width: size.width,
-        height: size.height,
-        radius: radiusForSize(size, role, panel),
-        speed: walkSpeedForHeight(
-          size.height,
-          role,
-          role === "player"
-            ? opts.archetypeDefaults?.player?.speed
-            : opts.archetypeDefaults?.npc?.speed,
-        ),
-      });
-    } catch (err) {
-      console.warn(
-        `[bootstrapWorldFromAssets] spawn failed for "${placement.label}"`,
-        err,
-      );
-      continue;
-    }
-
-    if (!firstSpawnedId) firstSpawnedId = entityId;
-    if (role === "player" && !controlledId) {
-      controlledId = entityId;
-    }
-  }
-
-  // Maps may omit an explicit Player — still make the first character walkable
-  // on initial boot only (never invent a second player on transition).
-  const toControl =
-    controlledId ?? (preservePlayer ? existingControlled : firstSpawnedId);
-  if (toControl) {
-    game.setControlledEntity(toControl);
-    // The controlled entity must survive map transitions. A map that omits an
-    // explicit Player role may fall back to the first NPC (spawned mapLocal),
-    // and clearMapLocal would destroy it on the next transition — promote it.
-    game.patch(toControl, { mapLocal: false, kind: "player" });
-    // Maps placements can sit on colliders; snap the player footbox to free ground.
-    game.ensureEntityOnWalkable(toControl);
-  }
-  return toControl;
 }
 
 /**
@@ -1317,9 +1178,12 @@ function updateTransitionPrompt(opts: {
     typeof window !== "undefined" &&
     (window.matchMedia("(pointer: coarse)").matches ||
       navigator.maxTouchPoints > 0);
-  const promptText = touch
-    ? `Tap E to enter${label ? `: ${label}` : ""}`
-    : `Press E to enter${label ? `: ${label}` : ""}`;
+  const unlocked = isAuthoredTransitionUnlocked(game, enterableAuthored);
+  const promptText = unlocked
+    ? touch
+      ? `Tap E to enter${label ? `: ${label}` : ""}`
+      : `Press E to enter${label ? `: ${label}` : ""}`
+    : `${label || "The way ahead"} is locked`;
 
   prompt.active = true;
   prompt.label = label;
@@ -1386,6 +1250,23 @@ function handleDefaultInteract(
       ?.destinationMapId;
 
   if (enterableDest && !lockedInArrival) {
+    const unlockVariable = transitionUnlockVariable(enterableAuthored);
+    if (!isAuthoredTransitionUnlocked(game, enterableAuthored)) {
+      const blockedEvent: MapTransitionBlockedEvent = {
+        transitionId: enterableAuthored?.id ?? `transition_${enterableDest}`,
+        unlockVariable,
+        destinationMapId: enterableDest,
+        currentMapId: currentMapIdRef.id,
+      };
+      game.emit(MAP_TRANSITION_BLOCKED_EVENT, blockedEvent);
+      const prompt = game.getResource<MapTransitionPromptState>(
+        MAP_TRANSITION_PROMPT_RESOURCE,
+      );
+      if (prompt) {
+        prompt.promptText = `${prompt.label || "The way ahead"} is locked`;
+      }
+      return;
+    }
     const next = mapsById.get(enterableDest);
     if (next) {
       const spawnFeet = resolveTransitionSpawn({
@@ -1401,14 +1282,17 @@ function handleDefaultInteract(
             clearMapLocal(game);
             swap();
             currentMapIdRef.id = next.id;
-            spawnMapCharacters(game, opts, next.map, definedArchetypes, {
-              preserveExistingPlayer: true,
-            });
             spawnMapProps(game, next.map, definedArchetypes);
             const nextAssetId =
               typeof next.map.assetId === "string" && next.map.assetId.trim()
                 ? next.map.assetId.trim()
                 : next.id;
+            const mapState: BootstrapMapState = {
+              mapId: next.id,
+              mapAssetId: nextAssetId,
+            };
+            game.registerResource(BOOTSTRAP_MAP_RESOURCE, mapState);
+            game.emit(MAP_ENTERED_EVENT, mapState);
             applyMapAudio?.(nextAssetId);
             // Suppress re-entry until the player leaves the entrance they
             // spawned into on the destination map.
@@ -1523,6 +1407,10 @@ export function bootstrapWorldFromAssets(
             actions: [{ action: "interact", label: "E" }],
           }),
   });
+  game.registerResource(BOOTSTRAP_MAP_RESOURCE, {
+    mapId: start.id,
+    mapAssetId: start.map.assetId?.trim() || start.id,
+  } satisfies BootstrapMapState);
 
   const characterDialogues = characterDialogueCatalog(opts.characters);
   if (opts.commonAudio?.length || characterDialogues.audio.length) {
@@ -1586,43 +1474,33 @@ export function bootstrapWorldFromAssets(
 
   const definedArchetypes = new Set<string>();
 
-  const playerAssetIds = new Set<string>();
-  for (const entry of opts.maps) {
-    const mapPlayerId =
-      typeof entry.map.playerCharacterId === "string"
-        ? entry.map.playerCharacterId
-        : null;
-    for (const p of entry.map.characterPlacements ?? []) {
-      if (p.role === "player" || (mapPlayerId && p.assetId === mapPlayerId)) {
-        playerAssetIds.add(p.assetId);
-      }
-    }
-  }
-
   for (const entry of opts.characters ?? []) {
     const assetId = characterAssetId(entry);
     const primary = entry.archetype?.trim() || archetypeNameForAssetId(assetId);
-    const isPlayerLike = playerAssetIds.has(assetId);
+    const isPlayerLike =
+      entry.character.isPlayer === true ||
+      entry.character.characterRole?.trim().toLowerCase() === "player";
     const roleDefaults = isPlayerLike
       ? opts.archetypeDefaults?.player
       : opts.archetypeDefaults?.npc;
-    const size = defaultCharacterSize(panelPixelSize(game));
+    const panel = panelPixelSize(game);
+    const size = calibratedCharacterSize(entry.character, panel);
     const role = isPlayerLike ? "player" : "npc";
     const def = toArchetype(entry.character, {
       kind: isPlayerLike ? "player" : "npc",
       radius:
-        roleDefaults?.radius ?? (isPlayerLike ? PLAYER_RADIUS : NPC_RADIUS),
+        roleDefaults?.radius ?? radiusForCharacterSize(size, role, panel),
       speed: walkSpeedForHeight(size.height, role, roleDefaults?.speed),
       frameDurationMs:
         roleDefaults?.frameDurationMs ??
         frameDurationMsForCharacter(entry.character),
-      // Default only — spawn overrides with map-editor placement size.
+      // Calibrated default — gameplay chooses position, not size.
       ...size,
     });
     game.defineArchetype(primary, def);
     definedArchetypes.add(primary);
 
-    // Always also register under char_<assetId> so placements match.
+    // Keep a stable asset-id alias in addition to the projected character name.
     const alt = archetypeNameForAssetId(assetId);
     if (alt !== primary) {
       game.defineArchetype(alt, def);
@@ -1630,7 +1508,6 @@ export function bootstrapWorldFromAssets(
     }
   }
 
-  spawnMapCharacters(game, opts, start.map, definedArchetypes);
   spawnMapProps(game, start.map, definedArchetypes);
 
   const activeBgmRef = { name: null as string | null };

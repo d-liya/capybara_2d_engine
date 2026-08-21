@@ -7,14 +7,15 @@
 | **Map** | From `generatedWorld` when asset sync has maps; else blank SVG starter |
 | **Bootstrap** | `bootstrapWorldFromAssets` via `createGeneratedWorld` |
 | **Gameplay** | `configureGameplay` in `mainScene.ts` + `BootstrapGameplayOptions` |
+| **Characters** | Calibrated archetypes are registered by bootstrap; `configureGameplay` spawns the player/NPC cast |
 | **Inputs** | Built-in WASD / arrows; default `interact` (KeyE / touch) from bootstrap |
-| **Enterables** | Proximity glow + “Press E to enter” prompt; transition only on interact. Forward doors auto-get a return exit at `destinationSpawnBox2d` when the destination has no authored back-link. |
+| **Enterables** | Proximity glow + “Press E to enter” prompt; transition only on interact. `unlockVariable` gates read the boolean `storyVariables` resource and emit `map:transition-blocked` when false. Forward doors auto-get a return exit at `destinationSpawnBox2d` when the destination has no authored back-link. |
 
 ```ts
 import { createMainScene } from "./scenes/mainScene";
 createMainScene({
   onAudioReady: loadingGate.onContinue,
-  // Optional: onBootstrapped, resolveCharacterArchetype, archetypeDefaults, …
+  // Optional: onBootstrapped, archetypeDefaults, …
 });
 ```
 

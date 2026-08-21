@@ -19,9 +19,9 @@ When a hosted sandbox also injects `system.md`, treat that as the operational co
 Synced projects have `src/data/capybara-assets.json` and/or a non-stub `src/scenes/generatedWorld.ts`.
 
 - Sync wrote manifests, registries, and `generatedWorld.ts`. Each map is lean `map_*.json` plus optional sidecars (merged via `mergeMapSidecars`).
-- `bootstrapWorldFromAssets` loads the start map, defines character archetypes, spawns `characterPlacements`, starts map-scoped BGM, loads atmosphere, and binds default interact. Synthetic return exits are added for forward enterables when needed.
+- `bootstrapWorldFromAssets` loads the start map, defines calibrated character archetypes, starts map-scoped BGM, loads props/atmosphere, and binds default interact. Gameplay spawns characters explicitly. Synthetic return exits are added for forward enterables when needed.
 - Extend custom gameplay in `configureGameplay` (`src/scenes/mainScene.ts`). See [ASSET_INTEGRATION.md](ASSET_INTEGRATION.md).
-- Treat manifest-owned files as read-only. Spawn only entities you invent for custom gameplay. Bootstrap does **not** auto-spawn generic `placement[]` props or mount `hudPlacements`.
+- Treat manifest-owned files as read-only. Spawn the controlled player and zone NPCs from generated archetypes at explicit feet coordinates. Bootstrap does **not** auto-spawn characters, generic `placement[]` props, or `hudPlacements`.
 
 ## When the user says an asset looks bad
 

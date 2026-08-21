@@ -14,12 +14,12 @@ Prefer the synced path:
 Do not re-implement these in `configureGameplay`:
 
 - Start map selection and `createGame` / `toMapData`
-- Character archetypes + `characterPlacements` spawn (player vs NPC)
+- Calibrated character archetype registration (gameplay explicitly spawns player/NPCs)
 - Map-scoped BGM / ambience / autoplay SFX + dual-path audio unlock
 - Atmosphere from `atmospherePlacements`
-- Default `interact` (enterables / synthetic return exits / state overlays / gameplay VFX)
+- Default `interact` (enterables / synthetic return exits / state overlays / gameplay VFX). An authored enterable with `unlockVariable` opens only when that key is `true` in the `storyVariables` resource; blocked attempts emit `map:transition-blocked`.
 
-Bootstrap does **not** auto-spawn props from `placement[]` or mount `hudPlacements` — those belong in gameplay.
+Bootstrap emits `map:entered` and updates the `bootstrapMap` resource after default map transitions so gameplay can compose the destination cast. Gameplay should register `storyVariables` as a boolean record before the player can interact with gated travel and provide visible/audio feedback for `map:transition-blocked`. Bootstrap does **not** auto-spawn characters, generic props from `placement[]`, or `hudPlacements` — those belong in gameplay. Explicit `propPlacements` remain bootstrap-owned.
 
 ## If you orchestrate a scene by hand
 

@@ -4,12 +4,18 @@ import { createGeneratedWorld } from "./generatedWorld";
 import type { BootstrapGameplayOptions } from "./bootstrapWorldFromAssets";
 
 export {
+  BOOTSTRAP_MAP_RESOURCE,
   bootstrapWorldFromAssets,
+  MAP_ENTERED_EVENT,
+  MAP_TRANSITION_BLOCKED_EVENT,
+  STORY_VARIABLES_RESOURCE,
   type BootstrapArchetypeDefaults,
   type BootstrapCharacterEntry,
   type BootstrapGameplayOptions,
   type BootstrapMapEntry,
+  type BootstrapMapState,
   type BootstrapWorldOptions,
+  type MapTransitionBlockedEvent,
 } from "./bootstrapWorldFromAssets";
 
 /**
@@ -85,12 +91,13 @@ function spawnStarterPlayer(game: GameAPI): void {
 }
 
 /**
- * Main scene entry. Prefers auto-generated world wiring when
+ * Main scene entry. Prefers generated world wiring when
  * `./generatedWorld` exports maps; otherwise boots the blank SVG floor
  * with a box placeholder player (replaced once real assets sync in).
  *
  * Sync from capybara_game regenerates `generatedWorld.ts` — do not hand-edit it.
- * Customize via `configureGameplay` above or `BootstrapGameplayOptions`.
+ * `configureGameplay` must spawn the generated player and zone NPCs explicitly.
+ * Customize the remaining bootstrap services with `BootstrapGameplayOptions`.
  */
 export function createMainScene(
   options?: BootstrapGameplayOptions

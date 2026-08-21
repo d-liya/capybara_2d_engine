@@ -7,10 +7,11 @@ Shared guidance for coding agents in this checkout. Keep this file lean. **Curre
 This is a **Capybara 2.5D** game: fixed-camera top-down / 3/4 pixel-art stages, component runtime, generated assets.
 
 - Public API: `src/Game.ts`. Do not import `src/core/`.
-- Gameplay: extend `configureGameplay` in `src/scenes/mainScene.ts`. Bootstrap already loads the start map, archetypes, character/prop placements, BGM, atmosphere, default interact, and the controlled player. Do not re-spawn those.
+- Gameplay: extend `configureGameplay` in `src/scenes/mainScene.ts`. Bootstrap loads the start map, calibrated character archetypes, prop placements, BGM, atmosphere, and default interact. Game code explicitly spawns the controlled player and each zone's NPC cast.
 - Generated projection: `src/data/`. Import handles from `src/data/index.ts`. Do not edit `generatedWorld.ts` or the asset ledger.
 - HUD scaffolds: `src/widgets/`. Mount them in gameplay; use the Painted Pixel kit in `styles.css`.
 - Coordinates: 0–1000 per map. Entity `x,y` is top-left. Spawn characters with `spawnAtFeet`. Map travel uses `transitionMap` / enterable metadata, not baked-pixel edits.
+- Character size comes from each generated character archetype. Character location does not: read `bootstrapMap`, listen for `map:entered`, and spawn map-local NPCs at deliberate feet coordinates.
 - Keyboard and touch share the same input actions.
 
 `WORLD.md` is the generated-world contract (maps, IDs, animations, what code must wire). `DESIGN.md` is the playable beat sheet. Do not copy those ledgers into this file.

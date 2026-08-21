@@ -141,7 +141,7 @@ export interface GeneratedAtmospherePlacement {
   enabled?: boolean;
 }
 
-/** Spawn-ready feet anchor derived from a generated character placement. */
+/** Spawn-ready feet anchor from optional authored character placement data. */
 export interface CharacterPlacementSpawnPlan extends GeneratedCharacterPlacement {
   feetX: number;
   feetY: number;

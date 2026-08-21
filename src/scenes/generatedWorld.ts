@@ -13,6 +13,7 @@ import type { BootstrapGameplayOptions } from "./bootstrapWorldFromAssets";
  *     ...opts,
  *   });
  *
+ * Bootstrap registers generated character archetypes but does not spawn them.
  * Hand-written gameplay belongs in `mainScene` (`configureGameplay`) or in
  * options passed to `createMainScene` — never edit this file by hand.
  */

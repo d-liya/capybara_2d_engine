@@ -35,8 +35,27 @@ export interface GeneratedSpriteSheet {
  * Legacy flat character: already has engine-ready `spriteSheets`.
  * e.g. older `char_*.json` exports.
  */
-export interface GeneratedCharacter {
+export interface GeneratedCharacterIdentity {
+  assetId?: string;
+  name?: string;
   label?: string;
+  /** Stable design/manifest key, independent of where gameplay spawns it. */
+  characterKey?: string;
+  characterRole?: string;
+  isPlayer?: boolean;
+  /** Narrative composition hints; gameplay remains the placement authority. */
+  homeZoneId?: string;
+  initialState?: string;
+  movement?: string;
+  scaleClass?: string;
+  /** Calibrated opaque body height against the generated map art. */
+  heightPercentOfMap?: number;
+  /** Calibrated engine entity bounds in normalized world units. */
+  entityWidth?: number;
+  entityHeight?: number;
+}
+
+export interface GeneratedCharacter extends GeneratedCharacterIdentity {
   spriteSheets: GeneratedSpriteSheet[];
 }
 
@@ -96,8 +115,7 @@ export interface GeneratedDirectionalSheet {
  * Missing `idle` → synthesize a 1-frame `idle_{defaultFacing}` sheet from
  * `baseUrl` when present; else the actor freezes frame 0 of the walk strip.
  */
-export interface GeneratedDirectionalCharacter {
-  label?: string;
+export interface GeneratedDirectionalCharacter extends GeneratedCharacterIdentity {
   defaultAnimation?: string;
   defaultFacing?: CharacterFacing | string;
   /** Multi-clip map: clip name → facing → strip. */
@@ -1561,6 +1579,8 @@ export function toArchetype(
     (typeof character.label === "string" && character.label.trim()) ||
     "character";
   const sheets = toSpriteSheets(character);
+  const entityWidth = Number(character.entityWidth);
+  const entityHeight = Number(character.entityHeight);
   let defaultFacing = "front";
   let defaultAnimation: string | undefined;
   if (isDirectionalCharacter(character)) {
@@ -1584,6 +1604,12 @@ export function toArchetype(
     spriteSheets: sheets,
     ...(defaultAnimation ? { activeAnimation: defaultAnimation } : {}),
     facingDir: defaultFacing,
+    ...(Number.isFinite(entityWidth) && entityWidth > 0
+      ? { width: entityWidth }
+      : {}),
+    ...(Number.isFinite(entityHeight) && entityHeight > 0
+      ? { height: entityHeight }
+      : {}),
     ...extra,
   };
 }

@@ -12,12 +12,12 @@ Each map is split across files (merged in `generated.ts` via `mergeMapSidecars` 
 | ---- | -------- |
 | `map_<id>.json` | Lean: `url`, `walkableBoxes`, `mapOverlays` (`erase` / `state` / `vfx` / `grid`) |
 | `map_<id>.sprites.json` | Cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
-| `map_<id>.placements.json` | `placement`, `characterPlacements`, `propPlacements`, `hudPlacements`, `atmospherePlacements` |
+| `map_<id>.placements.json` | `placement`, `propPlacements`, `hudPlacements`, `atmospherePlacements` |
 
 What sync + `bootstrapWorldFromAssets` already do:
 
 1. Registries (`generated.ts` / `generated-props.ts` / `common.json` / `huds.json`) are written by sync.
-2. Bootstrap defines character archetypes, spawns `characterPlacements` (player vs NPC) and explicit `propPlacements`, starts map-scoped BGM / ambience / autoplay SFX, and binds default interact (enterables → `transitionMap`, state overlays, gameplay VFX). Forward enterables get a synthetic return exit at `destinationSpawnBox2d` when the destination has no authored back-link.
+2. Bootstrap defines calibrated character archetypes, spawns explicit `propPlacements`, starts map-scoped BGM / ambience / autoplay SFX, and binds default interact (enterables → `transitionMap`, state overlays, gameplay VFX). Gameplay explicitly spawns the controlled player and each zone's map-local NPC cast. Forward enterables get a synthetic return exit at `destinationSpawnBox2d` when the destination has no authored back-link. When an enterable declares `unlockVariable`, bootstrap requires that exact boolean key in the `storyVariables` resource and emits `map:transition-blocked` when it is false.
 3. Atmosphere loads automatically from `toMapData(...).atmospherePlacements` inside the map runtime — bootstrap does **not** call a separate atmosphere API.
 4. Treat manifest-owned JSON and `generatedWorld.ts` as read-only; import handles from `src/data/index.ts`.
 5. Extend gameplay in `configureGameplay` (`src/scenes/mainScene.ts`): systems, custom widgets, overlay triggers, dialogue, combat, quests, inventory, plus any entities you invent.
@@ -25,6 +25,39 @@ What sync + `bootstrapWorldFromAssets` already do:
 Bootstrap auto-spawns explicit `propPlacements` as map-local, bottom-Y-sorted entities with `kind`, `assetId`, and `placementId`. It does **not** turn generic `placement[]` targets into props, make props collectible automatically, mount HUDs from `hudPlacements` / `huds.json`, or run dialogue. Query the authored prop entity for gameplay and do not place a duplicate over its box.
 
 Identifiers like `mapMain`, `charPlayer` below are **placeholders**. Copy real names from generated JSON / exports.
+
+Character JSON is location-neutral. It exposes `name` (the registered archetype),
+`characterKey`, `assetId`, calibrated dimensions, and `homeZoneId` / `initialState`
+composition hints. Spawn the player once and compose NPCs from the current map:
+
+```ts
+import type { BootstrapMapState } from "../scenes/mainScene";
+import { charPlayer, charGuide } from "../data";
+
+const playerId = game.spawnAtFeet(charPlayer.name, 500, 760, {
+  assetId: charPlayer.assetId,
+  characterKey: charPlayer.characterKey,
+  kind: "player",
+  mapLocal: false,
+});
+game.setControlledEntity(playerId);
+
+function composeCast(map: BootstrapMapState) {
+  if (map.mapAssetId !== "copy-real-map-asset-id") return;
+  game.spawnAtFeet(charGuide.name, 620, 610, {
+    assetId: charGuide.assetId,
+    characterKey: charGuide.characterKey,
+    kind: "npc",
+    mapLocal: true,
+  });
+}
+
+composeCast(game.getResource<BootstrapMapState>("bootstrapMap"));
+game.on("map:entered", (payload) => composeCast(payload as BootstrapMapState));
+```
+
+Default transitions clear prior `mapLocal` entities before emitting
+`map:entered`, so the event handler owns only the destination cast.
 
 Overlays from the builder are already on the lean map — wire interactions with the overlay APIs below.
 

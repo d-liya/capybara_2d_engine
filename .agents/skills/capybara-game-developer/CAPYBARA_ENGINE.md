@@ -14,7 +14,7 @@ Treat the repo as four layers:
 2. **SDK facade** — `src/sdk/index.ts` plus [SDK_FACADE.md](SDK_FACADE.md)
    - auth/session, save/load, storage, multiplayer
 3. **Generated assets** — `src/data/capybara-assets.json` + lean `map_*.json` / `.sprites.json` / `.placements.json` / `char_*.json` / `prop_*.json` / `huds.json` / `common.json`, with handles from `generated.ts` re-exported by `src/data/index.ts`
-   - after sync, `generatedWorld.ts` → `bootstrapWorldFromAssets` already loads the start map, defines archetypes, spawns `characterPlacements`, starts BGM, loads atmosphere from placements, and binds default interact
+   - after sync, `generatedWorld.ts` → `bootstrapWorldFromAssets` loads the start map, defines calibrated character archetypes, starts BGM, loads props/atmosphere, and binds default interact; gameplay explicitly spawns characters
    - active scene composition: `src/scenes/SCENES.md`
 4. **Gameplay modules** — `src/types`, `src/archetypes`, `src/systems`, `src/inputs`, `src/widgets`, `src/scenes` (`configureGameplay` in `mainScene.ts`)
    - game-specific behavior built on the facades above
@@ -166,6 +166,8 @@ await game.transitionMap(toMapData(mapInterior), {
 ```
 
 For multi-map games, keep an explicit lifecycle table in the scene/plan: each NPC, clue prop, pickup, and room-only marker should be either `mapLocal` and rebuilt, hidden while off-map, or intentionally persistent. A courtyard clue or NPC should not remain visible in an interior/study map unless that is deliberate.
+
+Synced enterables can declare `unlockVariable`. Register `storyVariables` as a direct boolean record; bootstrap permits the transition only when the named key is exactly `true`. Listen for `map:transition-blocked` to provide a short locked message and audio cue. Do not duplicate or manually replace these authored transitions.
 
 `loadMap` / the swap inside `transitionMap` resets active navigation/pathfinding state, clears hover state, stops held movement input, updates the camera bounds, moves the controlled entity if a spawn is supplied, and emits `map:changed`.
 
@@ -332,7 +334,7 @@ Generated map JSON is **flat**. Prefer a **lean map + sidecars** so agents can r
 | ---- | -------- |
 | `map_<id>.json` | `name`, `url`, `walkableBoxes`, `mapOverlays`, optional legacy `masks` / `spriteSheets` |
 | `map_<id>.sprites.json` | `{ "sprites": [ ... ] }` — cut-outs, `pixel_bbox`, `spriteUrl`, `collision_polygons` |
-| `map_<id>.placements.json` | `{ "placement", "characterPlacements", "hudPlacements", "atmospherePlacements" }` |
+| `map_<id>.placements.json` | `{ "placement", "propPlacements", "hudPlacements", "atmospherePlacements" }` |
 
 Register with `mergeMapSidecars` (sync does this in `generated.ts`), then pass the merged handle to `toMapData`:
 
@@ -346,7 +348,7 @@ export const mapMain = mergeMapSidecars(mapMainBase, {
 });
 ```
 
-`toMapData` copies `characterPlacements` and `atmospherePlacements` onto `GameMapData` (atmosphere is applied by the map runtime). `hudPlacements` stay on the merged `GeneratedMap` for gameplay to mount — they are not auto-mounted.
+`toMapData` copies prop and atmosphere placements onto `GameMapData` (atmosphere is applied by the map runtime). Character JSON carries calibrated entity dimensions, while gameplay owns spawn positions. `hudPlacements` stay on the merged `GeneratedMap` for gameplay to mount — they are not auto-mounted.
 Lean `map_*.json` shape:
 
 ```jsonc
