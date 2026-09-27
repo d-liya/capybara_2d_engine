@@ -1,3 +1,5 @@
+# ⚠️ Important: This project is no longer being maintained;
+
 # Capybara 2.5D Engine
 
 [![Walkthrough](https://i.vimeocdn.com/video/2186076829-5f20fc4efb4bdc6fafa3b21b666fcb6d2d3c0f24390aef306c4d5751031a5905-d_1280)](https://vimeo.com/1215006229)
