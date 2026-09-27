@@ -18,7 +18,7 @@
 
 We're releasing v2 with a web interface instead of MCP for now. As worlds get more detailed, a graphical interface gives you a level of control that coding agents alone can't: precise placement, direct editing of the world as you build it, and the ability to see changes instantly rather than describing them in text.
 
-**Platform:** [www.capybara.build](https://www.capybara.build/)
+**Platform:** ([https://www.capybara.build/](https://v1.capybara.build/))
 
 **Community:** [Join the Discord](https://discord.gg/GTfuBwCRd)
 
